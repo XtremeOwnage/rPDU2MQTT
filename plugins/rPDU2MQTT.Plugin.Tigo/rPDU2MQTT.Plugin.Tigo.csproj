@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Tigo TAP integration, written as a plugin: it references rPDU2MQTT.Core and nothing else, so it can
+       only reach the bridge through the plugin contracts. The bridge's own build copies the DLL into
+       plugins/tigo/, where the plugin loader finds it like any third-party one. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>rPDU2MQTT.Plugin.Tigo</AssemblyName>
+    <RootNamespace>rPDU2MQTT.Plugin.Tigo</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Private/ExcludeAssets so the plugin ships only its own DLL: the host already has Core loaded, and a
+         plugin carrying its own copy would implement an interface the runtime considers a different type. -->
+    <ProjectReference Include="..\..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="rPDU2MQTT.Tests" />
+  </ItemGroup>
+
+</Project>

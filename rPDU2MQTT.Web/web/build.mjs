@@ -77,6 +77,7 @@ const MODULES = [
   'sections/circuit-finder.ts',
   'sections/panel-schedule.ts',
   'sections/floor-plan.ts',
+  'sections/solar-array.ts',
   'sections/export.ts',
   'sections/ha-energy.ts',
   'sections/ha-cleanup.ts',
