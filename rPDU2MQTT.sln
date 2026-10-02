@@ -36,6 +36,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "rPDU2MQTT.Web", "rPDU2MQTT.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "rPDU2MQTT.Abstractions", "rPDU2MQTT.Abstractions\rPDU2MQTT.Abstractions.csproj", "{7341D558-E925-46D8-9B80-BE5DDDD5508B}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "plugins", "plugins", "{07D57EEB-2F50-60C4-C011-FE4FA775C9A8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "rPDU2MQTT.Plugin.Tigo", "plugins\rPDU2MQTT.Plugin.Tigo\rPDU2MQTT.Plugin.Tigo.csproj", "{3935C34E-5BF2-47BB-84D2-B7454AB46382}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -130,6 +134,18 @@ Global
 		{7341D558-E925-46D8-9B80-BE5DDDD5508B}.Release|x64.Build.0 = Release|Any CPU
 		{7341D558-E925-46D8-9B80-BE5DDDD5508B}.Release|x86.ActiveCfg = Release|Any CPU
 		{7341D558-E925-46D8-9B80-BE5DDDD5508B}.Release|x86.Build.0 = Release|Any CPU
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382}.Debug|x64.Build.0 = Debug|Any CPU
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382}.Debug|x86.Build.0 = Debug|Any CPU
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382}.Release|x64.ActiveCfg = Release|Any CPU
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382}.Release|x64.Build.0 = Release|Any CPU
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382}.Release|x86.ActiveCfg = Release|Any CPU
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -137,6 +153,7 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{9A53818A-4415-4C29-976C-D625454EB330} = {7E6AEFD8-E44C-4EF1-99C5-94D45B9679C0}
 		{86F9A45C-0034-425C-9BC7-63173827CE01} = {2E135745-EA9F-4734-90F9-68518A38A390}
+		{3935C34E-5BF2-47BB-84D2-B7454AB46382} = {07D57EEB-2F50-60C4-C011-FE4FA775C9A8}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {22826ED9-5C8B-4039-8116-C122A5795C87}

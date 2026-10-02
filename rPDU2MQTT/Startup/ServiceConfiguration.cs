@@ -303,7 +303,15 @@ public static class ServiceConfiguration
 
         services.AddSingleton(new Services.Gui.PluginSchemaSections(PluginSections));
 
-        services.AddSingleton<Core.Integrations.IntegrationRegistry>();
+        // Built here rather than by the container so an integration that asked for the cluster's lease is
+        // handed it before anything uses it: a plugin cannot take one in a constructor.
+        services.AddSingleton(sp =>
+        {
+            var registry = new Core.Integrations.IntegrationRegistry(sp.GetServices<Core.Integrations.IIntegration>());
+            var lease = sp.GetRequiredService<Core.Integrations.ISingleOwnerLease>();
+            foreach (var user in registry.All.OfType<Core.Integrations.ISingleOwnerLeaseUser>()) user.UseLease(lease);
+            return registry;
+        });
         // An integration that is switched on and cannot run is recorded into the SAME faults collection the
         // Status board and GUI already read — registering a second one would have replaced the instance
         // already holding the logging-sink faults. The rule itself lives on the integration, so a plugin

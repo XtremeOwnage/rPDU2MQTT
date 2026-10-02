@@ -81,6 +81,15 @@ The one real limit is the **CRD**: it is a compile-time contract published to th
 describe a type that exists only on one operator's machine. Plugin settings live under the open `Plugins`
 map instead.
 
+### Bundled plugins
+
+`plugins/` in the repository holds plugins built as separate libraries, each referencing only
+`rPDU2MQTT.Core`. That keeps them honest: nothing in the host is visible to them except the contracts. The host
+project builds them and copies each DLL into `plugins/<name>/` of its build and publish output, so they load
+through the same `PluginLoader` path as a third-party DLL. The first is `rPDU2MQTT.Plugin.Tigo`. A volume
+mounted over `/app/plugins`, or `RPDU2MQTT_PLUGINS` pointing elsewhere, hides the bundled plugins. Copy
+`plugins/tigo/` into that directory to keep them.
+
 ## What this removed
 
 Four hosted services and five bespoke endpoints deleted; `NAV_GROUPS`, `SOURCE_TYPES`,
