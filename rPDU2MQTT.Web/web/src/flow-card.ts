@@ -1,6 +1,6 @@
 // The details card for one node in the sunburst and the treemap: the Sankey's hover card, plus where the
 // node sits in the tree those two views draw — its share of the whole and of its parent, and the path to it.
-import { el, formatMeasure } from './helpers.js';
+import { api, el, formatMeasure } from './helpers.js';
 import { state } from './state.js';
 import { metricLabel } from './flow-vocabulary.js';
 
@@ -21,7 +21,7 @@ const pct = (part: number, whole: number) => {
   return p >= 10 || p === 0 ? `${Math.round(p)}%` : `${p.toFixed(1)}%`;
 };
 
-export function flowCardRows(n: any, place: TreePlace, ctx: { units: string; metric: string; nodes: any[]; links: any[] }): any[] {
+export function flowCardRows(n: any, place: TreePlace, ctx: { units: string; metric: string; nodes: any[]; links: any[]; readings?: any[] }): any[] {
   const { units } = ctx;
   const fmt = (v: number) => formatMeasure(v, units);
   const byId = new Map(ctx.nodes.map((x: any) => [x.id, x]));
@@ -37,6 +37,7 @@ export function flowCardRows(n: any, place: TreePlace, ctx: { units: string; met
       text: n.derivation === 'inferred' ? 'inferred — nothing measures it' : 'summed from what it feeds' }));
   if (n.imbalance != null)
     rows.push(el('div', { class: 'nh-warn', text: `${fmt(Math.abs(n.imbalance))} ${n.imbalance > 0 ? 'more leaves than arrives' : 'short of what it passes on'}` }));
+  rows.push(...(ctx.readings || []));
 
   // Shares: the question these two views answer.
   rows.push(el('div', { class: 'nh-head', text: 'Share' }));
@@ -73,4 +74,37 @@ export function flowCardRows(n: any, place: TreePlace, ctx: { units: string; met
   }
   if ((n.tags || []).length) rows.push(el('div', { class: 'nh-sub', style: { margin: '6px 0 0' }, text: '#' + n.tags.join(' #') }));
   return rows;
+}
+
+/// The readings a hover card lists, in this order.
+const READINGS: [string, string][] = [
+  ['realpower', 'Power'], ['apparentpower', 'Apparent power'], ['current', 'Current'], ['voltage', 'Voltage'],
+  ['powerfactor', 'Power factor'], ['frequency', 'Frequency'], ['energy_d', 'Energy today'], ['energy', 'Energy (lifetime)'],
+];
+const READINGS_TTL = 10_000;
+let readings: { path: string; at: number; byNode: Map<string, any[]> } | null = null;
+let readingsPending: Promise<boolean> | null = null;
+
+/// Fetch every node's readings unless a recent copy is held; resolves true when new ones arrived.
+export function refreshReadings(path: string): Promise<boolean> {
+  if (readings && readings.path === path && Date.now() - readings.at < READINGS_TTL) return Promise.resolve(false);
+  if (readingsPending) return readingsPending;
+  readingsPending = api(path).then((r: any) => {
+    if (!r?.body?.ok) return false;
+    readings = { path, at: Date.now(), byNode: new Map((r.body.nodes || []).map((n: any) => [n.node, n.readings || []])) };
+    return true;
+  }).catch(() => false).finally(() => { readingsPending = null; });
+  return readingsPending;
+}
+
+/// A node's other readings, the one the diagram is drawn by left out. Nothing for a metric it lacks.
+export function readingRows(id: string, drawn: string): any[] {
+  const held = readings?.byNode.get(id) || [];
+  const rows = READINGS
+    .map(([metric, label]) => ({ label, r: held.find((x: any) => x.metric === metric) }))
+    .filter(x => x.r && x.r.metric !== drawn)
+    .map(({ label, r }) => el('div', { class: 'nh-row' },
+      el('span', { class: 'nh-name', text: label }),
+      el('span', { class: 'nh-num', text: formatMeasure(r.value, r.units || '') })));
+  return rows.length ? [el('div', { class: 'nh-head', text: 'Readings' }), ...rows] : [];
 }

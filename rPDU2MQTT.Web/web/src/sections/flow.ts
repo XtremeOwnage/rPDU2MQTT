@@ -7,7 +7,7 @@ import { exportData } from '../overrides.js';
 import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.js';
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
-import { focusPath, clearFocus, focusedNode, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
+import { focusPath, clearFocus, focusedNode, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard, updateNodeCard } from '../flow-focus.js';
 import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, groupChips, viewSwitches, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
 import { editNodeOnNextOpen, flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
@@ -15,7 +15,7 @@ import { makeMenu } from '../context-menu.js';
 import { openHistorySheet } from '../history-sheet.js';
 import { drawSunburst } from '../sunburst.js';
 import { drawTreemap } from '../treemap.js';
-import { flowCardRows } from '../flow-card.js';
+import { flowCardRows, readingRows, refreshReadings } from '../flow-card.js';
 import { templateHelp } from '../template-field.js';
 import { COST_OF, currency, energyPrice, priceGraph } from '../cost.js';
 
@@ -315,6 +315,17 @@ export function addFlowSection(nav: any, sections: any) {
     redrawBoth();
   };
 
+  /// A hover card with the node's other readings, fetched on hover and filled into the card when they arrive.
+  let cardFor: string | null = null;
+  const withReadings = (id: string, build: (readings: any[]) => any[]) => {
+    cardFor = id;
+    // A past diagram is not described by live readings.
+    if (historyQuery(hist)) return build([]);
+    refreshReadings(withInstance('/api/flow/readings', instSel))
+      .then(fresh => { if (fresh && cardFor === id) updateNodeCard(build(readingRows(id, measured()))); });
+    return build(readingRows(id, measured()));
+  };
+
   // Letting go of a control draws whatever arrived while it was in use.
   sec.addEventListener('focusout', () => setTimeout(() => {
     if (!heldGraph || menu.isOpen() || busyInSection(sec)) return;
@@ -385,8 +396,8 @@ export function addFlowSection(nav: any, sections: any) {
         onOpen: (id: string) => drill(id),
         // Out one level: to what feeds the node drilled into, or to the whole diagram.
         onOut: () => drill(drillTo ? ((whole.links || []).find((l: any) => l.target === drillTo)?.source || null) : null),
-        card: (id: string, place: any) => flowCardRows(nodes.find((n: any) => n.id === id) || { id }, place,
-          { units: graph.units || '', metric: metricSel.value, nodes, links }),
+        card: (id: string, place: any) => withReadings(id, (readings) => flowCardRows(nodes.find((n: any) => n.id === id) || { id }, place,
+          { units: graph.units || '', metric: metricSel.value, nodes, links, readings })),
         host: sec,
       };
       const sunburst = modeSel.value === 'sunburst';
@@ -711,6 +722,22 @@ export function addFlowSection(nav: any, sections: any) {
       ]);
     });
 
+    const nodeHistory = (n: any, window?: string) => {
+      const named = n.label || n.id;
+      openHistorySheet({
+        title: named,
+        nodes: [n.id],
+        lineLabel: named,
+        labelOf: (id: string) => byId[id]?.label || id,
+        metric: measured(),
+        empty: 'Nothing is measuring this node, so there is nothing to chart.',
+        // What it feeds, each on a strip of its own: where a tier's power went, over the same window.
+        parts: (outgoing[n.id] || []).map((l: any) => l.target),
+        partsLabel: 'What it feeds',
+        window,
+      });
+    };
+
     /// What a right-click offers over a node: what it has been drawing, where its supply comes from, and
     /// the node itself. A history is only worth offering for something the bridge actually reads.
     const nodeMenu = (e: any, n: any) => {
@@ -719,20 +746,9 @@ export function addFlowSection(nav: any, sections: any) {
       const named = n.label || n.id;
       menu.open(e, [
         { label: named, head: true },
-        {
-          label: 'History…',
-          run: () => openHistorySheet({
-            title: named,
-            nodes: [n.id],
-            lineLabel: named,
-            labelOf: (id: string) => byId[id]?.label || id,
-            metric: measured(),
-            empty: 'Nothing is measuring this node, so there is nothing to chart.',
-            // What it feeds, each on a strip of its own: where a tier's power went, over the same window.
-            parts: (outgoing[n.id] || []).map((l: any) => l.target),
-            partsLabel: 'What it feeds',
-          }),
-        },
+        { label: 'Trace its supply', run: () => focusPath(svg, incoming, n.id) },
+        { label: 'Last 7 days…', run: () => nodeHistory(n, 'days=7&step=3600') },
+        { label: 'History…', run: () => nodeHistory(n) },
         {
           label: 'Drill into this',
           // Only what carries something: an end load drilled into is one node on its own.
@@ -743,8 +759,7 @@ export function addFlowSection(nav: any, sections: any) {
           { label: 'Out one level', disabled: !(incoming[drillTo] || []).length, run: () => drill((incoming[drillTo!] || [])[0]?.source || null) },
           { label: 'Show the whole diagram', run: () => drill(null) },
         ] : []),
-        { label: 'Trace its supply', run: () => focusPath(svg, incoming, n.id) },
-        { label: 'Clear the trace', run: () => clearFocus(svg) },
+        { label: 'Clear the trace', disabled: !focusedNode, run: () => clearFocus(svg) },
         {
           label: 'Edit this node',
           // Only a node of the config has an editor; a PDU or outlet the bridge derives has none.
@@ -946,7 +961,7 @@ export function addFlowSection(nav: any, sections: any) {
       svg.appendChild(labGroup);
 
         // Hovering a node explains it: what it is, what it reads, what feeds it and what it feeds.
-      const card = () => {
+      const card = (readings: any[]) => {
         const rows: any[] = [];
         rows.push(el('div', { class: 'nh-title', text: n.label }));
         rows.push(el('div', { class: 'nh-sub', text: `${n.kind || 'node'} · ${n.id}` }));
@@ -965,6 +980,7 @@ export function addFlowSection(nav: any, sections: any) {
         if (n.throughput != null)
           rows.push(el('div', { class: 'desc', style: { margin: '2px 0 0' },
             text: `its sensor covers this leg; ${formatMeasure(n.throughput, units)} passes through the node` }));
+        rows.push(...readings);
 
         const side = (title: string, ls: any[], other: (l: any) => string) => {
           if (!ls.length) return;
@@ -995,19 +1011,20 @@ export function addFlowSection(nav: any, sections: any) {
         elm.addEventListener('dblclick', (e: any) => {
           e.preventDefault?.();
           e.stopPropagation?.();
+          menu.close();
           if (drillTo === n.id) { drill((incoming[n.id] || [])[0]?.source || null); return; }
           if ((outgoing[n.id] || []).length) drill(n.id);
         });
-        elm.addEventListener('mouseenter', (e: any) => showNodeCard(sec, e, card()));
+        elm.addEventListener('mouseenter', (e: any) => showNodeCard(sec, e, withReadings(n.id, card)));
         elm.addEventListener('mousemove', (e: any) => moveNodeCard(e));
         elm.addEventListener('mouseleave', hideNodeCard);
       });
 
-      // Click to trace where this node's supply comes from: everything upstream stays lit, the rest dims.
+      // A click opens the node's menu, as a right-click does.
       if (!(n.group || memberGroup[n.id] || groupById[n.id])) {
         [rect, lab].forEach((elm: any) => {
           elm.style.cursor = 'pointer';
-          elm.addEventListener('click', (e: any) => { e.stopPropagation?.(); focusPath(svg, incoming, n.id); });
+          elm.addEventListener('click', (e: any) => nodeMenu(e, n));
         });
       }
 

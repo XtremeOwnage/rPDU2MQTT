@@ -571,6 +571,31 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         catch (Exception ex) { return new { ok = false, message = $"Could not build the series: {ex.Message}" }; }
     }
 
+    private static readonly string[] ReadingMetrics = ["realpower", "apparentpower", "current", "voltage", "powerfactor", "frequency"];
+
+    /// <summary>Each node's value for every metric it has, one graph per metric.</summary>
+    private async Task<object> BuildReadingsAsync(string? instance, CancellationToken ct)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            var (id, pdu, _) = ResolveInstance(instance);
+            var data = await ResolveData(id, pdu, cts.Token);
+            var nodes = ReadingMetrics.Concat(FlowTiers.Metrics(config))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(m => FlowGraphBuilder.Build(data, config.EnergyFlow, m, live))
+                .SelectMany(g => g.Nodes
+                    .Where(n => !n.Synthetic && n.Value is not null)
+                    .Select(n => new { node = n.Id, metric = g.Metric, value = n.Value!.Value, units = g.Units, derivation = n.Derivation }))
+                .GroupBy(x => x.node, StringComparer.OrdinalIgnoreCase)
+                .Select(g => new { node = g.Key, readings = g.Select(x => new { x.metric, x.value, x.units, x.derivation }).ToArray() })
+                .ToArray();
+            return new { ok = true, nodes };
+        }
+        catch (Exception ex) { return new { ok = false, message = $"Could not read the node readings: {ex.Message}" }; }
+    }
+
     /// <summary>The energy-flow graph for one instance + metric (the Sankey / Energy Overview source).</summary>
     private async Task<object> BuildFlowAsync(string? instance, string? metric, CancellationToken ct, DateTime? atUtc = null, int spanDays = 1)
     {
@@ -1088,6 +1113,12 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             {
                 return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json);
             }
+        });
+
+        // Every reading each node has, for the diagram's hover card.
+        app.MapGet("/api/flow/readings", async (HttpContext ctx) =>
+        {
+            return Results.Json(await BuildReadingsAsync(ctx.Request.Query["instance"], ctx.RequestAborted), ConfigSchema.Json);
         });
 
         // The panel directory, resolved: each breaker's chain to the channel measuring it, and its power (#453/#454).
