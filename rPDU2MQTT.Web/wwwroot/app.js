@@ -1394,6 +1394,17 @@ function coveredEnergy(home               , gridImport               )          
   return Math.max(0, home - Math.max(0, gridImport));
 }
 
+/// The share of the home's energy made up by solar and battery once export is netted against import, 0–100.
+function netSelfProducedPct(home               , gridNet               )                {
+  if (home == null || gridNet == null || home <= 0) return null;
+  return Math.max(0, Math.min(100, ((home - gridNet) / home) * 100));
+}
+
+/// Colour band for a share: 1 above 90, 2 above 75, 3 above 50, 4 above 25, else 5.
+function shareBand(pct        )         {
+  return pct > 90 ? 1 : pct > 75 ? 2 : pct > 50 ? 3 : pct > 25 ? 4 : 5;
+}
+
 /// Add up a set of readings, treating "no reading" as absent rather than zero.
 function sumKnown(values                               )                {
   const known = values.filter(v => v != null)            ;
@@ -9590,7 +9601,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
     }
 
     // Self-sufficiency is an ENERGY question — over some window.
-    let eHome                = null, eFromGrid                = null, eUnits = 'kWh';
+    let eHome                = null, eFromGrid                = null, eGridNet                = null, eUnits = 'kWh';
     let eWindow = 'of lifetime energy';
     if (isEnergy) {
       // The board is already an energy view, so the bar is a share of the very tiles above it.
@@ -9598,6 +9609,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
       eUnits = units;
       // Energy drawn from the grid is what it imported.
       eFromGrid = gridK.value == null ? null : Math.max(0, gridK.value);
+      eGridNet = gridK.value == null || gridIn == null ? null : gridNet;
       const day = hist.day();
       eWindow = day ? `of energy on ${new Date(hist.at()).toLocaleDateString()}`
         : metric === 'energy_d' ? 'of today’s energy' : 'of lifetime energy';
@@ -9620,15 +9632,16 @@ function addEnergyOverviewSection(nav     , sections     ) {
           } catch { /* no live cache — energy#in just stays absent */ }
         }
         const eSumIn = (ids          ) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|energy_d#in`; if (k in eInBy) { s += eInBy[k]; known = true; } }); return known ? s : null; };
-        const eBattNet = net(eBatt, eSumIn(battIds)), eGridNet = net(eGrid, eSumIn(gridIds));
+        const eBattNet = net(eBatt, eSumIn(battIds)), eGridBal = net(eGrid, eSumIn(gridIds));
         // Home energy: tagged load nodes if present, else the balance of measured sources (same rule as power).
         if (eLoad.present) eHome = eLoad.value;
         else {
           const unknownFeeder = (eSolar.present && eSolar.value == null) || (eBatt.present && eBatt.value == null) || (eGrid.present && eGrid.value == null);
-          if (!unknownFeeder && (eSolar.present || eBatt.present || eGrid.present)) eHome = (eSolar.value || 0) + (eBattNet || 0) + (eGridNet || 0);
+          if (!unknownFeeder && (eSolar.present || eBatt.present || eGrid.present)) eHome = (eSolar.value || 0) + (eBattNet || 0) + (eGridBal || 0);
         }
         // What the house drew, not what it drew net of what it sent back.
         if (eGrid.value != null) eFromGrid = Math.max(0, eGrid.value);
+        if (eGrid.value != null && eSumIn(gridIds) != null) eGridNet = eGridBal;
       }
     } catch { /* energy graph unavailable — self-sufficiency just won't render */ }
 
@@ -9691,9 +9704,19 @@ function addEnergyOverviewSection(nav     , sections     ) {
       row.append(
         el('div', { class: 'energy-ss-label', text: `Self-sufficiency ${pct}%` }),
         el('div', { class: 'energy-ss-bar' }, el('span', { style: { width: pct + '%' } })),
-        el('div', { class: 'desc', text: `${fmtEnergy(covered, eUnits)} of ${fmtEnergy(eHome, eUnits)} ${eWindow} covered by solar + battery.` }),
+        el('div', { class: 'desc', text: `${fmtEnergy(covered, eUnits)} of ${fmtEnergy(eHome, eUnits)} ${eWindow} covered by solar + battery; ${fmtEnergy(eFromGrid, eUnits)} imported.` }),
       );
       summary.appendChild(row);
+    }
+    const netPct = netSelfProducedPct(eHome, eGridNet);
+    if (netPct != null) {
+      const pct = Math.round(netPct);
+      const exported = eFromGrid == null || eGridNet == null ? null : eFromGrid - eGridNet;
+      summary.appendChild(el('div', { class: 'energy-selfsuff' },
+        el('div', { class: 'energy-ss-label', text: `Self-produced (net) ${pct}%` }),
+        el('div', { class: 'energy-ss-bar ov-band-' + shareBand(netPct) }, el('span', { style: { width: pct + '%' } })),
+        el('div', { class: 'desc', text: `${fmtEnergy(eHome  - eGridNet , eUnits)} of ${fmtEnergy(eHome, eUnits)} ${eWindow}, counting ${fmtEnergy(exported, eUnits)} exported against import.` }),
+      ));
     }
 
     if (!grid.children.length)
@@ -9730,8 +9753,12 @@ function addOverviewSection(nav     , sections     ) {
 
   const bar = el('div', { class: 'sec-actions' });
   const refresh = btn('Refresh');
+  const showSel = el('select', { style: { width: 'auto' } })                     ;
+  showSel.appendChild(el('option', { value: 'energy_d', text: 'Energy (kWh)' }));
+  showSel.appendChild(el('option', { value: 'realpower', text: 'Power (W)' }));
+  try { showSel.value = localStorage.getItem('rpdu-overview-show') === 'realpower' ? 'realpower' : 'energy_d'; } catch { showSel.value = 'energy_d'; }
   const stamp = el('span', { class: 'ld-count' });
-  bar.append(refresh, stamp); sec.appendChild(bar);
+  bar.append(showSel, refresh, stamp); sec.appendChild(bar);
 
   // Anything wrong goes at the top, at full size. When nothing is, it collapses to a single line.
   const alerts = el('div'); sec.appendChild(alerts);
@@ -10008,11 +10035,33 @@ function addOverviewSection(nav     , sections     ) {
     const loadW = idsOfRole(nodes, 'home').length ? sumOfRole(nodes, 'home') : undefined;
     const homeW = homeEnergy({ solar: solarW, grid: gridNet, battery: battNet, ...(loadW === undefined ? {} : { load: loadW }) });
 
+    const eNodes = (energy?.nodes || [])         ;
+    const eInOf = (ids          ) => sumKnown(ids.map(id => {
+      const n = eNodes.find((x     ) => x.id === id + '#in');
+      return typeof n?.value === 'number' ? n.value : undefined;
+    }));
+    const eSolar = sumOfRole(eNodes, 'solar');
+    const eGridOut = sumOfRole(eNodes, 'grid');
+    const eGridIn = eInOf(gridIds);
+    const eBattOut = sumOfRole(eNodes, 'battery');
+    const eBattIn = eInOf(battIds);
+    const eBattNet = eBattOut == null && eBattIn == null ? null : (eBattOut || 0) - (eBattIn || 0);
+    const eGridSigned = eGridOut == null && eGridIn == null ? null : (eGridOut || 0) - (eGridIn || 0);
+    const eLoad = idsOfRole(eNodes, 'home').length ? sumOfRole(eNodes, 'home') : undefined;
+    const eHome = homeEnergy({
+      solar: eSolar, battery: eBattNet, grid: eGridSigned,
+      ...(eLoad === undefined ? {} : { load: eLoad }),
+    });
+
+    const isEnergy = showSel.value !== 'realpower';
+    const fmtF = isEnergy ? fmtKwh : fmtW;
+    const fSolar = isEnergy ? eSolar : solarW, fGrid = isEnergy ? eGridSigned : gridNet;
+    const fBatt = isEnergy ? eBattNet : battNet, fHome = isEnergy ? eHome : homeW;
     const arms            = [];
-    if (solarIds.length) arms.push({ key: 'solar', icon: '☀', label: 'Solar', text: fmtW(solarW), color: KIND_COLOR.solar, flow: solarW, ids: solarIds });
-    if (gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmtW(gridNet == null ? null : Math.abs(gridNet)), color: KIND_COLOR.grid, flow: gridNet, ids: gridIds });
-    if (battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: fmtW(battNet == null ? null : Math.abs(battNet)), color: KIND_COLOR.battery, flow: battNet, ids: battIds });
-    arms.push({ key: 'home', icon: '⌂', label: 'Home', text: fmtW(homeW), color: 'var(--accent)', flow: homeW == null ? null : -homeW });
+    if (solarIds.length) arms.push({ key: 'solar', icon: '☀', label: 'Solar', text: fmtF(fSolar), color: KIND_COLOR.solar, flow: fSolar, ids: solarIds });
+    if (gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmtF(fGrid == null ? null : Math.abs(fGrid)), color: KIND_COLOR.grid, flow: fGrid, ids: gridIds });
+    if (battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: fmtF(fBatt == null ? null : Math.abs(fBatt)), color: KIND_COLOR.battery, flow: fBatt, ids: battIds });
+    arms.push({ key: 'home', icon: '⌂', label: 'Home', text: fmtF(fHome), color: 'var(--accent)', flow: fHome == null ? null : -fHome });
     drawEnergyFlow(flowWrap, arms, (a, g) => {
       g.style.cursor = 'pointer';
       g.onclick = () => {
@@ -10030,24 +10079,10 @@ function addOverviewSection(nav     , sections     ) {
 
     // --- Today ------------------------------------------------------------------------------------
     todayRow.innerHTML = '';
-    const eNodes = (energy?.nodes || [])         ;
     if (!eNodes.length) {
       todayRow.appendChild(el('div', { class: 'desc', text: 'No energy totals yet — history is off, or nothing has reported today.' }));
       return;
     }
-    const eSolar = sumOfRole(eNodes, 'solar');
-    const eGridOut = sumOfRole(eNodes, 'grid');
-    const eGridIn = sumKnown(gridIds.map(id => {
-      const n = eNodes.find((x     ) => x.id === id + '#in');
-      return typeof n?.value === 'number' ? n.value : undefined;
-    }));
-    const eBattOut = sumOfRole(eNodes, 'battery');
-    const eLoad = idsOfRole(eNodes, 'home').length ? sumOfRole(eNodes, 'home') : undefined;
-    const eHome = homeEnergy({
-      solar: eSolar, battery: eBattOut,
-      grid: eGridOut == null && eGridIn == null ? null : (eGridOut || 0) - (eGridIn || 0),
-      ...(eLoad === undefined ? {} : { load: eLoad }),
-    });
 
     const note = originNote();
     if (note) todayRow.appendChild(note);
@@ -10065,6 +10100,12 @@ function addOverviewSection(nav     , sections     ) {
     const pct = selfSufficiencyPct(eHome, eGridOut);
     todayRow.appendChild(tile('self', '◔', 'Self-sufficiency', pct == null ? '—' : `${Math.round(pct)}%`,
       pct == null ? 'needs both home use and grid import' : 'of what the house used came from you', []));
+    // Net: export counts against import.
+    const netPct = netSelfProducedPct(eHome, eGridOut == null || eGridIn == null ? null : eGridOut - eGridIn);
+    const netTile = tile('net', '☀', 'Self-produced (net)', netPct == null ? '—' : `${Math.round(netPct)}%`,
+      netPct == null ? 'needs home use, grid import and export' : 'of what the house used, net of export', []);
+    if (netPct != null) netTile.querySelector('.ov-value')?.classList.add('ov-band-' + shareBand(netPct));
+    todayRow.appendChild(netTile);
   };
 
   let power      = null, energy      = null;
@@ -10108,6 +10149,10 @@ function addOverviewSection(nav     , sections     ) {
   };
 
   refresh.onclick = () => load();
+  showSel.onchange = () => {
+    try { localStorage.setItem('rpdu-overview-show', showSel.value); } catch { /* not remembered */ }
+    load();
+  };
   liveWhileActive(sec, () => 'flow:realpower', () => load());
   setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 15000);
   link.onclick = () => { activate(link, sec); load(); };

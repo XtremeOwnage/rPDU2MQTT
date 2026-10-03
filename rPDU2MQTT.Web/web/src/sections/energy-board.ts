@@ -3,7 +3,7 @@ import { api, btn, el, activate, formatNum, svgEl, navLink, instanceSelector, wi
 import { busyInSection, liveWhileActive, realtimeLive } from '../realtime.js';
 import { state } from '../state.js';
 // The energy rules every view shares — see energy.ts for why they are not written twice.
-import { homeEnergy, selfSufficiencyPct, coveredEnergy } from '../energy.js';
+import { homeEnergy, selfSufficiencyPct, coveredEnergy, netSelfProducedPct, shareBand } from '../energy.js';
 import { sparkline } from '../charts.js';
 import { requestFocus } from '../state.js';
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
@@ -383,7 +383,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     }
 
     // Self-sufficiency is an ENERGY question — over some window.
-    let eHome: number | null = null, eFromGrid: number | null = null, eUnits = 'kWh';
+    let eHome: number | null = null, eFromGrid: number | null = null, eGridNet: number | null = null, eUnits = 'kWh';
     let eWindow = 'of lifetime energy';
     if (isEnergy) {
       // The board is already an energy view, so the bar is a share of the very tiles above it.
@@ -391,6 +391,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       eUnits = units;
       // Energy drawn from the grid is what it imported.
       eFromGrid = gridK.value == null ? null : Math.max(0, gridK.value);
+      eGridNet = gridK.value == null || gridIn == null ? null : gridNet;
       const day = hist.day();
       eWindow = day ? `of energy on ${new Date(hist.at()).toLocaleDateString()}`
         : metric === 'energy_d' ? 'of today’s energy' : 'of lifetime energy';
@@ -413,15 +414,16 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
           } catch { /* no live cache — energy#in just stays absent */ }
         }
         const eSumIn = (ids: string[]) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|energy_d#in`; if (k in eInBy) { s += eInBy[k]; known = true; } }); return known ? s : null; };
-        const eBattNet = net(eBatt, eSumIn(battIds)), eGridNet = net(eGrid, eSumIn(gridIds));
+        const eBattNet = net(eBatt, eSumIn(battIds)), eGridBal = net(eGrid, eSumIn(gridIds));
         // Home energy: tagged load nodes if present, else the balance of measured sources (same rule as power).
         if (eLoad.present) eHome = eLoad.value;
         else {
           const unknownFeeder = (eSolar.present && eSolar.value == null) || (eBatt.present && eBatt.value == null) || (eGrid.present && eGrid.value == null);
-          if (!unknownFeeder && (eSolar.present || eBatt.present || eGrid.present)) eHome = (eSolar.value || 0) + (eBattNet || 0) + (eGridNet || 0);
+          if (!unknownFeeder && (eSolar.present || eBatt.present || eGrid.present)) eHome = (eSolar.value || 0) + (eBattNet || 0) + (eGridBal || 0);
         }
         // What the house drew, not what it drew net of what it sent back.
         if (eGrid.value != null) eFromGrid = Math.max(0, eGrid.value);
+        if (eGrid.value != null && eSumIn(gridIds) != null) eGridNet = eGridBal;
       }
     } catch { /* energy graph unavailable — self-sufficiency just won't render */ }
 
@@ -484,9 +486,19 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
       row.append(
         el('div', { class: 'energy-ss-label', text: `Self-sufficiency ${pct}%` }),
         el('div', { class: 'energy-ss-bar' }, el('span', { style: { width: pct + '%' } })),
-        el('div', { class: 'desc', text: `${fmtEnergy(covered, eUnits)} of ${fmtEnergy(eHome, eUnits)} ${eWindow} covered by solar + battery.` }),
+        el('div', { class: 'desc', text: `${fmtEnergy(covered, eUnits)} of ${fmtEnergy(eHome, eUnits)} ${eWindow} covered by solar + battery; ${fmtEnergy(eFromGrid, eUnits)} imported.` }),
       );
       summary.appendChild(row);
+    }
+    const netPct = netSelfProducedPct(eHome, eGridNet);
+    if (netPct != null) {
+      const pct = Math.round(netPct);
+      const exported = eFromGrid == null || eGridNet == null ? null : eFromGrid - eGridNet;
+      summary.appendChild(el('div', { class: 'energy-selfsuff' },
+        el('div', { class: 'energy-ss-label', text: `Self-produced (net) ${pct}%` }),
+        el('div', { class: 'energy-ss-bar ov-band-' + shareBand(netPct) }, el('span', { style: { width: pct + '%' } })),
+        el('div', { class: 'desc', text: `${fmtEnergy(eHome! - eGridNet!, eUnits)} of ${fmtEnergy(eHome, eUnits)} ${eWindow}, counting ${fmtEnergy(exported, eUnits)} exported against import.` }),
+      ));
     }
 
     if (!grid.children.length)

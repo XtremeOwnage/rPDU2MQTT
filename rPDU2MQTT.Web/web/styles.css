@@ -677,6 +677,14 @@
   .energy-ss-label { font-size:13px; font-weight:650; margin-bottom:6px; }
   .energy-ss-bar { height:10px; border-radius:var(--r-pill); background:var(--panel3); overflow:hidden; }
   .energy-ss-bar span { display:block; height:100%; background:var(--good); border-radius:var(--r-pill); transition:width .4s var(--ease); }
+  /* Share bands: >90, >75, >50, >25, else. */
+  .ov-band-1 { --band: var(--good); }
+  .ov-band-2 { --band: color-mix(in srgb, var(--good) 55%, var(--warn)); }
+  .ov-band-3 { --band: var(--warn); }
+  .ov-band-4 { --band: color-mix(in srgb, var(--warn) 50%, var(--bad)); }
+  .ov-band-5 { --band: var(--bad); }
+  .ov-value[class*="ov-band-"] { color: var(--band); }
+  .energy-ss-bar[class*="ov-band-"] span { background: var(--band); }
   .energy-selfsuff .desc { margin-top:6px; }
 
   /* --- Overrides editor --------------------------------------------------------------------------- */

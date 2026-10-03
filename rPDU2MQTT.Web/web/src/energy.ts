@@ -35,6 +35,17 @@ export function coveredEnergy(home: number | null, gridImport: number | null): n
   return Math.max(0, home - Math.max(0, gridImport));
 }
 
+/// The share of the home's energy made up by solar and battery once export is netted against import, 0–100.
+export function netSelfProducedPct(home: number | null, gridNet: number | null): number | null {
+  if (home == null || gridNet == null || home <= 0) return null;
+  return Math.max(0, Math.min(100, ((home - gridNet) / home) * 100));
+}
+
+/// Colour band for a share: 1 above 90, 2 above 75, 3 above 50, 4 above 25, else 5.
+export function shareBand(pct: number): number {
+  return pct > 90 ? 1 : pct > 75 ? 2 : pct > 50 ? 3 : pct > 25 ? 4 : 5;
+}
+
 /// Add up a set of readings, treating "no reading" as absent rather than zero.
 export function sumKnown(values: (number | null | undefined)[]): number | null {
   const known = values.filter(v => v != null) as number[];
