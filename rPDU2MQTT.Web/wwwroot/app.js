@@ -1400,6 +1400,12 @@ function netSelfProducedPct(home               , gridNet               )        
   return Math.max(0, Math.min(100, ((home - gridNet) / home) * 100));
 }
 
+/// Solar produced as a share of the home's energy, uncapped: above 100 when solar out-produced the home.
+function netSolarPct(home               , solar               )                {
+  if (home == null || solar == null || home <= 0) return null;
+  return Math.max(0, (solar / home) * 100);
+}
+
 /// Colour band for a share: 1 above 90, 2 above 75, 3 above 50, 4 above 25, else 5.
 function shareBand(pct        )         {
   return pct > 90 ? 1 : pct > 75 ? 2 : pct > 50 ? 3 : pct > 25 ? 4 : 5;
@@ -1838,6 +1844,8 @@ function barChart(opts
 
   // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
   svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
+  if (opts.ref != null && opts.ref >= trough && opts.ref <= peak)
+    svg.appendChild(svgTag('line', { x1: padL, y1: y(opts.ref), x2: W - padR, y2: y(opts.ref), stroke: 'var(--muted)', 'stroke-width': 1, 'stroke-dasharray': '4 4', class: 'trend-ref' }));
 
   // A full-height hit area per day, over the bars.
   days.forEach((day, d) => {
@@ -11374,7 +11382,7 @@ function trendsPage(nav     , sections     , spec            ) {
     return customRange({ from: to - w, to });
   };
 
-  const intervalSel = el('select', { title: 'How far apart the samples are. Auto fits them to the width of the chart; per day is one total for each day.' })                     ;
+  const intervalSel = el('select', { title: 'Sample spacing. Auto fits the chart width.' })                     ;
   INTERVALS.forEach(([v, t]) => intervalSel.appendChild(el('option', { value: v, text: t })));
   intervalSel.value = 'auto';
   // Per day only exists across days.
@@ -11401,7 +11409,7 @@ function trendsPage(nav     , sections     , spec            ) {
     { metric: 'realpower', units: 'W', epoch: 'instant' },
     { metric: 'energy', units: 'kWh', epoch: 'lifetime' },
   ];
-  const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' })                     ;
+  const metricSel = el('select', { title: 'Measurement to chart.' })                     ;
   let metricChosen = false;
   const unitsOf = (m        ) => (chartable().find(x => x.metric === m) || { units: '' }).units;
   const epochOf = (m        ) => (chartable().find(x => x.metric === m) || {}).epoch || '';
@@ -11437,7 +11445,7 @@ function trendsPage(nav     , sections     , spec            ) {
   const stackBox = el('input')                    ;
   stackBox.type = 'checkbox';
   stackBox.checked = true;
-  stackBox.title = 'Stack the series on top of each other. Off, bars sit side by side and areas overlap.';
+  stackBox.title = 'Stack the series.';
   // Lines are never stacked.
   const syncStack = () => { stackBox.disabled = chartSel.value === 'line'; };
   chartSel.onchange = () => { syncStack(); draw(); };
@@ -11523,22 +11531,9 @@ function trendsPage(nav     , sections     , spec            ) {
   };
 
   const describe = () => {
-    const from = 'read from the history backend.';
-    if (perDay()) {
-      desc.textContent = `Daily ${metricName()} totals over time, ${from} A day the backend has no reading `
-        + 'for is left empty rather than drawn as zero, and is left out of every total.';
-      return;
-    }
+    if (perDay()) { desc.textContent = `Daily ${metricName()} totals.`; return; }
     const every = body?.stepSeconds ? `every ${durationText(body.stepSeconds)}` : 'sampled';
-    const name = `${metricName().charAt(0).toUpperCase()}${metricName().slice(1)}`;
-    if (body?.deltas) {
-      desc.textContent = `${name} ${every} through the window, ${from} Each bar is what changed between two `
-        + 'readings of the counter, so the bars add up rather than each restating it. An interval either reading is missing from is left empty.';
-      return;
-    }
-    desc.textContent = `${name} ${every} through the window, ${from} A sample the backend has no reading `
-      + 'for is left empty rather than drawn as zero.'
-      + (rate() ? ' These are instantaneous readings, so they are not added up.' : '');
+    desc.textContent = `${metricName().charAt(0).toUpperCase()}${metricName().slice(1)}${body?.deltas ? ' change' : ''}, ${every}.`;
   };
 
   const section = (title        , note        , made                            , legend        ) => {
@@ -11753,14 +11748,32 @@ function addTrendsSection(nav     , sections     ) {
         const gridLines         = [{ label: 'Import', color: KIND_COLOR.grid, values: sumOf(gridSupply) }];
         if (exports_) gridLines.push({ label: 'Export', color: '#6fb0e0', values: exports_ });
         p.section(p.perDay() ? 'Grid per day' : 'Grid',
-          'Every grid node. Import above the line, export below it'
-          + (exports_ ? '.' : ' — no export series is in history for this window, so only import is charted.'),
+          exports_ ? 'Import above zero, export below.' : 'Import.',
           barChart({ days, lines: gridLines, units, stacked: true, kind: p.kind(), partial, fitTo: p.fitTo() }), gridLines);
         drawn++;
       }
 
-      // --- Self-sufficiency ---------------------------------------------------------------------------
       const solar = byKind('solar'), batt = byKind('battery'), load = byKind('home');
+
+      // --- Net solar coverage ---------------------------------------------------------------------------
+      if (p.summable() && solar && (load || gridIn)) {
+        const pct = days.map((_, d) => netSolarPct(homeEnergy({
+          solar: solar[d],
+          ...(batt ? { battery: batt[d] } : {}),
+          ...(gridIn ? { grid: gridIn[d] } : {}),
+          ...(load ? { load: load[d] } : {}),
+        }), solar[d]));
+        if (pct.some(v => v != null)) {
+          const nsLines         = [{ label: 'Net solar', color: KIND_COLOR.solar, values: pct }];
+          const top = Math.max(100, ...pct.map(v => v ?? 0));
+          p.section(p.perDay() ? 'Net solar coverage per day' : 'Net solar coverage',
+            'Solar produced ÷ home energy.',
+            barChart({ days, lines: nsLines, units: '%', stacked: false, kind: p.kind(), max: top, pct: true, ref: 100, partial, fitTo: p.fitTo() }), nsLines);
+          drawn++;
+        }
+      }
+
+      // --- Self-sufficiency ---------------------------------------------------------------------------
       // A share of energy over a period; instantaneous power is a different quantity.
       if (p.summable() && gridIn && (load || solar)) {
         const imported = sumOf(gridSupply);
@@ -11773,9 +11786,7 @@ function addTrendsSection(nav     , sections     ) {
         if (pct.some(v => v != null)) {
           const ssLines         = [{ label: 'Self-sufficiency', color: KIND_COLOR.solar, values: pct }];
           p.section(p.perDay() ? 'Self-sufficiency per day' : 'Self-sufficiency',
-            'The share of the home’s energy that did not come from the grid'
-            + (load ? '.' : ', with the home taken as the balance of the measured sources.')
-            + ' A day missing either figure is left empty rather than estimated.',
+            'Home energy not from the grid.',
             barChart({ days, lines: ssLines, units: '%', stacked: false, kind: p.kind(), max: 100, pct: true, partial, fitTo: p.fitTo() }), ssLines);
           drawn++;
         }
@@ -11797,8 +11808,7 @@ function addTrendsSection(nav     , sections     ) {
         });
       if (supplyLines.length > 1) {
         p.section(p.perDay() ? `Where the day’s ${p.metricName()} came from` : `Where the ${p.metricName()} is coming from`,
-          'Each kind summed across its nodes. What went back — battery charge, grid export — is below the line, '
-          + 'so the same energy is not counted as produced and then again as returned.',
+          'Supply above zero; battery charge and grid export below.',
           barChart({ days, lines: supplyLines, units, stacked: true, kind: p.kind(), partial, fitTo: p.fitTo() }), supplyLines);
         drawn++;
       }
@@ -11850,8 +11860,8 @@ function addTrendsSection(nav     , sections     ) {
         const num = (v               ) => (v == null ? '—' : Math.round(v * scale) / scale === 0 ? '0' : (Math.round(v * scale) / scale).toLocaleString('en-US'));
         const table = el('table', { class: 'trend-table' });
         const why                         = {
-          Load: 'What the home used: its own reading where something measures it, else what the measured sources leave for it.',
-          'Net grid': 'Grid used less grid exported — what the meter nets out to. A day missing either figure is left empty.',
+          Load: 'Measured load, else the balance of the measured sources.',
+          'Net grid': 'Grid used − grid exported.',
         };
         table.appendChild(el('thead', {}, el('tr', {}, el('th', { text: p.perDay() ? 'Day' : 'At' }),
           ...shown.map(([label]) => el('th', { text: `${label} (${units})`, title: why[label] || '' })))));
@@ -11865,7 +11875,7 @@ function addTrendsSection(nav     , sections     ) {
             text: num(values[d]),
             class: values[d] != null && resets[label]?.[d] ? 'is-reset' : '',
             title: values[d] != null && resets[label]?.[d]
-              ? 'The counter behind this was re-based during the day, so this is what is known to have run since — the day may have been more.' : '',
+              ? 'Counter re-based during the day; known to have run since.' : '',
           })));
           rows.appendChild(tr);
         });
@@ -11877,7 +11887,7 @@ function addTrendsSection(nav     , sections     ) {
           const known = values.filter((v)              => v != null);
           foot.appendChild(el('td', {
             text: known.length ? num(known.reduce((a, v) => a + v, 0)) : '—',
-            title: known.length === values.length ? '' : `${values.length - known.length} of ${values.length} readings are missing, so this is the sum of what is known.`,
+            title: known.length === values.length ? '' : `${values.length - known.length} of ${values.length} readings are missing.`,
             class: known.length === values.length ? '' : 'is-partial',
           }));
         });
@@ -11887,7 +11897,7 @@ function addTrendsSection(nav     , sections     ) {
       }
 
       if (!drawn)
-        p.charts.appendChild(el('div', { class: 'desc', text: 'Nothing about the whole system to chart in this window: no grid, solar or battery node reported. Each node’s own series is on the Node Trends page.' }));
+        p.charts.appendChild(el('div', { class: 'desc', text: 'No grid, solar or battery data in this window.' }));
 
       const gaps = days.filter((_, d) => !all.some((s     ) => s.values[d] != null)).length;
       p.status.textContent = p.statusLine(gaps);

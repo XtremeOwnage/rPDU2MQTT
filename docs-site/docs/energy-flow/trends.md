@@ -8,7 +8,7 @@ History is read from the backend set in [History](../system/history.md).
 
 ## Trends
 
-**Energy Flow › Trends**. Site totals from the [Balance](index.md#balance): grid import and export, solar, battery, home, self-sufficiency, and a per-day table.
+**Energy Flow › Trends**. Site totals from the [Balance](index.md#balance): grid import and export, solar, battery, home, self-sufficiency, net solar coverage, and a per-day table.
 
 ![Trends page](../assets/screenshots/trends.webp)
 

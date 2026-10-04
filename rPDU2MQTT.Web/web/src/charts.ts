@@ -54,6 +54,8 @@ export function barChart(opts: {
   overlay?: Line;
   /// Bars, lines or filled areas. Lines are never stacked.
   kind?: 'bar' | 'line' | 'area';
+  /// A dashed reference line at this value.
+  ref?: number;
 }): { svg: any; gaps: number } {
   const { days, lines, units } = opts;
   const kind = opts.kind || 'bar';
@@ -217,6 +219,8 @@ export function barChart(opts: {
 
   // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
   svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
+  if (opts.ref != null && opts.ref >= trough && opts.ref <= peak)
+    svg.appendChild(svgTag('line', { x1: padL, y1: y(opts.ref), x2: W - padR, y2: y(opts.ref), stroke: 'var(--muted)', 'stroke-width': 1, 'stroke-dasharray': '4 4', class: 'trend-ref' }));
 
   // A full-height hit area per day, over the bars.
   days.forEach((day, d) => {
