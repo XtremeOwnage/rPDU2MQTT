@@ -2164,11 +2164,7 @@ function makeMenu(host     , cls = 'ctx-menu', onClose             ) {
 }
 
 // ── history-sheet.ts ────────────────────────────────────────────
-// What a node has been drawing, in a sheet: the panel schedule opens it for a breaker, the flow diagram for
-// whatever was right-clicked. One line, summed from the nodes asked for — a moment where any of them has no
-// reading is a gap in the line, never a partial sum.
 
-/// Windows worth asking about, and how finely each is sampled.
 const HISTORY_WINDOWS                     = [
   ['minutes=60&step=30', 'Last hour'],
   ['minutes=360&step=60', 'Last 6 hours'],
@@ -2176,25 +2172,21 @@ const HISTORY_WINDOWS                     = [
   ['days=7&step=3600', 'Last 7 days'],
   ['days=30&step=21600', 'Last 30 days'],
 ];
-/// The window a sheet opens on when nobody has picked one yet.
 const HISTORY_DEFAULT = 'minutes=1440&step=900';
-/// The measurements a reading can be asked for in, and what each is called.
 const HISTORY_METRICS                     = [
   ['realpower', 'Power (W)'],
   ['current', 'Current (A)'],
+  ['voltage', 'Voltage (V)'],
   ['apparentpower', 'Apparent (VA)'],
+  ['temperature', 'Temperature (°C)'],
   ['energy_d', 'Energy (kWh)'],
 ];
-/// The last window picked, kept per browser: the same question tends to be asked over the same span.
 const WINDOW_KEY = 'rpdu2mqtt.history.window';
 const rememberedWindow = () => {
   try { const v = localStorage.getItem(WINDOW_KEY); return HISTORY_WINDOWS.some(([q]) => q === v) ? v  : HISTORY_DEFAULT; }
   catch { return HISTORY_DEFAULT; }
 };
 
-                                                                           
-
-/// Open the history of one or more nodes, over a window picked in the sheet.
 function openHistorySheet(o                ) {
   const nodes = o.nodes.filter(Boolean);
   const labelOf = o.labelOf || ((id        ) => id);
@@ -2203,7 +2195,6 @@ function openHistorySheet(o                ) {
   const legend = el('div', { class: 'ld-toolbar ps-legend', style: { flexWrap: 'wrap', gap: '10px' } });
   const note = el('div', { class: 'desc' });
   const breakdown = el('div', { class: 'hs-parts' });
-  // A part that is the whole is not a breakdown; two legs summed into one line are.
   const parts = (o.parts || []).filter(id => id && !(nodes.length === 1 && nodes[0] === id));
   let window = o.window && HISTORY_WINDOWS.some(([q]) => q === o.window) ? o.window : rememberedWindow();
   let metricNow = metric;
@@ -2224,7 +2215,7 @@ function openHistorySheet(o                ) {
     const all = body.series || [];
     const series = all.filter((s     ) => nodes.includes(s.node));
     if (!series.length) { note.textContent = `The history backend holds nothing for ${nodes.join(', ')} in this window.`; return; }
-    // A node with no reading at some moment leaves the total unknown then, exactly as its power is.
+    // A missing reading at any moment makes the total null.
     const at           = body.at || [];
     const values = at.map((_, i) => {
       let total = 0;
@@ -2233,7 +2224,6 @@ function openHistorySheet(o                ) {
     });
     const known = values.filter((v)              => v != null);
     const units = body.units || 'W';
-    // What the line is, and what it is summed from.
     legend.innerHTML = '';
     legend.appendChild(el('span', { class: 'desc', style: { margin: '0' } },
       el('span', { class: 'trend-swatch', style: { background: 'var(--accent)' } }), o.lineLabel));
@@ -2253,7 +2243,6 @@ function openHistorySheet(o                ) {
         + `${last == null ? '' : ` · latest ${Math.round(last).toLocaleString('en-US')} ${units}`} · from ${nodes.join(' + ')}`
       : `No readings stored for ${nodes.join(', ')} in this window.`;
 
-    // What the total is made of, each on a strip of its own over the same window and the same reading.
     breakdown.innerHTML = '';
     if (!parts.length) return;
     const held = parts.map(id => ({ id, s: all.find((x     ) => x.node === id) })).filter(x => x.s);
@@ -2262,7 +2251,6 @@ function openHistorySheet(o                ) {
       return;
     }
     breakdown.appendChild(el('div', { class: 'hs-parts-head', text: o.partsLabel || 'What it is made of' }));
-    // Ordered by what each drew, so the biggest part of the total is first.
     held.map(({ id, s }) => {
       const vs                    = (s.values || []).map((v     ) => (typeof v === 'number' ? v : null));
       const seen = vs.filter((v)              => v != null);
@@ -2272,7 +2260,6 @@ function openHistorySheet(o                ) {
       row.dataset.node = part.id;
       row.appendChild(el('span', { class: 'hs-part-name', text: part.label, title: part.id }));
       row.appendChild(sparkline({ values: part.vs, color: 'var(--accent)', units, width: 132, height: 34 }));
-      // A part with no reading says so: it is not nothing, it is unknown.
       row.appendChild(el('span', { class: 'hs-part-num', text: part.latest == null ? 'no data' : `${Math.round(part.latest).toLocaleString('en-US')} ${units}` }));
       breakdown.appendChild(row);
     });
@@ -2283,7 +2270,7 @@ function openHistorySheet(o                ) {
     const b = btn(label);
     b.onclick = () => {
       window = q;
-      try { localStorage.setItem(WINDOW_KEY, q); } catch { /* a browser that keeps nothing still charts */ }
+      try { localStorage.setItem(WINDOW_KEY, q); } catch { }
       buttons.forEach(x => x.classList.remove('primary'));
       b.classList.add('primary');
       load();
@@ -2293,7 +2280,6 @@ function openHistorySheet(o                ) {
   });
   const markWindow = () => buttons.forEach((b, i) => b.classList.toggle('primary', HISTORY_WINDOWS[i][0] === window));
   markWindow();
-  // The same reading, asked for in another measurement: watts, amps, or the energy behind them.
   const metricSel = el('select', { class: 'hs-metric', title: 'Which measurement to chart.' })                     ;
   HISTORY_METRICS.forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
   if (!HISTORY_METRICS.some(([v]) => v === metricNow)) metricSel.appendChild(el('option', { value: metricNow, text: metricNow }));
@@ -2301,7 +2287,6 @@ function openHistorySheet(o                ) {
   metricSel.onchange = () => { metricNow = metricSel.value; load(); };
   picker.appendChild(el('label', { class: 'ld-inst' }, 'Show ', metricSel));
 
-  // The node itself is a thing of its own — its bindings and its label live on the Nodes page.
   const toNode = btn('Edit node');
   toNode.hidden = !nodes.length || o.editNode === false;
   toNode.title = nodes.length ? `Open ${labelOf(nodes[0])} (${nodes[0]}) in the node editor.` : '';
@@ -16985,12 +16970,49 @@ function renderPduTags()                                                 {
   return { el: box, load };
 }
 
-// ── config-form.ts ──────────────────────────────────────────────
-// Schema-driven config form: render scalar/object/dictionary/list nodes, the per-section panels, the
-// nav, and the overall build() that wires every tab.
+// ── plugin-pages.ts ─────────────────────────────────────────────
+// Plugin-provided GUI pages, mounted on first open.
 
-// Every scalar edit reports back, so the save bar, the nav badges and the field's own "edited" mark all
-// stay in step with the document as it is typed.
+let pluginPages               = [];
+
+async function loadPluginPages() {
+  try {
+    const r = await api('/api/integrations');
+    pluginPages = (r.body?.integrations || []).flatMap((i     ) =>
+      (i.pages || []).map((p     ) => ({ ...p, integration: i.id })));
+  } catch { pluginPages = []; }
+}
+
+const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection });
+
+function pluginPageTool(p            ) {
+  return (nav     , sections     ) => {
+    const link = navLink(nav, p.title, p.icon || '•');
+    if (p.configSection) link.dataset.section = p.configSection;
+    const sec = el('div', { class: 'section' });
+    sections.appendChild(sec);
+    const base = `/api/integrations/${encodeURIComponent(p.integration)}/pages/${encodeURIComponent(p.id)}`;
+    let page      = null;
+    const mount = async () => {
+      if (page) return;
+      try {
+        const [js, css] = await Promise.all([fetch(base + '.js').then(r => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status))),
+          fetch(base + '.css').then(r => r.ok ? r.text() : '')]);
+        if (css) (document.head ?? document.body).appendChild(el('style', { text: css }));
+        page = new Function(js)()(sec, pluginPageHost()) || {};
+      } catch (e     ) {
+        sec.textContent = '';
+        sec.append(el('h2', { text: p.title }), el('div', { class: 'desc', text: `${p.title} could not be loaded: ${e?.message || e}` }));
+      }
+    };
+    link.onclick = async () => { activate(link, sec); await mount(); page?.show?.(); };
+    return { link, sec };
+  };
+}
+
+// ── config-form.ts ──────────────────────────────────────────────
+// Schema-driven config form, nav, and build().
+
 function scalarInput(node     , obj     )      {
   const touched = () => refreshDirty();
   let el     ;
@@ -16999,11 +17021,9 @@ function scalarInput(node     , obj     )      {
     el.onchange = () => { obj[node.key] = el.checked; touched(); };
   } else if (node.type === 'enum') {
     el = document.createElement('select');
-    // A blank choice (value "") means "unset" — leave the field out so its default/auto behaviour applies.
+    // A blank choice means unset; leave the field out.
     const choices           = (node.enumValues || []).slice();
-    // A saved value the build does not offer stays on the list, named as unrecognised. Dropping it would
-    // show a blank control over a config that still holds the value, and the first edit of any other field
-    // on the page would look like the user chose to clear it.
+    // Keep an unrecognised saved value on the list.
     const current = obj[node.key];
     if (current != null && current !== '' && !choices.includes(String(current))) choices.push(String(current));
     choices.forEach((v        ) => {
@@ -17024,10 +17044,7 @@ function scalarInput(node     , obj     )      {
     if (obj[node.key] != null) el.value = obj[node.key];
     el.onchange = () => { obj[node.key] = el.value === '' ? null : el.value; touched(); };
   }
-  // A setting whose "off" would take away the means of turning it back on — the GUI's own Enabled flag
-  // being the one that matters. Shown rather than hidden: a setting that vanishes reads as unsupported and
-  // sends the operator looking for it, while a disabled control with the reason beside it answers in place.
-  // The server decides which these are (schema notEditableReason), so there is no list to keep in step here.
+  // Settings whose "off" would lock the GUI out are shown disabled (schema notEditableReason).
   if (node.notEditableReason) {
     el.disabled = true;
     el.title = node.notEditableReason;
@@ -17035,8 +17052,6 @@ function scalarInput(node     , obj     )      {
   return el;
 }
 
-// A boolean reads (and hits) better as a switch with the current state spelled out beside it than as a
-// 16px checkbox whose meaning you have to infer from the label.
 function switchWrap(input     ) {
   const label = el('span', { class: 'switch-state', text: input.checked ? 'On' : 'Off' });
   const wrap = el('label', { class: 'switch-wrap' }, input, label);
@@ -17046,18 +17061,15 @@ function switchWrap(input     ) {
   return wrap;
 }
 
-// Render an object's child properties into `container`: scalar fields flow into a multi-column grid
-// (compact), while nested lists/dicts/objects are tall unbreakable blocks, so they render full-width
-// and stacked — otherwise the CSS column-balancer shoves them into one lopsided column.
-// `path` is where `target` lives in the config document, so each field can be tracked for unsaved edits.
+// Render an object's properties: scalars in a multi-column grid, collections full-width.
+// `path` locates `target` in the config document.
 function renderObjectBody(properties       , target     , container     , path           = []) {
   const isComplex = (c     ) => c.type === 'object' || c.type === 'list' || c.type === 'dictionary';
   const scalars = (properties || []).filter(c => !isComplex(c));
   const complex = (properties || []).filter(isComplex);
   const fields = new Map             ();
 
-  // Settings the schema puts in a group are drawn together in a box of their own, in the order the group
-  // first appears. Retention is four numbers that only mean something beside each other.
+  // Schema-grouped settings render together in a box, in first-appearance order.
   const into = (list       , host     ) => {
     const grid = document.createElement('div'); grid.className = 'grid';
     list.forEach(child => {
@@ -17083,17 +17095,12 @@ function renderObjectBody(properties       , target     , container     , path  
   complex.forEach(child => renderNode(child, target, container, path));
 }
 
-// A setting that only applies to one choice of another setting (schema visibleWhen) — the Prometheus URL,
-// when the history provider is Prometheus. Hidden the rest of the time rather than shown greyed out: an
-// EmonCMS page carrying a Prometheus URL reads as if that is what will be queried.
-//
-// Which fields these are comes from the schema, so the form holds no list of provider-specific settings.
+// Shown only when another setting has a given value (schema visibleWhen).
 function wireVisibility(props       , target     , fields                  ) {
   props.filter(p => p.visibleWhen).forEach(p => {
     const field = fields.get(p.key);
     if (!field) return;
-    // Unset means the deciding setting is at its default, not that it is blank — leaving History.Provider
-    // alone still means Prometheus, and the URL has to be reachable.
+    // Unset means the deciding setting is at its default.
     const decider = props.find((x     ) => x.key === p.visibleWhen.key);
     const sync = () => {
       const cur = target[p.visibleWhen.key] ?? decider?.default ?? '';
@@ -17104,22 +17111,17 @@ function wireVisibility(props       , target     , fields                  ) {
   });
 }
 
-// Every conditional field's re-check, run together whenever the document is edited. Rebuilt with the form,
-// so a sync never outlives the element it hides.
+// Re-checks for every conditional field; rebuilt with the form.
 let visibilitySyncs                 = [];
 let visibilityOff      = null;
 const runVisibilitySyncs = () => visibilitySyncs.forEach(s => s());
 
-// Leaving a page can change what belongs in the nav too: a page kept visible only because you were on it
-// (its feature switched off from inside it) drops out once you go somewhere else. Registered once — the
-// list it runs is rebuilt with the form, this listener is not.
+// Re-evaluate feature-hidden nav entries on page change; registered once.
 window.addEventListener?.('rpdu:activate', runVisibilitySyncs);
 
 function show(elm     , on         ) { elm.classList[on ? 'remove' : 'add']('is-hidden'); }
 
-/// PreferEmonCms -> "Prefer EmonCMS". The acronym is restored after the split, not before: splitting on a
-/// case change turns EmonCms into "Emon Cms" first, and a pattern looking for the joined-up form then
-/// matches nothing.
+/// PreferEmonCms -> "Prefer EmonCMS"; acronyms are restored after the split.
 function humanise(value        ) {
   return value
     .replace(/([a-z])([A-Z])/g, '$1 $2')
@@ -17127,11 +17129,7 @@ function humanise(value        ) {
     .replace(/^./, c => c.toUpperCase());
 }
 
-/// A radio group for a small closed set, each choice carrying its own explanation as a tooltip.
-///
-/// The alternative is a dropdown under a paragraph covering every option, and that paragraph is then
-/// repeated for every entry of a fixed list — eight times over on the EmonCMS types page, saying the same
-/// thing about choices the reader is not looking at. The tooltip belongs to the choice it describes.
+/// A radio group for a small closed set, each choice with its own tooltip.
 function radioGroup(node     , obj     ) {
   const wrap = document.createElement('div');
   wrap.className = 'radio-group';
@@ -17147,8 +17145,7 @@ function radioGroup(node     , obj     ) {
     input.onchange = () => { if (input.checked) { obj[node.key] = v; refreshDirty(); runVisibilitySyncs(); } };
     const text = document.createElement('span'); text.textContent = humanise(v);
     lab.appendChild(input); lab.appendChild(text);
-    // The explanation hangs off a mark you can aim at, rather than being a paragraph under every choice or
-    // an invisible tooltip on the whole row that nothing tells you is there.
+    // Info mark carrying the choice's explanation.
     if (why) {
       const hint = document.createElement('span');
       hint.className = 'hint'; hint.textContent = 'ⓘ'; hint.title = why;
@@ -17159,9 +17156,7 @@ function radioGroup(node     , obj     ) {
   return wrap;
 }
 
-// Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
-/// One schema section's settings, rendered into another page. Edits land in the same place and the save
-/// bar counts them as it does anywhere else.
+/// Render one schema section's settings into another page.
 function renderSettingsOf(key        , container     ) {
   const node = (state.schema || []).find((n     ) => n.key === key);
   if (!node?.properties) return;
@@ -17183,20 +17178,14 @@ function renderNode(node     , obj     , container     , path           = []) {
     container.appendChild(renderList(node, ensure(obj, node.key, []), here));
   } else {
     const f = document.createElement('div'); f.className = 'field';
-    // The setting's own name, so anything looking for a field finds it by what it is rather than by the
-    // words on the label — which are there to be read, and change.
     f.dataset.key = node.key;
-    // Where this control writes to, on the element itself: it makes a rendered form readable in devtools,
-    // and it is how a check can say "this exact setting is rendered once" rather than matching on a label
-    // like "Enabled", which several unrelated nested sections legitimately share.
+    // Config path of this control, for devtools and checks.
     f.dataset.path = here.join('.');
-    // A blank label means something beside the control already names it — a dictionary row's key.
+    // A blank label means something beside the control already names it.
     if (node.label !== '') { const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab); }
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
     const input = node.radio ? radioGroup(node, obj) : scalarInput(node, obj);
-    // A masked field with no way to read it back is how a mistyped credential survives three attempts.
     f.appendChild(node.type === 'bool' ? switchWrap(input) : node.type === 'password' ? revealWrap(input) : input);
-    // Say why it's greyed out, in the field itself — a disabled control with no explanation reads as a bug.
     if (node.notEditableReason) {
       const why = document.createElement('div');
       why.className = 'desc field-locked';
@@ -17228,11 +17217,9 @@ const TYPE_LABELS                         = {
 };
 function labelFor(value        ) { return TYPE_LABELS[value] || value; }
 
-// Render the value of a dictionary/list element (valueSchema has no key of its own). `path` addresses
-// the element itself, e.g. ['Pdus','default'] or ['Modbus','Connections','0'].
-/// Returns the node the control is bound to, so a renamed key can be rebound to its own value.
+// Render a dictionary/list element's value; `path` addresses the element.
+/// Returns the node the control is bound to.
 function renderValue(valueSchema     , holder     , keyName     , container     , path          , inline = false) {
-  // Inline, the key sits beside the value and a second label saying "value" is noise.
   const node = Object.assign({}, valueSchema, { key: keyName, label: inline ? '' : 'value' });
   if (node.type === 'object') {
     const target = ensure(holder, keyName, {});
@@ -17248,15 +17235,13 @@ function renderMap(node     , mapObj     , path          ) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
   if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-  // A worked entry says more than another sentence about the shape of one.
   if (node.mapExample) {
     const ex = document.createElement('div'); ex.className = 'desc map-example'; ex.textContent = node.mapExample;
     fs.appendChild(ex);
   }
   const entries = document.createElement('div'); fs.appendChild(entries);
 
-  // A map of scalars is one row per entry — key, value, Remove. Only a map of objects (each PDU, each
-  // Modbus connection) has enough in it to be worth a card of its own.
+  // A map of scalars renders one row per entry; a map of objects renders cards.
   const inline = !node.valueSchema || node.valueSchema.type !== 'object';
 
   const drawEntry = (key        ) => {
@@ -17276,8 +17261,7 @@ function renderMap(node     , mapObj     , path          ) {
       head.appendChild(keyIn); head.appendChild(del); wrap.appendChild(head);
       bound = renderValue(node.valueSchema, mapObj, key, wrap, [...path, key]);
     }
-    // Renaming the key moves the value with it, and the control follows — bound to the old key it would
-    // write the entry straight back under the name that was just changed.
+    // Rebind the control to the renamed key.
     keyIn.onchange = () => {
       if (!keyIn.value || keyIn.value === key) return;
       mapObj[keyIn.value] = mapObj[key];
@@ -17289,8 +17273,7 @@ function renderMap(node     , mapObj     , path          ) {
     entries.appendChild(wrap);
   };
 
-  // Rows of two unlabelled boxes say nothing about which side is which, so the columns are headed — and
-  // the heading stands whether or not there are any entries yet to read it against.
+  // Column headings for key/value rows.
   if (inline) {
     const head = document.createElement('div'); head.className = 'map-head';
     const k = document.createElement('span'); k.textContent = node.keyLabel || 'Key';
@@ -17310,8 +17293,7 @@ function renderList(node     , arr       , path          ) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
 
-  // A list of tag names is a list of references to something defined elsewhere, so it is chosen rather
-  // than typed: a mistyped tag here is a filter that silently matches nothing.
+  // Tag lists are picked from defined tags, not typed.
   if (node.tagChoices) {
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
     const picker = tagInput(arr, { strict: true });
@@ -17321,9 +17303,7 @@ function renderList(node     , arr       , path          ) {
   }
 
   const entries = document.createElement('div'); fs.appendChild(entries);
-  // A fixed list is the set it ships with — the measurement types EmonCMS understands, say. Its entries are
-  // titled by the field that names them rather than offering that field for editing, and neither the Add
-  // nor the Remove button is drawn, because either would produce an entry nothing downstream can act on.
+  // A fixed list: entries are titled by fixedListKey, with no Add or Remove.
   const fixedKey                     = node.fixedListKey;
   const draw = (idx        ) => {
     const wrap = document.createElement('div'); wrap.className = 'list-entry';
@@ -17350,30 +17330,24 @@ function renderList(node     , arr       , path          ) {
   return fs;
 }
 
-// Nav grouped by function (#209): the PDU group only does anything with Vertiv rPDUs configured; live
-// value sources are Integrations; readings are consolidated and shipped onward (Destinations); the rest is
-// plumbing (System). A group holds both schema-driven config sections (by key) and the bespoke tool tabs
-// (by their add* fn). Ungrouped schema sections fall into System, so a new one is never lost.
-/// `after` names the schema section a tool belongs to. Without it a tool lands at the END of its group,
-/// and `child: true` then indents it under whatever schema section happened to sort last — which is how
-/// "HA Energy Mapping" ended up hanging off EmonCMS.
+// Nav groups; ungrouped schema sections fall into System.
+/// `after` names the schema section(s) a tool follows; without it a tool goes to the end of its group.
 
+/** Anchors for the PDU tabs, in order of preference. */
+const PDU_BLOCK = ['Overrides', 'Pdus'];
 const NAV_GROUPS                                        = [
-  // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
-  { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
+  // Sources: the PDU tabs are children of the Vertiv rPDU page.
+  { title: 'Sources', items: [{ tool: addLiveDataSection, child: true, after: PDU_BLOCK }, { tool: addControlSection, child: true, after: PDU_BLOCK }, { tool: addPathsSection, child: true, after: PDU_BLOCK }] },
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addBalanceSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { tool: addFloorPlanSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
-  // The status board is a System page: it answers "is the bridge healthy", which is the second question.
   { title: 'System', items: [{ tool: addHomeSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
-// Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
+// Display-label fixes, keyed by schema section key.
 const LABEL_OVERRIDES                         = { Pdus: 'Vertiv rPDU', Api: 'API', Gui: 'GUI', Modbus: 'Modbus TCP', HomeAssistant: 'Home Assistant' };
 
-// A leading glyph per schema-driven page. Purely a scanning aid — the label is still the page's
-// identity — so an unlisted section simply gets the neutral bullet. (The bespoke tool tabs pass their
-// own glyph to navLink() where they build their link.)
+// A leading glyph per schema-driven page; unlisted sections get the neutral bullet.
 const NAV_ICONS                         = {
   'Vertiv rPDU': '▤', 'Overrides': '✎', 'MQTT': '⇅', 'Modbus TCP': '⧉', 'EmonCMS': '▦',
   'Home Assistant': '⌂', 'Prometheus': '◎', 'GUI': '▭', 'API': '⚙',
@@ -17381,8 +17355,7 @@ const NAV_ICONS                         = {
 };
 function navIcon(label        ) { return NAV_ICONS[label] || '•'; }
 
-// A collapsible nav group: clicking the header toggles its items. Returns the container the group's links
-// (schema sections or tool tabs) are appended into.
+// A collapsible nav group; returns the container its links are appended into.
 function navGroup(nav     , title        ) {
   const wrap = el('div', { class: 'nav-group-wrap' });
   const header = el('div', { class: 'nav-group', text: title });
@@ -17392,9 +17365,7 @@ function navGroup(nav     , title        ) {
   return items;
 }
 
-// A credential field with a show/hide button. Hidden by default — it is a credential — but readable while
-// it is being entered, because a value you cannot see is a value you cannot check against the one you
-// copied.
+// A credential field with a show/hide button, hidden by default.
 function revealWrap(input     ) {
   const wrap = el('div', { class: 'reveal-wrap' });
   const eye = btn('Show');
@@ -17411,8 +17382,7 @@ function revealWrap(input     ) {
   return wrap;
 }
 
-// The History page's extras, each in the box its settings are in: where EmonCMS history comes from beside the
-// provider, where the store is beside its directory, and copying between backends in a box of its own.
+// The History page's extras, each placed in its settings' box.
 function historyBox(sec     , name        ) {
   const found = [...sec.querySelectorAll('fieldset.setting-group')].find((f     ) => f.querySelector('legend')?.textContent === name);
   if (found) return found;
@@ -17421,7 +17391,7 @@ function historyBox(sec     , name        ) {
   return box;
 }
 
-// Reading history from EmonCMS reads the feeds the EmonCMS export writes, so point at the page that configures it.
+// Link to the EmonCMS export page, whose feeds EmonCMS history reads.
 function wireHistoryProvider(sec     ) {
   const wrap = el('div', { class: 'desc feature-pointer' });
   wrap.appendChild(el('span', { text: 'EmonCMS history reads the feeds the EmonCMS export writes. Its server, API key and feed names are configured on the EmonCMS page. ' }));
@@ -17434,7 +17404,7 @@ function wireHistoryProvider(sec     ) {
   sync();
   visibilitySyncs.push(sync);
 
-  // LocalPath left empty resolves at runtime, so say where the readings are actually going.
+  // An empty LocalPath resolves at runtime; show where readings actually go.
   const where = el('div', { class: 'history-facts' });
   historyBox(sec, 'Local storage').appendChild(where);
   api('/api/history/store').then((r     ) => {
@@ -17487,7 +17457,6 @@ function historyCopyPanel() {
     const why = backends.find((x     ) => x.id === to.value)?.replace;
     replace.disabled = !!why;
     if (why) conflicts.value = 'keep';
-    // Said only when replacing is not on offer, and why.
     conflictNote.textContent = why ? `Replacing is not available for ${to.value}: ${why}.` : '';
     conflictNote.hidden = !why;
   };
@@ -17504,7 +17473,7 @@ function historyCopyPanel() {
       el('div', { class: 'field' }, el('label', { text: 'When both have a reading' }), conflictNote, conflicts)),
     el('div', { class: 'ld-toolbar' }, go));
 
-  // The run itself: what it is doing, how far through, and how long is left.
+  // Progress of the running copy.
   const pill = el('span', { class: 'pill' });
   const route = el('strong');
   const bar = el('span', { style: { width: '0%' } });
@@ -17551,7 +17520,7 @@ function historyCopyPanel() {
         from.append(el('option', { value: x.id, text: x.id + (x.read ? ` (${x.read})` : ''), disabled: !!x.read }));
         to.append(el('option', { value: x.id, text: x.id + (x.write ? ' (read only)' : ''), disabled: !!x.write, title: x.write || '' }));
       }
-      // A copy needs two different backends: start with the first readable one into local.
+      // Default: the first readable backend into local.
       const readable = (b.backends || []).find((x     ) => !x.read && x.id !== 'local');
       if (readable) from.value = readable.id;
       if ((b.backends || []).some((x     ) => x.id === 'local' && !x.write)) to.value = 'local';
@@ -17573,19 +17542,12 @@ function historyCopyPanel() {
   return wrap;
 }
 
-// A settings page for a capability that is switched off is a page of settings for something that is not
-// running. Its nav entry is hidden until the feature is turned on.
-//
-// Hidden, not removed: the page is still built, still reachable from the Features card's Settings button
-// and from the command palette, and its entry returns the instant the switch is flipped — no save, no
-// reload. The Features page is the one place that answers "what is this bridge doing?", and the nav now
-// agrees with it instead of listing ten pages for things that are off.
+// A disabled feature's settings page is still built, but its nav entry is hidden.
 function hideWhileOff(link     , sectionKey        , feature     ) {
   const sync = () => {
     const cur = (state.data[sectionKey] || {})[feature.key];
     const on = cur == null ? !!feature.default : !!cur;
-    // Never hide the page being looked at: switching a feature off from its own settings page is exactly
-    // when its nav entry would vanish under you, which reads as the GUI breaking.
+    // Never hide the active page.
     show(link, on || link.classList.contains('active'));
   };
   sync();
@@ -17596,16 +17558,15 @@ function hideWhileOff(link     , sectionKey        , feature     ) {
 function renderConfigSection(node     , nav     , sections     ) {
   const label = LABEL_OVERRIDES[node.key] || node.label;
   const link = navLink(nav, label, navIcon(label));
-  // Which part of the document this page edits, so its nav entry can carry a count of pending edits.
+  // The document section this page edits, for the nav's pending-edit count.
   link.dataset.section = node.key;
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = label; sec.appendChild(h);
   if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
-  // Section-specific actions belong with the section they act on, not on every page.
   const acts = sectionActions(node);
   if (acts) sec.appendChild(acts);
   if (node.key === 'Overrides') {
-    // Bespoke, live-data-driven editor instead of the blind dictionary form.
+    // Live-data-driven editor instead of the dictionary form.
     const tools = document.createElement('div'); tools.className = 'sec-actions';
     const refresh = btn('Refresh live data');
     const preview = btn('Preview generated paths (with unsaved edits)');
@@ -17619,23 +17580,14 @@ function renderConfigSection(node     , nav     , sections     ) {
   } else {
     if (node.type === 'object') {
       ensure(state.data, node.key, {});
-      // The Energy Dashboard's settings — its URL and long-lived token above all — are rendered here, on
-      // the Home Assistant page, because that is where anyone looks for them: the status board reports the
-      // sync as "Home Assistant — Failing", and this is the page it names. The HA Energy Mapping page keeps
-      // its own copies of the two connection fields, bound to this same object, because it cannot test a
-      // connection it has no way to enter.
       let props = node.properties;
-      // A feature's on/off switch lives on the Features page, not on eight separate pages (#292). It is
-      // removed here rather than duplicated: two switches bound to one value would disagree the moment one
-      // of them was clicked, and a page showing "Off" for something that is on is exactly the kind of
-      // inaccuracy this GUI must never show.
+      // A feature's on/off switch lives on the Features page, so it is removed here.
       const feature = featureToggle(node);
       if (feature) {
         props = (props || []).filter((p     ) => p !== feature);
         hideWhileOff(link, node.key, feature);
       }
-      // A plugin's settings live under Plugins/<id>, not as a property of their own — Config was compiled
-      // before the plugin existed. Everything else about rendering and change-tracking is identical.
+      // Plugin settings live under Plugins/<id>.
       const target = node.isPlugin
         ? ensure(ensure(state.data, 'Plugins', {}), node.key, {})
         : state.data[node.key];
@@ -17643,9 +17595,7 @@ function renderConfigSection(node     , nav     , sections     ) {
       renderObjectBody(props, target, sec, path);
     }
     else renderNode(node, state.data, sec, []);
-    // A plugin's buttons come from what it says it can do — no per-integration wiring here at all.
     if (node.isPlugin) integrationActionBar(node.key).then(bar => { if (bar) sec.appendChild(bar); });
-    // The discovery cleanups belong with the discovery buttons, not on the energy-mapping page.
     if (node.key === 'HomeAssistant') addDiscoveryCleanup(sec);
     if (node.key === 'History') wireHistoryProvider(sec);
     if (node.key === 'Gui') wireGuiAuth(sec);
@@ -17654,7 +17604,6 @@ function renderConfigSection(node     , nav     , sections     ) {
     else if (node.key === 'Operator') { wireOperatorCheck(sec); wireOperatorSwitch(sec); }
     link.onclick = () => activate(link, sec);
   }
-  // The PDU page is where anything about the PDUs is looked for, their tags included.
   if (node.key === 'Pdus') {
     const tags = renderPduTags();
     sec.appendChild(tags.el);
@@ -17667,32 +17616,13 @@ function renderConfigSection(node     , nav     , sections     ) {
 function build() {
   const nav      = document.getElementById('nav'); const sections      = document.getElementById('sections');
   nav.innerHTML = ''; sections.innerHTML = '';
-  // Everything registered against the old DOM is gone with it.
   clearFieldRegistry();
   visibilitySyncs = [];
 
   const byKey = new Map(state.schema.map((n     ) => [n.key, n]));
-  // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs), so its raw schema form is hidden here.
-  // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs). Plugins is the raw storage behind the
-  // per-plugin pages — every loaded plugin already renders its own typed section, so showing the map as
-  // well gives two editors for one thing, and the raw one is a free-text box you cannot usefully type into.
-  // Deployment settings have no page: ports, directories, buckets, the cache endpoint and what is switched
-  // on at all belong to the config file or the chart's values, where the volume, the service and the
-  // container that back them are also declared. Debug's two switches are on Diagnostics, beside the runtime
-  // state they are used to investigate.
+  // Sections with no page of their own.
   const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache']);
-  // A section the client doesn't place itself — a plugin's, or a new built-in — goes where the schema says
-  // it belongs, and into System when it says nothing, so a new one is never lost.
-  //
-  // Built from a COPY of NAV_GROUPS. Pushing into the module-level constant meant every rebuild of the form
-  // appended the same sections again, so saving twice put a page in the nav three times.
-  // Every schema section is placed by what the SCHEMA says, built-in or plugin. NAV_GROUPS now carries
-  // only the visual editors (Flow, Nodes, Trends…), which have no schema section to declare a group on.
-  // Holding the grouping in two places is how a section ends up registered, rendered and reachable while
-  // sitting in the wrong group, with nothing to say it was forgotten.
-  //
-  // Schema sections lead each group and the tools follow, because a tool marked `child` indents under
-  // whatever precedes it — the PDU tabs belong under the PDU page, not above it.
+  // Schema sections are placed by their declared group (System if none); tools follow them.
   const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: []              }));
   const groupFor = (title        ) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System') ;
 
@@ -17700,20 +17630,25 @@ function build() {
     if (HIDDEN.has(n.key)) return;
     groupFor(n.group || 'System').items.push({ schema: n.key });
   });
-  NAV_GROUPS.forEach((g, i) => g.items.forEach(it => {
-    // A tool that names its parent section sits directly after it; everything else keeps to the end.
-    const after = 'after' in it ? it.after : undefined;
-    const at = after ? navGroups[i].items.findIndex(x => 'schema' in x && x.schema === after) : -1;
-    if (at >= 0) navGroups[i].items.splice(at + 1, 0, it);
-    else navGroups[i].items.push(it);
+  const navItems = NAV_GROUPS.map(g => [...g.items]);
+  pluginPages.forEach(p => (navItems[NAV_GROUPS.findIndex(g => g.title === p.group)] ?? navItems[navItems.length - 1]).push({ tool: pluginPageTool(p) }));
+  navItems.forEach((list, i) => list.forEach(it => {
+    // Place a tool after its first present anchor, behind tools already there; otherwise at the end.
+    const items = navGroups[i].items;
+    const after = 'after' in it && it.after ? ([]            ).concat(it.after) : [];
+    let at = -1;
+    for (const key of after) { at = items.findIndex(x => 'schema' in x && x.schema === key); if (at >= 0) break; }
+    if (at < 0) { items.push(it); return; }
+    while (at + 1 < items.length && 'tool' in items[at + 1] && (items[at + 1]       ).after === it.after) at++;
+    items.splice(at + 1, 0, it);
   }));
 
-  // The landing page: what the system is doing now, rendered first so it's the default tab (#395).
+  // The landing page, first so it is the default tab.
   const overview = addOverviewSection(nav, sections);
   const first      = overview.link;
 
   for (const g of navGroups) {
-    // Drop items whose schema section is absent (e.g. Logging is hidden from the schema under Kubernetes).
+    // Drop items whose schema section is absent.
     const items = g.items.filter(it => 'tool' in it || byKey.get((it       ).schema));
     if (!items.length) continue;
     const container = navGroup(nav, g.title);
@@ -17729,24 +17664,21 @@ function build() {
     }
   }
 
-  // Open the tab named in the URL hash (so a refresh / shared link lands where you were), else the first.
+  // Open the tab named in the URL hash, else the first.
   const wanted = decodeURIComponent((location.hash || '').slice(1));
   const target = wanted ? ([...nav.querySelectorAll('a')]         ).find(a => slug(navLabel(a)) === wanted) : null;
   (target || first)?.click();
 
-  // One subscription for every conditional field, so changing the setting they hang off takes effect as
-  // soon as it is picked rather than after a save and reload.
+  // One subscription re-runs every conditional field's check.
   visibilityOff?.();
   visibilityOff = onDirty(runVisibilitySyncs);
 
   wireNavBadges(nav);
 }
 
-// Each config page's nav entry carries the number of unsaved edits inside it, so pending work is
-// visible from anywhere — you don't have to remember which tab you were on when you changed something.
+// Each config page's nav entry shows its unsaved-edit count.
 let navBadgesOff      = null;
 function wireNavBadges(nav     ) {
-  // A rebuild replaces every link, so drop the watcher that was pointing at the old ones.
   navBadgesOff?.();
   const links = ([...nav.querySelectorAll('a')]         ).filter(a => a.dataset?.section);
   navBadgesOff = onDirty(() => links.forEach(a => {
@@ -17784,8 +17716,7 @@ function wireEmonCmsTransport(sec     ) {
   const transportSel = field('Transport')?.querySelector('select');
   if (!transportSel) return;
   const mqttOnly = ['MqttBaseTopic', 'MqttTopicTemplate'].map(field).filter(Boolean);
-  // Url/ApiKey are needed by the HTTP transport AND by feed auto-config (which drives the REST API
-  // regardless of the measurement transport); Path is HTTP-transport only.
+  // Url/ApiKey are needed for HTTP transport and feed auto-config; Path is HTTP only.
   const urlKey = ['Url', 'ApiKey'].map(field).filter(Boolean);
   const pathField = field('Path');
   const feedsAuto = field('AutoConfigure')?.querySelector('input[type=checkbox]');
@@ -17800,9 +17731,7 @@ function wireEmonCmsTransport(sec     ) {
   apply();
 }
 
-// The API section advertises OpenAPI/Scalar docs but never said where they live (#190). Show the real
-// URLs, derived from the configured port. The API listens on its own port, so the links are built from
-// this page's hostname rather than its path — they are only reachable if that port is exposed to you.
+// Show the OpenAPI/Scalar doc URLs, built from this page's hostname and the API port.
 function wireApiDocs(sec     ) {
   const fields = [...sec.querySelectorAll('.field')]         ;
   const field = (label        ) => fields.find(f => f.querySelector('label')?.textContent === label);
@@ -17837,10 +17766,7 @@ function wireApiDocs(sec     ) {
       a.href = base + path; a.textContent = base + path;
       a.target = '_blank'; a.rel = 'noopener';
       a.style.cssText = 'font:12px ui-monospace,Consolas,monospace;';
-      // Left clickable even when the API is off. Killing pointer-events made these look like ordinary
-      // links that silently ignored a click — reported as "API links not clickable" (#295), because a
-      // dead-looking link is indistinguishable from a broken page. The reason is now on the row itself
-      // rather than only in the paragraph above it, so the state is legible where the link is.
+      // Left clickable when the API is off; the row states why.
       if (!on) {
         a.style.opacity = '0.55';
         a.title = 'The API is disabled, so nothing is listening on this port yet — enable it above, save, and restart.';
@@ -17861,8 +17787,7 @@ function wireApiDocs(sec     ) {
   sec.appendChild(box);
 }
 
-// Operator page: an on-demand update check. Asks the operator to query the registry now and says plainly
-// whether a newer eligible version (bounded by Policy) is available — read-only, never touches the Deployment.
+// Operator page: an on-demand, read-only update check.
 function wireOperatorCheck(sec     ) {
   const box = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = 'Update check'; box.appendChild(lg);
@@ -17874,9 +17799,7 @@ function wireOperatorCheck(sec     ) {
   sec.appendChild(box);
 
   const show = (u     ) => {
-    // The operator reports both the message and a Severity, so the colour comes straight from that severity —
-    // no re-deriving from wording (the old code called 'unstable' a "release", then keyword-sniffed the prose).
-    // Fall back to `available` only for a legacy report that predates the severity field.
+    // Colour from the reported severity; `available` is the fallback for legacy reports.
     const msg = u?.message || (u?.available ? 'Update available.' : 'Up to date.');
     const sev = u?.severity ?? (u?.available ? 'UpdateAvailable' : 'Ok');
     if (sev === 'UpdateAvailable') { result.style.color = 'var(--warn, #fa4)'; result.textContent = '↑ ' + msg; }
@@ -17895,7 +17818,7 @@ function wireOperatorCheck(sec     ) {
   };
 }
 
-// Operator page: a channel/version switcher — roll the Deployment to stable/edge/dev or a specific release (#210).
+// Operator page: a channel/version switcher.
 function wireOperatorSwitch(sec     ) {
   const box = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = 'Deployed version'; box.appendChild(lg);
@@ -17918,7 +17841,6 @@ function wireOperatorSwitch(sec     ) {
     toast(res.body?.message || (res.ok ? 'Force update requested.' : 'Force update failed.'), forcedOk);
     if (forcedOk) {
       status.textContent = res.body.message;
-      // The workload is about to go away. Say so, so the dropped stream reads as "busy", not "broken".
       expectRestart('Re-pulling the deployed image');
       toast('Updating — the bridge is restarting. This page reconnects on its own.', true);
     }
@@ -17961,9 +17883,7 @@ function wireOperatorSwitch(sec     ) {
   }).catch(() => { desc.textContent = 'Could not load available versions.'; sel.style.display = 'none'; switchBtn.style.display = 'none'; forceBtn.style.display = 'none'; });
 }
 
-// A link out to the system this page configures. It appears only when a URL is actually configured, so it
-// can never dangle, and the href is resolved on each visit rather than at build time — otherwise editing
-// the URL and clicking straight through would open the old one.
+// A link to the configured system, shown only when a URL is set; href resolved on each visit.
 function externalLink(label        , href                     , hint        ) {
   const a      = el('a', { class: 'ext-link', target: '_blank', rel: 'noopener', title: hint }, label + ' ↗');
   const sync = () => {
@@ -17972,12 +17892,12 @@ function externalLink(label        , href                     , hint        ) {
     else a.classList.add('is-hidden');
   };
   sync();
-  // activate() announces every tab switch, so a URL edited elsewhere is picked up on the way back here.
+  // activate() fires on each tab switch, picking up URL edits.
   window.addEventListener?.('rpdu:activate', sync);
   return a;
 }
 
-// A configured URL, trimmed and only if it looks like one — a half-typed host shouldn't produce a link.
+// A configured URL, trimmed, only if it looks like one.
 function cfgUrl(...path          )                {
   let o      = state.data;
   for (const p of path) { if (o == null) return null; o = o[p]; }
@@ -17985,13 +17905,11 @@ function cfgUrl(...path          )                {
   return /^https?:\/\/.+/i.test(s) ? s.replace(/\/+$/, '') : null;
 }
 
-// Section-specific action buttons (connection tests; Home Assistant discovery actions; a way in to the
-// system being configured).
+// Section-specific action buttons.
 function sectionActions(node     ) {
   const bar = document.createElement('div'); bar.className = 'sec-actions';
 
-  // What the last action did, on the page. A toast is gone in a few seconds and "did that work?" is the
-  // whole reason these buttons exist — a test whose answer you have to catch is a test that says nothing.
+  // The last action's result, shown on the page.
   const result = el('div', { class: 'desc test-result' });
 
   const add = (label        , fn     , cls         ) => {
@@ -18008,7 +17926,7 @@ function sectionActions(node     ) {
           result.classList.add(out.ok ? 'test-ok' : 'test-bad');
         }
       } catch (e     ) {
-        // An action that throws must not leave the button stuck on "Working…" with nothing said.
+        // A throwing action must not leave the button stuck on "Working…".
         result.textContent = '✗ ' + (e?.message || e);
         result.classList.add('test-bad');
       } finally { b.disabled = false; b.textContent = was; }
@@ -18028,21 +17946,17 @@ function sectionActions(node     ) {
     if ((state.data.HomeAssistant || {}).DiscoveryEnabled !== false) {
       add('Republish discovery', rediscoverHa);
       add('Clear discovery', clearHa, 'danger');
-      // The two cleanups that "Clear discovery" cannot do. One removes retained configs for things this
-      // build no longer publishes; the other removes devices Home Assistant still lists whose config is
-      // already gone, which is reachable only through HA's own API.
+      // The two cleanups "Clear discovery" cannot do.
     }
-    // The base URL is configured for the Energy Dashboard sync, but it's the way in to HA either way.
     bar.appendChild(externalLink('Open Home Assistant', () => cfgUrl('HomeAssistant', 'EnergyDashboard', 'Url'), 'Open Home Assistant'));
   } else if (node.key === 'Prometheus') {
-    // Our own exporter, not the Pushgateway (that URL is a write endpoint, not something to visit). Built
-    // from this page's hostname the way the API docs links are — it only resolves if that port is exposed.
+    // Our own exporter's /metrics, on this page's hostname.
     bar.appendChild(externalLink('Open /metrics', () => {
       const p = state.data?.Prometheus || {};
       return p.Exporter === false ? null : `${location.protocol}//${location.hostname}:${p.Port || 9184}/metrics`;
     }, 'The metrics this bridge exposes for Prometheus to scrape'));
   } else if (node.key === 'Pdus') {
-    // One way in per configured PDU — their web UIs are where you go to check anything this can't show.
+    // One link per configured PDU's web UI.
     Object.entries(state.data?.Pdus || {}).forEach(([id, pdu]     ) => {
       bar.appendChild(externalLink(`Open ${id}`, () => {
         const c = pdu?.Connection || {};
@@ -18196,12 +18110,9 @@ async function integrationActionBar(id        )               {
 }
 
 // ── main.ts ─────────────────────────────────────────────────────
-// Shell bootstrap: load the schema + config, build the UI, and own everything that lives outside a
-// section — the app bar, the live-stream indicator, the theme, the palette, and the save bar.
+// Shell bootstrap: app bar, live indicator, theme, palette and save bar.
 
-// Back/forward navigation + direct hash edits: open the matching tab if it isn't already active. (Normal
-// tab clicks already set the hash via activate(), so by the time this fires the tab is active -> no-op,
-// which also avoids re-loading a tab's data on every click.)
+// Back/forward and hash edits: open the matching tab if it isn't already active.
 window.addEventListener('hashchange', () => {
   const wanted = decodeURIComponent((location.hash || '').slice(1));
   if (!wanted) return;
@@ -18212,69 +18123,49 @@ window.addEventListener('hashchange', () => {
 async function load() {
   state.schema = (await api('/api/schema')).body;
   state.data = (await api('/api/config')).body;
-  // Older backends have no such endpoint; the editor then says what it can without the arithmetic.
+  // Older backends lack this endpoint.
   try { state.derivations = ((await api('/api/flow/derivations')).body || {}).metrics || []; }
   catch { state.derivations = []; }
+  await loadPluginPages();
   build();
-  // Whatever the server just handed us is, by definition, the saved state.
   setBaseline();
   refreshStatus();
 }
 
 // --- App-bar status --------------------------------------------------------------------------------
 
-// Last-seen operator update report, so "check now" can tell when a fresh result has landed.
+// Last operator report time, so "check now" can tell when a fresh result lands.
 let lastCheckedAt                = null;
 let configWritable = true;
-// The last roll the operator reported — its timestamp, and the tag it went to. null means "we haven't seen
-// a report yet", which is deliberately different from "" — see appliedTagChanged.
+// null means no report seen yet, distinct from "".
 let lastApplied                = null;
 let lastAppliedAt                = null;
 
-/// Did the operator just roll the deployment?
-///
-/// AutoUpdate rolls on the operator's own schedule, so unlike Switch or Force update there is no click to
-/// hang an expectRestart() on: the page's first and only warning is the stream dying, which shows as a red
-/// "Offline" for something entirely routine.
-///
-/// Watching the applied *tag* was not enough, and is why this never fired for anyone. Tracking a moving
-/// channel — `unstable`, `main`, `edge`, the default and the common case — means an auto-update swaps the
-/// digest under an unchanged tag, so "unstable" was reported before and after and nothing looked different.
-/// Only a switch between two differently named tags was ever visible. The operator now stamps when it
-/// actually rolled, which changes either way; the tag is still checked so an older operator that reports no
-/// timestamp keeps working as it did.
-///
-/// Never fires on the first report. On a fresh page load every value is "new", and announcing a restart
-/// that already happened (or never happened) would put the app bar into a state nothing is going to clear.
+/// True when the operator has rolled the deployment since the last report; never on the first report.
 function appliedTagChanged(applied                           , appliedAt                )          {
   const at = appliedAt || '';
   if (at !== '') {
-    // Same rule as the tag below: an absent timestamp is not a new roll, so it must not clear what we know.
     const rolled = lastAppliedAt !== null && at !== lastAppliedAt;
     lastAppliedAt = at;
-    // Keep the tag in step so a later report can't read as a change purely because we stopped tracking it.
     if (applied) lastApplied = applied;
     return rolled;
   }
 
   const now = applied || '';
-  // No tag in this report is not a change of tag — the operator can simply stop reporting one (restarting,
-  // briefly unreachable). Forgetting the last tag here would make the next report of the SAME tag look
-  // like a fresh roll, and announce a restart that never happened.
+  // A report without a tag is not a tag change.
   if (now === '') return false;
   const changed = lastApplied !== null && now !== lastApplied;
   lastApplied = now;
   return changed;
 }
 
-// Render the header update chip from the operator's report (#210). Hidden when no operator is reporting.
+// Header update chip from the operator's report; hidden when none is reporting.
 function renderUpdate(u     ) {
   const upd      = document.getElementById('st-update');
   if (!upd) return;
   if (!u) { upd.classList.add('is-hidden'); lastCheckedAt = null; return; }
   lastCheckedAt = u.checkedAt || null;
-  // An update the operator applied by itself: the workload is going away and nobody here asked for it.
-  // Same treatment as a manual switch, so the drop that follows reads as "busy", not "broken".
+  // An operator-applied update is treated like a manual switch.
   if (appliedTagChanged(u.applied, u.appliedAt)) {
     expectRestart(`Auto-updating to ${u.applied}`);
     toast(`Update applied — rolling to ${u.applied}. The bridge is restarting.`, true);
@@ -18296,12 +18187,7 @@ function renderUpdate(u     ) {
   }
 }
 
-/// Settings that were saved but that this process is not running.
-///
-/// Most of the configuration is read once at startup, so saving it writes the file and changes nothing
-/// else — the GUI then showed the saved value while the bridge went on behaving the old way, with a single
-/// toast as the only warning. The badge stays until a restart closes the gap, on every page and in every
-/// browser, and clicking it does the restart.
+/// Badge for settings saved but not yet running; clicking it restarts.
 function renderRestartPending(r     ) {
   const pill      = document.getElementById('st-restart');
   if (!pill) return;
@@ -18316,8 +18202,6 @@ function renderRestartPending(r     ) {
   pill.onclick = () => restartNow(settings);
 }
 
-/// Restart the bridge, having said exactly what it is for. The stream drops on the way, which the live
-/// pill already knows how to explain.
 async function restartNow(settings          ) {
   const what = settings.length === 1 ? settings[0] : `${settings.length} settings`;
   if (!confirm(`Restart the bridge now to apply ${what}?\n\nPolling and MQTT publishing stop for a few seconds. This page reconnects on its own.`)) return;
@@ -18327,9 +18211,6 @@ async function restartNow(settings          ) {
 }
 
 // --- Coming back from a restart ----------------------------------------------------------------------
-// The bridge going away is expected — an update, a switch, applying settings. What was not handled is it
-// coming back: the stream stayed down, every page held whatever it had, and the tab sat there stale until
-// someone reloaded it by hand. So the page waits for the bridge and picks itself back up.
 
 let bootVersion                = null;
 let returnWatch      = null;
@@ -18338,8 +18219,6 @@ let watchingForReturn = false;
 let lastInstance                = null;
 
 // --- The restart overlay -------------------------------------------------------------------------------
-// A restart or an update the operator asked for covers the page until the bridge is back: the page is
-// about to be stale or reloaded, and edits made meanwhile would be made against a process that is going.
 let restartBox      = null;
 let restartFrom                = null;
 let restartTimer      = null;
@@ -18366,7 +18245,6 @@ function showRestartOverlay(why        ) {
   const tick = () => {
     const secs = Math.round((Date.now() - started) / 1000);
     parts.elapsed.textContent = secs < 90 ? `${secs} s` : `${secs} s — taking longer than expected`;
-    // Never a trap: past half a minute the page can be used again, restart or not.
     parts.dismiss.hidden = secs < 30;
   };
   tick();
@@ -18383,18 +18261,16 @@ function hideRestartOverlay() {
   restartParts = null;
 }
 
-/// Poll until the bridge answers again, then carry on where we left off.
+/// Poll until the bridge answers again.
 function watchForReturn() {
-  // A flag rather than the timer id: a timer id is only reliably truthy in a browser.
+  // A flag, not the timer id: timer ids are only reliably truthy in a browser.
   if (watchingForReturn) return;
   watchingForReturn = true;
   const poll = async () => {
     let body      = null;
-    // While it is away this throws (connection refused) or answers with an error page; both mean "not yet".
     try { const r      = await api('/api/status'); body = r && r.ok ? r.body : null; } catch { body = null; }
     if (!body || !body.version) return;
-    // A restart that was asked for is over when a different process answers. In a rolling update the old
-    // one keeps answering until the new one takes over; that is not the bridge coming back.
+    // During a rolling update the old instance still answers; wait for a different one.
     if (restartFrom && body.instance && body.instance === restartFrom) return;
     clearInterval(returnWatch);
     returnWatch = null;
@@ -18405,7 +18281,7 @@ function watchForReturn() {
   setTimeout(poll, 1000);
 }
 
-/// The bridge answered. Reload when it is a different build; otherwise just bring the page up to date.
+/// Reload on a different build; otherwise refresh the page.
 function cameBack(body     ) {
   restartFinished();
   hideRestartOverlay();
@@ -18413,7 +18289,7 @@ function cameBack(body     ) {
 
   const now = body.version || '';
   if (bootVersion && now && now !== bootVersion) {
-    // Never throw away work the operator has not saved: say what is waiting instead of reloading over it.
+    // Do not reload over unsaved changes.
     if (isDirty()) {
       toast(`The bridge is back on v${now}, but this page is still the old build. Save or discard your `
           + 'changes, then reload to catch up.', true);
@@ -18425,17 +18301,15 @@ function cameBack(body     ) {
   }
 
   toast('The bridge is back.', true);
-  // Sections re-subscribe and refresh off this, the same as a tab switch.
-  try { window.dispatchEvent?.(new CustomEvent('rpdu:activate')); } catch { /* sections keep polling */ }
+  try { window.dispatchEvent?.(new CustomEvent('rpdu:activate')); } catch { }
 }
 
-// Paint the app bar from a /api/status body — from the initial fetch, or pushed on the `status` feed.
+// Paint the app bar from a /api/status body.
 function renderStatus(body     ) {
   if (!body) return;
   const set = (id        , fn                  ) => { const e = document.getElementById(id); if (e) fn(e); };
 
-  // What this page was loaded against. A restart that comes back on a different build means the assets in
-  // this tab are the old ones, and no amount of reconnecting fixes that.
+  // The build this page was loaded against.
   if (!bootVersion && body.version) bootVersion = body.version;
   if (body.instance) lastInstance = body.instance;
   set('st-version', e => { e.textContent = 'v' + (body.version || '?'); e.title = body.configSource ? 'Config source: ' + body.configSource : ''; });
@@ -18448,15 +18322,14 @@ function renderStatus(body     ) {
 
   renderRestartPending(body.restart);
 
-  // A ConfigMap / read-only mount can't be saved: say so up front, not after the save fails.
+  // A read-only config source cannot be saved.
   configWritable = body.configWritable !== false;
   set('st-readonly', e => e.classList[configWritable ? 'add' : 'remove']('is-hidden'));
   renderSaveBar();
 
-  // Off by default only if the operator turned it off; absent (an older server) means show it.
+  // Absent (older server) means show it.
   set('project-link', e => e.classList[body.showProjectLink === false ? 'add' : 'remove']('is-hidden'));
 
-  // Show a logout link + signed-in user when OIDC is in use.
   if (body.auth === 'oidc') {
     set('st-logout', e => e.classList.remove('is-hidden'));
     if (body.user) set('st-user', e => e.textContent = body.user);
@@ -18467,7 +18340,6 @@ async function refreshStatus() {
   renderStatus((await api('/api/status')).body);
 }
 
-// The live pill: the one place that says whether anything on screen is actually moving.
 function initLiveIndicator() {
   const pill      = document.getElementById('st-live');
   const LOOK                      = {
@@ -18476,15 +18348,11 @@ function initLiveIndicator() {
     down: ['pill bad', 'Offline', 'The live update stream dropped — retrying. Pages fall back to manual refresh.'],
     idle: ['pill', 'Idle', 'Nothing on this page needs live updates.'],
   };
-  // Both ways the bridge can go away: one we asked for, and one we only notice by the stream dropping.
   onExpectRestart(() => { showRestartOverlay(expectedRestart() || 'Restarting'); watchForReturn(); });
   onRealtimeState(s => {
     if (s === 'down') watchForReturn();
     if (!pill) return;
-    // A gap we asked for is not a fault. While a switch/redeploy/restart is in flight the stream is
-    // expected to drop, so say "Updating" rather than flashing red "Offline" at someone who just clicked
-    // the button that caused it. Once the stream is back, the window closes and normal reporting resumes —
-    // and if it never comes back, the window expires and it goes red for real.
+    // An expected restart shows "Updating" instead of "Offline".
     const why = expectedRestart();
     if (s === 'live') restartFinished();
     const restarting = why && s !== 'live';
@@ -18497,11 +18365,10 @@ function initLiveIndicator() {
     const dot = restarting ? ' warn' : s === 'live' ? ' good' : s === 'down' ? ' bad' : s === 'connecting' ? ' warn' : '';
     pill.append(el('span', { class: 'dot' + dot }), text);
   });
-  // The app bar is always watching, so the stream is up as soon as the page is.
   subscribeLive('status', renderStatus);
 }
 
-// "Check now": ask the operator (a separate process) to run a registry check, then poll for the result.
+// Ask the operator to run a registry check, then poll for the result.
 async function checkUpdatesNow() {
   const upd      = document.getElementById('st-update');
   if (upd.classList.contains('busy')) return;
@@ -18511,7 +18378,7 @@ async function checkUpdatesNow() {
   const r = await api('/api/operator/check', { method: 'POST' });
   if (!r.ok || !r.body?.ok) { toast(r.body?.message || 'Update check failed.', false); await refreshStatus(); return; }
 
-  // The operator patches the CR status asynchronously; poll a few times for a newer checkedAt.
+  // The operator updates its status asynchronously; poll for a newer checkedAt.
   const started = Date.now();
   while (Date.now() - started < 12000) {
     await new Promise(res => setTimeout(res, 1500));
@@ -18527,21 +18394,16 @@ async function checkUpdatesNow() {
 }
 
 // --- Save bar --------------------------------------------------------------------------------------
-// It only exists when there is something to save, and it says how much. The old bar was permanent and
-// always enabled: identical whether you'd changed nothing or twenty settings, with no way to see what
-// a click would write, and no way back.
 
 let saving = false;
 
-/// The page keeps the bar's height free at its foot, so the last thing on it can be scrolled up past the
-/// bar. On a phone the bar wraps to two or three rows and covered the bottom of every page — on the
-/// Balance page, the whole Home total, with no way to reach it but to save or discard first.
+/// Reserve the save bar's height at the page foot so content can scroll past it.
 function reserveForSaveBar() {
   const bar      = document.getElementById('savebar');
   const h = bar && !bar.classList.contains('is-hidden') ? Math.ceil(bar.offsetHeight || 0) : 0;
   document.documentElement?.style?.setProperty?.('--savebar-h', h + 'px');
 }
-try { window.addEventListener('resize', () => reserveForSaveBar()); } catch { /* no window: tests */ }
+try { window.addEventListener('resize', () => reserveForSaveBar()); } catch { }
 
 function renderSaveBar() {
   const bar      = document.getElementById('savebar');
@@ -18573,13 +18435,11 @@ async function saveConfigChanges() {
   if (save) { save.innerHTML = ''; save.append('Save', el('kbd', { text: 'Ctrl' }), el('kbd', { text: 'S' })); }
 
   const ok = r.ok && r.body.ok;
-  // Only re-baseline on success — a failed save must leave the changes (and the bar) exactly as they were.
+  // Re-baseline only on success.
   if (ok) setBaseline(payload);
   else renderSaveBar();
   toast(r.body.message || (ok ? 'Saved.' : 'Save failed.'), ok);
 
-  // Offer the restart at the moment it is needed, rather than leaving the operator to notice later that
-  // the bridge is still running the old settings.
   if (ok && r.body.restartRequired) {
     const settings           = r.body.restartSettings || [];
     renderRestartPending({ required: true, settings });
@@ -18587,13 +18447,12 @@ async function saveConfigChanges() {
   }
 }
 
-// The reviewable list of what a save would write: one row per setting, old value -> new value.
+// Review sheet: one row per changed setting, old -> new.
 function reviewChanges() {
   const list = changes();
   const body = el('div');
   if (!list.length) body.appendChild(el('div', { class: 'cmd-empty', text: 'Nothing has been changed.' }));
 
-  // Grouped by the config section each setting belongs to, matching how the nav is organised.
   const groups = new Map               ();
   list.forEach(c => {
     const g = c.path[0] || 'Config';
@@ -18630,8 +18489,6 @@ function discardAll() {
 function initShell() {
   const on = (id        , fn     ) => { const e      = document.getElementById(id); if (e) e.onclick = fn; };
   on('st-update', checkUpdatesNow);
-  // Not flow.ts's saveConfig, which this once named through the shared bundle: that one skips the
-  // restart offer and then calls the click event as its callback.
   on('btn-save', saveConfigChanges);
   on('btn-review', reviewChanges);
   on('btn-discard', discardAll);
@@ -18640,7 +18497,7 @@ function initShell() {
     load();
   });
 
-  // Narrow screens: the sidebar is a drawer. Any nav click closes it again.
+  // Narrow screens: the sidebar is a drawer; a nav click closes it.
   const closeNav = () => document.body.classList.remove('nav-open');
   on('nav-toggle', () => document.body.classList.toggle('nav-open'));
   on('nav-scrim', closeNav);
@@ -18648,23 +18505,18 @@ function initShell() {
 
   window.addEventListener('keydown', (e     ) => {
     if (e.key === 'Escape' && sheetIsOpen()) { e.preventDefault(); closeSheet(); return; }
-    // Ctrl/⌘+S is what everyone's fingers already do in a form this size.
     if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveConfigChanges(); }
   });
 
-  // Don't let a tab close silently take edits with it.
   window.addEventListener('beforeunload', (e     ) => {
     if (!isDirty()) return;
     e.preventDefault();
     e.returnValue = '';
   });
 
-  // The bar is a pure function of the pending changes, so it repaints whenever they move.
   onDirty(renderSaveBar);
 
-  // The bespoke editors (energy-flow nodes, the overrides table) mutate the same document directly
-  // rather than going through the schema form. Instead of making every one of them report in, re-diff
-  // after any interaction with the page: the document is small, and this runs once per event burst.
+  // Bespoke editors mutate the document directly, so re-diff after any interaction.
   let dirtyTick      = null;
   const scheduleDirty = () => { clearTimeout(dirtyTick); dirtyTick = setTimeout(refreshDirty, 120); };
   const sections = document.getElementById('sections');

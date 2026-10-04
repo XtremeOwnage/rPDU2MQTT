@@ -42,7 +42,7 @@ public sealed class MyPlugin : IIntegration
 
 ## The capabilities
 
-Implement any combination. EmonCMS, for example, is a destination, a history provider and a configuration publisher.
+Implement any combination.
 
 | Interface | For |
 | --- | --- |
@@ -51,11 +51,12 @@ Implement any combination. EmonCMS, for example, is a destination, a history pro
 | `IConfigurationPublisher` | Push *structure* to the far end — entities, feeds, dashboards — and sweep what you no longer own. |
 | `INodeProvider` | Offer nodes the operator could adopt (discovery only; never write config). |
 | `IValueSourcePlugin` | Supply live values for nodes bound to your source type. |
-| `IDeviceSourcePlugin` | Poll hardware into a snapshot — this is how a second PDU vendor is supported. |
+| `IDeviceSourcePlugin` | Poll hardware into a snapshot. |
 | `IDeviceControlPlugin` | Switch its outlets, when the hardware can. |
 | `IIntegrationApi` | Actions beyond the standard ones. |
-| `IStatusProvider` | Decide what your own health means, when the default is not specific enough. |
+| `IStatusProvider` | Decide what your own health means. |
 | `IConfigurablePlugin` | Carry your own settings section. |
+| `IGuiPageProvider` | Ship your own GUI pages. |
 
 ### Receiving data
 
@@ -129,9 +130,30 @@ public IReadOnlyList<IntegrationAction> Actions =>
 - `ActionEffect.Destructive` makes the GUI confirm first.
 - Query and form values arrive on the action context.
 
-## Supplying values, or being a device
+## Your pages
 
-Two capabilities read into the bridge:
+```csharp
+public IReadOnlyList<GuiPage> Pages => [new("my-page", "My Page", "Energy Flow", "☀", "EnergyFlow")];
+public string? PageAsset(string file) => GuiPageAssets.Read(typeof(MyPlugin).Assembly, file);
+```
+
+`GuiPage(Id, Title, Group, Icon, ConfigSection)`:
+
+| Field | Value |
+|-------|-------|
+| `Id` | File name without extension. The host serves `{Id}.js` and `{Id}.css`. |
+| `Title` | Nav entry text. |
+| `Group` | `Sources`, `Energy Flow`, `Integrations`, `Destinations` or `System`. |
+| `Icon` | Nav glyph. Optional. |
+| `ConfigSection` | Config section the page edits. Its unsaved edits count on the nav entry. Optional. |
+
+- Embed `{Id}.js` and, optionally, `{Id}.css` in the plugin assembly.
+- Served from `GET /api/integrations/{id}/pages/{file}`. File names match `^[a-z0-9][a-z0-9-]*\.(js|css)$`.
+- The script is a function body that returns `mount(section, host)`. It runs on the page's first open.
+- `mount` may return `{ show }`. `show` runs each time the page opens.
+- `host`: `api`, `btn`, `el`, `ensure`, `toast`, `state`, `refreshDirty`, `saveConfig`, `openHistorySheet`, `busyInSection`.
+
+## Supplying values, or being a device
 
 ```csharp
 // A node binds { Type: "mything", Metric: "realpower", Settings: { … } } and you supply the value.
@@ -177,4 +199,3 @@ Restart. The log shows `Plugin loaded: MyPlugin.dll — influx.` `RPDU2MQTT_PLUG
 ## Limits
 
 - The Kubernetes CRD does not validate plugin settings. They are stored in the open `Plugins` map.
-- No custom editors. Plugins get the generated settings page and action buttons.

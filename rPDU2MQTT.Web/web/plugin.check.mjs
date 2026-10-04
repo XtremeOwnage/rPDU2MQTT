@@ -1,9 +1,4 @@
-// A plugin needs no TypeScript (#v4).
-//
-// Everything a loaded plugin shows in the GUI is generated: its page from the schema its settings class
-// produced, its nav placement from the group it declared, its buttons from the actions the server derived.
-// Nothing in web/src names a plugin, and this check is what keeps that true — the moment someone special-
-// cases one, a plugin stops being a drop-in DLL and becomes a change to the bundle.
+// Checks that an unknown plugin gets a nav entry, generated fields and action buttons from the schema alone.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -23,7 +18,12 @@ const pluginSection = {
     { key: 'BatchSize', label: 'BatchSize', type: 'int', default: 100, min: 1, max: 1000 },
   ],
 };
-const schema = [...base, pluginSection];
+// A plugin in the Sources group.
+const sourceSection = {
+  key: 'busreader', label: 'Bus Reader', type: 'object', isPlugin: true, group: 'Sources',
+  properties: [{ key: 'Enabled', label: 'Enabled', type: 'bool', default: false }],
+};
+const schema = [...base, pluginSection, sourceSection];
 
 const cfg = { EnergyFlow: { Nodes: [], Links: [] } };
 const integrations = {
@@ -49,16 +49,25 @@ vm.createContext(sandbox);
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 await new Promise(r => setTimeout(r, 60));
 
-// 1. It has a nav entry, in the group it declared — not in System, where anything ungrouped lands.
+// 1. A nav entry in its declared group.
 const links = query(getEl('nav'), 'a', true);
 const link = links.find(a => a.dataset.label === 'Acme Flux');
 if (!link) fail(`no nav entry for the plugin; saw ${links.map(a => a.dataset.label).join(', ')}`);
+
+// PDU tabs stay under the PDU; the Sources plugin follows them.
+const order = links.map(a => a.dataset.label);
+const want = ['Vertiv rPDU', 'Overrides', 'Live Data', 'PDU Control', 'Paths', 'Bus Reader'];
+const got = order.filter(l => want.includes(l));
+if (got.join() !== want.join()) fail(`Sources is ordered ${got.join(', ')}, not ${want.join(', ')}`);
+const busLink = links.find(a => a.dataset.label === 'Bus Reader');
+if (busLink.classList.contains('nav-child')) fail('the Sources plugin is indented as a child');
+if (!links.find(a => a.dataset.label === 'Live Data').classList.contains('nav-child')) fail('the PDU tabs are not indented under the PDU');
 
 const groupTitles = query(getEl('nav'), '.nav-group-title', true).map(t => t.textContent);
 if (groupTitles.length && !groupTitles.includes('Destinations'))
   fail(`no Destinations group to place it in: ${groupTitles.join(', ')}`);
 
-// 2. Its page renders its settings as typed controls, from the schema alone.
+// 2. Its settings render as typed controls.
 link.click();
 await new Promise(r => setTimeout(r, 250));
 const sec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
@@ -68,21 +77,19 @@ const fields = query(sec, '.field', true).map(f => f.dataset.path).filter(Boolea
 for (const want of ['Plugins.acmeflux.Enabled', 'Plugins.acmeflux.Url', 'Plugins.acmeflux.BatchSize'])
   if (!fields.includes(want)) fail(`'${want}' did not render; got ${fields.join(', ') || '(none)'}`);
 
-// 3. It binds under Plugins/<id> — Config was compiled before the plugin existed.
+// 3. It binds under Plugins/<id>.
 if (!sandbox.__state?.data?.Plugins?.acmeflux && !cfg.Plugins?.acmeflux) {
   const bound = query(sec, 'input', true).length > 0;
   if (!bound) fail('the plugin page rendered no inputs, so nothing is bound');
 }
 
-// 4. Its buttons come from what the server said it can do, and are not named anywhere in web/src.
+// 4. Its buttons come from the server's declared actions.
 await new Promise(r => setTimeout(r, 120));
 const labels = query(sec, 'button', true).map(b => b.textContent);
 for (const want of ['Test', 'Flush now'])
   if (!labels.includes(want)) fail(`no '${want}' button; saw ${labels.join(', ') || '(none)'}`);
 
-// 5. And the raw Plugins map is NOT offered as well. It is the storage behind the per-plugin pages;
-//    rendering it too gives two editors for one thing, and the raw one is a free-text box over a
-//    dictionary of objects that nobody can usefully type into.
+// 5. The raw Plugins map is not rendered as its own page.
 if (query(getEl('nav'), 'a', true).some(a => a.dataset.label === 'Plugins'))
   fail('the raw Plugins map is rendered as its own page as well as the plugin sections');
 

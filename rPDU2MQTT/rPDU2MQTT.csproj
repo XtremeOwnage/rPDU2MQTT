@@ -4,9 +4,7 @@
 		<OutputType>Exe</OutputType>
 		<TargetFramework>net10.0</TargetFramework>
 		<Version>2.0.0</Version>
-		<!-- Human-readable app version surfaced in the GUI / MQTT discovery / heartbeat.
-		     Overridden at build time via /p:InformationalVersion=... (see Dockerfile + docker-publish.yml).
-		     Releases get a clean semver; dev builds get a traceable pre-release string. -->
+		<!-- App version shown in GUI / MQTT discovery / heartbeat; overridden via /p:InformationalVersion. -->
 		<InformationalVersion>0.0.0-local</InformationalVersion>
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 		<ImplicitUsings>enable</ImplicitUsings>
@@ -29,7 +27,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<!-- Composition root references every layer. -->
 		<ProjectReference Include="..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" />
 		<ProjectReference Include="..\rPDU2MQTT.Engine\rPDU2MQTT.Engine.csproj" />
 		<ProjectReference Include="..\rPDU2MQTT.Api\rPDU2MQTT.Api.csproj" />
@@ -37,7 +34,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<!-- Host composition (DI wiring) + logging setup use HiveMQ + Serilog directly. -->
 		<PackageReference Include="HiveMQtt" Version="0.47.1" />
 		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
 		<PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
