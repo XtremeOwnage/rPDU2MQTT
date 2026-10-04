@@ -3,61 +3,27 @@ using System.Text.Json.Nodes;
 
 namespace rPDU2MQTT.Core.Integrations;
 
-/// <summary>
-/// An integration that carries its own configuration section.
-///
-/// <para>
-/// A built-in integration hangs its config off a property on <c>Config</c>, which is typed all the way
-/// through — the GUI, the YAML round-trip, the CRD and the change diff all come free. An externally loaded
-/// plugin cannot do that: <c>Config</c> is compiled before the plugin exists. So it declares a config
-/// <i>type</i> instead, and its section is stored under <c>Config.Plugins[id]</c> and bound to that type on
-/// load.
-/// </para>
-/// <para>
-/// The plugin author still writes an ordinary class with ordinary <c>[Description]</c> and
-/// <c>[DefaultValue]</c> attributes and gets a rendered settings page for it, because the GUI's form is
-/// driven by a schema generated at runtime — not compiled into the bundle. That is the property that makes
-/// runtime-loaded plugins possible at all here, and it was already true before anyone needed it to be.
-/// </para>
-/// </summary>
+/// <summary>An integration that carries its own configuration section, stored under <c>Config.Plugins[id]</c>.</summary>
 public interface IConfigurablePlugin
 {
-    /// <summary>
-    /// The plugin's settings class. Plain properties with <c>[Description]</c>/<c>[DefaultValue]</c>; the
-    /// schema generator reads it exactly as it reads a built-in section.
-    /// </summary>
+    /// <summary>The plugin's settings class.</summary>
     Type ConfigType { get; }
 
-    /// <summary>
-    /// Hand the plugin its settings, bound to <see cref="ConfigType"/>. Called on load and again whenever
-    /// the configuration is saved, so a plugin follows a live edit the way built-ins do.
-    /// </summary>
+    /// <summary>Applies settings bound to <see cref="ConfigType"/>; called on load and on every config save.</summary>
     void ApplyConfig(object settings);
 }
 
-/// <summary>
-/// Binds the untyped <c>Config.Plugins</c> sections to each plugin's own settings class, and back.
-/// </summary>
-/// <remarks>
-/// JSON is the intermediate form because the config document already round-trips through it for the GUI,
-/// and because a plugin's type is not known to the YAML serialiser at startup.
-/// </remarks>
+/// <summary>Binds <c>Config.Plugins</c> sections to each plugin's settings class.</summary>
 public static class PluginConfigBinder
 {
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNameCaseInsensitive = true,
         WriteIndented = false,
-        // A belt-and-braces companion to the scalar typing above: a settings class that declares an int
-        // still binds if a value slips through as a string.
         NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
     };
 
-    /// <summary>
-    /// Give <paramref name="plugin"/> its section from <paramref name="sections"/>, or a default-constructed
-    /// one when it has never been configured. A section that will not bind is reported and the plugin gets
-    /// defaults — a malformed block for one plugin must not stop the others loading.
-    /// </summary>
+    /// <summary>Binds the plugin's section, falling back to defaults when missing or unreadable.</summary>
     public static object Bind(
         IConfigurablePlugin plugin, string id, IDictionary<string, object?> sections, Action<string>? warn = null)
     {
@@ -81,35 +47,50 @@ public static class PluginConfigBinder
         return settings;
     }
 
-    /// <summary>The section as it should be stored, for writing a default block back out on first load.</summary>
+    /// <summary>Serialises settings to a storable node.</summary>
     public static object? ToNode(object settings)
         => JsonNode.Parse(JsonSerializer.Serialize(settings, settings.GetType(), Options));
 
-    /// <summary>
-    /// Whatever the YAML loader produced — nested dictionaries, lists, scalars — as JSON.
-    /// </summary>
-    /// <remarks>
-    /// YamlDotNet yields <c>Dictionary&lt;object, object&gt;</c> with boxed keys, which System.Text.Json
-    /// refuses to serialise directly. Walking it here is what lets a plugin declare an ordinary settings
-    /// class and have a YAML block bind to it.
-    /// </remarks>
+    /// <summary>Converts YAML loader output (nested dictionaries, lists, scalars) to JSON.</summary>
     public static JsonNode? ToJson(object? value)
     {
         switch (value)
         {
             case null: return null;
-            case JsonNode node: return node;
+            case JsonNode node: return ToJson(JsonSerializer.SerializeToElement(node));
+            case JsonElement el:
+                switch (el.ValueKind)
+                {
+                    case JsonValueKind.Object:
+                    {
+                        var obj = new JsonObject();
+                        foreach (var p in el.EnumerateObject())
+                            if (ToJson(p.Value) is { } v) obj[p.Name] = v;
+                        return obj;
+                    }
+                    case JsonValueKind.Array:
+                    {
+                        var arr = new JsonArray();
+                        foreach (var item in el.EnumerateArray()) arr.Add(ToJson(item));
+                        return arr;
+                    }
+                    case JsonValueKind.String: return ToJson(el.GetString());
+                    case JsonValueKind.Number: return el.TryGetInt64(out var n) ? JsonValue.Create(n) : JsonValue.Create(el.GetDouble());
+                    case JsonValueKind.True: return JsonValue.Create(true);
+                    case JsonValueKind.False: return JsonValue.Create(false);
+                    default: return null;
+                }
             case System.Collections.IDictionary map:
             {
                 var obj = new JsonObject();
+                // Blank fields are skipped so defaults apply.
                 foreach (System.Collections.DictionaryEntry e in map)
-                    if (e.Key?.ToString() is { } key) obj[key] = ToJson(e.Value);
+                    if (e.Key?.ToString() is { } key && ToJson(e.Value) is { } v) obj[key] = v;
                 return obj;
             }
-            // YAML scalars arrive as strings, so "true" and "10" have to be recovered as the types a
-            // settings class actually declares — otherwise every bool and every number fails to bind and
-            // the plugin silently runs on defaults.
+            // YAML scalars arrive as strings; recover bools and numbers.
             case string s:
+                if (s.Length == 0) return null;
                 if (bool.TryParse(s, out var b)) return JsonValue.Create(b);
                 if (long.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var i)) return JsonValue.Create(i);
                 if (double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d)) return JsonValue.Create(d);
@@ -120,6 +101,11 @@ public static class PluginConfigBinder
                 foreach (var item in list) arr.Add(ToJson(item));
                 return arr;
             }
+            case bool flag: return JsonValue.Create(flag);
+            case int or long or short or byte or uint or ulong or ushort or sbyte:
+                return JsonValue.Create(Convert.ToInt64(value, System.Globalization.CultureInfo.InvariantCulture));
+            case double or float or decimal:
+                return JsonValue.Create(Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture));
             default: return JsonValue.Create(value.ToString());
         }
     }
