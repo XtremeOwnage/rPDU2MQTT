@@ -11801,9 +11801,7 @@ function addTrendsSection(nav     , sections     ) {
           const nsLines         = [{ label: 'Net solar', color: KIND_COLOR.solar, values: pct }];
           const top = Math.max(100, ...pct.map(v => v ?? 0));
           p.section(p.perDay() ? 'Net solar coverage per day' : 'Net solar coverage',
-            'Solar produced as a share of the home’s energy'
-            + (load ? '' : ', with the home taken as the balance of the measured sources')
-            + '. Above 100% is more solar than the home used. A day missing either figure is left empty.',
+            'Solar produced ÷ home energy.',
             barChart({ days, lines: nsLines, units: '%', stacked: false, kind: p.kind(), max: top, pct: true, ref: 100, partial, fitTo: p.fitTo() }), nsLines);
           drawn++;
         }
