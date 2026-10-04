@@ -182,6 +182,16 @@ public class KubernetesConfigTests
         Assert.DoesNotContain("- America/", block);
     }
 
+    [Fact]
+    public void SourceSettings_AcceptAnyValue()
+    {
+        var yaml = CrdGenerator.ToYaml();
+        var at = yaml.IndexOf("Settings:", yaml.IndexOf("Sources:", StringComparison.Ordinal), StringComparison.Ordinal);
+        var block = yaml[at..yaml.IndexOf("StaleAfterSeconds:", at, StringComparison.Ordinal)];
+        var values = block[block.IndexOf("additionalProperties:", StringComparison.Ordinal)..];
+        Assert.DoesNotContain("type: object", values[..values.IndexOf("description:", StringComparison.Ordinal)]);
+    }
+
     private static string FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
