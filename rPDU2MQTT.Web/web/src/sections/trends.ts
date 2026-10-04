@@ -40,33 +40,12 @@ export function addTrendsSection(nav: any, sections: any) {
         const gridLines: Line[] = [{ label: 'Import', color: KIND_COLOR.grid, values: sumOf(gridSupply) }];
         if (exports_) gridLines.push({ label: 'Export', color: '#6fb0e0', values: exports_ });
         p.section(p.perDay() ? 'Grid per day' : 'Grid',
-          'Every grid node. Import above the line, export below it'
-          + (exports_ ? '.' : ' — no export series is in history for this window, so only import is charted.'),
+          exports_ ? 'Import above zero, export below.' : 'Import.',
           barChart({ days, lines: gridLines, units, stacked: true, kind: p.kind(), partial, fitTo: p.fitTo() }), gridLines);
         drawn++;
       }
 
-      // --- Self-sufficiency ---------------------------------------------------------------------------
       const solar = byKind('solar'), batt = byKind('battery'), load = byKind('home');
-      // A share of energy over a period; instantaneous power is a different quantity.
-      if (p.summable() && gridIn && (load || solar)) {
-        const imported = sumOf(gridSupply);
-        const pct = days.map((_, d) => selfSufficiencyPct(homeEnergy({
-          ...(solar ? { solar: solar[d] } : {}),
-          ...(batt ? { battery: batt[d] } : {}),
-          ...(gridIn ? { grid: gridIn[d] } : {}),
-          ...(load ? { load: load[d] } : {}),
-        }), imported[d]));
-        if (pct.some(v => v != null)) {
-          const ssLines: Line[] = [{ label: 'Self-sufficiency', color: KIND_COLOR.solar, values: pct }];
-          p.section(p.perDay() ? 'Self-sufficiency per day' : 'Self-sufficiency',
-            'The share of the home’s energy that did not come from the grid'
-            + (load ? '.' : ', with the home taken as the balance of the measured sources.')
-            + ' A day missing either figure is left empty rather than estimated.',
-            barChart({ days, lines: ssLines, units: '%', stacked: false, kind: p.kind(), max: 100, pct: true, partial, fitTo: p.fitTo() }), ssLines);
-          drawn++;
-        }
-      }
 
       // --- Net solar coverage ---------------------------------------------------------------------------
       if (p.summable() && solar && (load || gridIn)) {
@@ -82,6 +61,25 @@ export function addTrendsSection(nav: any, sections: any) {
           p.section(p.perDay() ? 'Net solar coverage per day' : 'Net solar coverage',
             'Solar produced ÷ home energy.',
             barChart({ days, lines: nsLines, units: '%', stacked: false, kind: p.kind(), max: top, pct: true, ref: 100, partial, fitTo: p.fitTo() }), nsLines);
+          drawn++;
+        }
+      }
+
+      // --- Self-sufficiency ---------------------------------------------------------------------------
+      // A share of energy over a period; instantaneous power is a different quantity.
+      if (p.summable() && gridIn && (load || solar)) {
+        const imported = sumOf(gridSupply);
+        const pct = days.map((_, d) => selfSufficiencyPct(homeEnergy({
+          ...(solar ? { solar: solar[d] } : {}),
+          ...(batt ? { battery: batt[d] } : {}),
+          ...(gridIn ? { grid: gridIn[d] } : {}),
+          ...(load ? { load: load[d] } : {}),
+        }), imported[d]));
+        if (pct.some(v => v != null)) {
+          const ssLines: Line[] = [{ label: 'Self-sufficiency', color: KIND_COLOR.solar, values: pct }];
+          p.section(p.perDay() ? 'Self-sufficiency per day' : 'Self-sufficiency',
+            'Home energy not from the grid.',
+            barChart({ days, lines: ssLines, units: '%', stacked: false, kind: p.kind(), max: 100, pct: true, partial, fitTo: p.fitTo() }), ssLines);
           drawn++;
         }
       }
@@ -102,8 +100,7 @@ export function addTrendsSection(nav: any, sections: any) {
         });
       if (supplyLines.length > 1) {
         p.section(p.perDay() ? `Where the day’s ${p.metricName()} came from` : `Where the ${p.metricName()} is coming from`,
-          'Each kind summed across its nodes. What went back — battery charge, grid export — is below the line, '
-          + 'so the same energy is not counted as produced and then again as returned.',
+          'Supply above zero; battery charge and grid export below.',
           barChart({ days, lines: supplyLines, units, stacked: true, kind: p.kind(), partial, fitTo: p.fitTo() }), supplyLines);
         drawn++;
       }
@@ -155,8 +152,8 @@ export function addTrendsSection(nav: any, sections: any) {
         const num = (v: number | null) => (v == null ? '—' : Math.round(v * scale) / scale === 0 ? '0' : (Math.round(v * scale) / scale).toLocaleString('en-US'));
         const table = el('table', { class: 'trend-table' });
         const why: Record<string, string> = {
-          Load: 'What the home used: its own reading where something measures it, else what the measured sources leave for it.',
-          'Net grid': 'Grid used less grid exported — what the meter nets out to. A day missing either figure is left empty.',
+          Load: 'Measured load, else the balance of the measured sources.',
+          'Net grid': 'Grid used − grid exported.',
         };
         table.appendChild(el('thead', {}, el('tr', {}, el('th', { text: p.perDay() ? 'Day' : 'At' }),
           ...shown.map(([label]) => el('th', { text: `${label} (${units})`, title: why[label] || '' })))));
@@ -170,7 +167,7 @@ export function addTrendsSection(nav: any, sections: any) {
             text: num(values[d]),
             class: values[d] != null && resets[label]?.[d] ? 'is-reset' : '',
             title: values[d] != null && resets[label]?.[d]
-              ? 'The counter behind this was re-based during the day, so this is what is known to have run since — the day may have been more.' : '',
+              ? 'Counter re-based during the day; known to have run since.' : '',
           })));
           rows.appendChild(tr);
         });
@@ -182,7 +179,7 @@ export function addTrendsSection(nav: any, sections: any) {
           const known = values.filter((v): v is number => v != null);
           foot.appendChild(el('td', {
             text: known.length ? num(known.reduce((a, v) => a + v, 0)) : '—',
-            title: known.length === values.length ? '' : `${values.length - known.length} of ${values.length} readings are missing, so this is the sum of what is known.`,
+            title: known.length === values.length ? '' : `${values.length - known.length} of ${values.length} readings are missing.`,
             class: known.length === values.length ? '' : 'is-partial',
           }));
         });
@@ -192,7 +189,7 @@ export function addTrendsSection(nav: any, sections: any) {
       }
 
       if (!drawn)
-        p.charts.appendChild(el('div', { class: 'desc', text: 'Nothing about the whole system to chart in this window: no grid, solar or battery node reported. Each node’s own series is on the Node Trends page.' }));
+        p.charts.appendChild(el('div', { class: 'desc', text: 'No grid, solar or battery data in this window.' }));
 
       const gaps = days.filter((_, d) => !all.some((s: any) => s.values[d] != null)).length;
       p.status.textContent = p.statusLine(gaps);
