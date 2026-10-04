@@ -78,6 +78,21 @@ public class PluginContractTests
         Assert.Equal(10, plugin.Settings.IntervalSeconds);
     }
 
+    [Theory]
+    [InlineData("\"\"")]
+    [InlineData("null")]
+    public void BlankPluginSettings_KeepTheirDefaults(string blank)
+    {
+        var plugin = new ExamplePlugin();
+        var cfg = ConfigSchema.FromJson($$"""{ "Plugins": { "example": { "Enabled": true, "Path": {{blank}}, "IntervalSeconds": {{blank}} } } }""");
+
+        PluginConfigBinder.Bind(plugin, "example", cfg.Plugins!);
+
+        Assert.True(plugin.Settings.Enabled);
+        Assert.Equal("/tmp/out.txt", plugin.Settings.Path);
+        Assert.Equal(30, plugin.Settings.IntervalSeconds);
+    }
+
     [Fact]
     public void AnUnreadableSection_LeavesThePluginOnDefaults_AndDoesNotThrow()
     {
