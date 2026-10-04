@@ -1,6 +1,6 @@
 // Trends: the whole system over the chosen window — the grid, self-sufficiency, and where the energy came from.
 import { el } from '../helpers.js';
-import { homeEnergy, selfSufficiencyPct, sumKnown } from '../energy.js';
+import { homeEnergy, selfSufficiencyPct, netSolarPct, sumKnown } from '../energy.js';
 import { barChart, KIND_COLOR, type Line } from '../charts.js';
 import { trendsPage, isReturn, signed } from './trends-shared.js';
 
@@ -64,6 +64,26 @@ export function addTrendsSection(nav: any, sections: any) {
             + (load ? '.' : ', with the home taken as the balance of the measured sources.')
             + ' A day missing either figure is left empty rather than estimated.',
             barChart({ days, lines: ssLines, units: '%', stacked: false, kind: p.kind(), max: 100, pct: true, partial, fitTo: p.fitTo() }), ssLines);
+          drawn++;
+        }
+      }
+
+      // --- Net solar coverage ---------------------------------------------------------------------------
+      if (p.summable() && solar && (load || gridIn)) {
+        const pct = days.map((_, d) => netSolarPct(homeEnergy({
+          solar: solar[d],
+          ...(batt ? { battery: batt[d] } : {}),
+          ...(gridIn ? { grid: gridIn[d] } : {}),
+          ...(load ? { load: load[d] } : {}),
+        }), solar[d]));
+        if (pct.some(v => v != null)) {
+          const nsLines: Line[] = [{ label: 'Net solar', color: KIND_COLOR.solar, values: pct }];
+          const top = Math.max(100, ...pct.map(v => v ?? 0));
+          p.section(p.perDay() ? 'Net solar coverage per day' : 'Net solar coverage',
+            'Solar produced as a share of the home’s energy'
+            + (load ? '' : ', with the home taken as the balance of the measured sources')
+            + '. Above 100% is more solar than the home used. A day missing either figure is left empty.',
+            barChart({ days, lines: nsLines, units: '%', stacked: false, kind: p.kind(), max: top, pct: true, ref: 100, partial, fitTo: p.fitTo() }), nsLines);
           drawn++;
         }
       }

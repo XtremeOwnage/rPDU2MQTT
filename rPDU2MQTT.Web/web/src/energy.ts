@@ -41,6 +41,12 @@ export function netSelfProducedPct(home: number | null, gridNet: number | null):
   return Math.max(0, Math.min(100, ((home - gridNet) / home) * 100));
 }
 
+/// Solar produced as a share of the home's energy, uncapped: above 100 when solar out-produced the home.
+export function netSolarPct(home: number | null, solar: number | null): number | null {
+  if (home == null || solar == null || home <= 0) return null;
+  return Math.max(0, (solar / home) * 100);
+}
+
 /// Colour band for a share: 1 above 90, 2 above 75, 3 above 50, 4 above 25, else 5.
 export function shareBand(pct: number): number {
   return pct > 90 ? 1 : pct > 75 ? 2 : pct > 50 ? 3 : pct > 25 ? 4 : 5;

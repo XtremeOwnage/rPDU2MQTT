@@ -1400,6 +1400,12 @@ function netSelfProducedPct(home               , gridNet               )        
   return Math.max(0, Math.min(100, ((home - gridNet) / home) * 100));
 }
 
+/// Solar produced as a share of the home's energy, uncapped: above 100 when solar out-produced the home.
+function netSolarPct(home               , solar               )                {
+  if (home == null || solar == null || home <= 0) return null;
+  return Math.max(0, (solar / home) * 100);
+}
+
 /// Colour band for a share: 1 above 90, 2 above 75, 3 above 50, 4 above 25, else 5.
 function shareBand(pct        )         {
   return pct > 90 ? 1 : pct > 75 ? 2 : pct > 50 ? 3 : pct > 25 ? 4 : 5;
@@ -1838,6 +1844,8 @@ function barChart(opts
 
   // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
   svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
+  if (opts.ref != null && opts.ref >= trough && opts.ref <= peak)
+    svg.appendChild(svgTag('line', { x1: padL, y1: y(opts.ref), x2: W - padR, y2: y(opts.ref), stroke: 'var(--muted)', 'stroke-width': 1, 'stroke-dasharray': '4 4', class: 'trend-ref' }));
 
   // A full-height hit area per day, over the bars.
   days.forEach((day, d) => {
@@ -11777,6 +11785,26 @@ function addTrendsSection(nav     , sections     ) {
             + (load ? '.' : ', with the home taken as the balance of the measured sources.')
             + ' A day missing either figure is left empty rather than estimated.',
             barChart({ days, lines: ssLines, units: '%', stacked: false, kind: p.kind(), max: 100, pct: true, partial, fitTo: p.fitTo() }), ssLines);
+          drawn++;
+        }
+      }
+
+      // --- Net solar coverage ---------------------------------------------------------------------------
+      if (p.summable() && solar && (load || gridIn)) {
+        const pct = days.map((_, d) => netSolarPct(homeEnergy({
+          solar: solar[d],
+          ...(batt ? { battery: batt[d] } : {}),
+          ...(gridIn ? { grid: gridIn[d] } : {}),
+          ...(load ? { load: load[d] } : {}),
+        }), solar[d]));
+        if (pct.some(v => v != null)) {
+          const nsLines         = [{ label: 'Net solar', color: KIND_COLOR.solar, values: pct }];
+          const top = Math.max(100, ...pct.map(v => v ?? 0));
+          p.section(p.perDay() ? 'Net solar coverage per day' : 'Net solar coverage',
+            'Solar produced as a share of the home’s energy'
+            + (load ? '' : ', with the home taken as the balance of the measured sources')
+            + '. Above 100% is more solar than the home used. A day missing either figure is left empty.',
+            barChart({ days, lines: nsLines, units: '%', stacked: false, kind: p.kind(), max: top, pct: true, ref: 100, partial, fitTo: p.fitTo() }), nsLines);
           drawn++;
         }
       }
