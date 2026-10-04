@@ -152,6 +152,9 @@ public static class CrdGenerator
         return schema;
     }
 
+    /// <summary>A <c>Dictionary&lt;string, object?&gt;</c> value: any JSON, not only objects.</summary>
+    private static bool IsUntyped(SchemaNode v) => v.Type == "object" && (v.Properties is null || v.Properties.Count == 0);
+
     private static object SchemaFor(SchemaNode n)
     {
         Dictionary<string, object?> s = n.Type switch
@@ -169,7 +172,9 @@ public static class CrdGenerator
             {
                 ["type"] = "object",
                 ["x-kubernetes-preserve-unknown-fields"] = true,
-                ["additionalProperties"] = n.ValueSchema is null ? new Dictionary<string, object?> { ["type"] = "string" } : SchemaFor(n.ValueSchema),
+                ["additionalProperties"] = n.ValueSchema is null ? new Dictionary<string, object?> { ["type"] = "string" }
+                    : IsUntyped(n.ValueSchema) ? new Dictionary<string, object?> { ["x-kubernetes-preserve-unknown-fields"] = true }
+                    : SchemaFor(n.ValueSchema),
             },
             "list" => new()
             {
@@ -179,7 +184,7 @@ public static class CrdGenerator
             _ => new() { ["type"] = "string" }, // string + password
         };
 
-        if (!string.IsNullOrEmpty(n.Description) && s["type"] is not null)
+        if (!string.IsNullOrEmpty(n.Description) && s.ContainsKey("type"))
             s["description"] = n.Description;
         if (n.Min is { } min && (n.Type == "int" || n.Type == "double"))
             s["minimum"] = min;
