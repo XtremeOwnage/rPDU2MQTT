@@ -6,10 +6,6 @@ using Xunit;
 
 namespace rPDU2MQTT.Tests;
 
-/// <summary>
-/// The plugin contract as an author meets it: declare an id and a settings class, get configuration,
-/// a rendered page, actions and health without writing any of them.
-/// </summary>
 public class PluginContractTests
 {
     private sealed class ExampleSettings
@@ -48,7 +44,7 @@ public class PluginContractTests
         ];
     }
 
-    /// <summary>The YAML loader's shape: nested dictionaries with boxed keys, every scalar a string.</summary>
+    /// <summary>Mimics YAML loader output: boxed-key dictionaries with string scalars.</summary>
     private static Dictionary<string, object?> YamlSection(params (string Key, object Value)[] fields)
     {
         var inner = new Dictionary<object, object>();
@@ -59,9 +55,6 @@ public class PluginContractTests
     [Fact]
     public void APluginBindsItsOwnSettings_FromWhatYamlProduced()
     {
-        // Every scalar arrives as a string. Binding "true" to a bool and "10" to an int is what makes an
-        // ordinary settings class work at all — without it every bool and number silently kept its default,
-        // so a plugin an operator had switched on simply never ran.
         var plugin = new ExamplePlugin();
         var sections = YamlSection(("Enabled", "true"), ("Path", "/var/log/x.txt"), ("IntervalSeconds", "10"));
 
@@ -73,11 +66,21 @@ public class PluginContractTests
     }
 
     [Fact]
+    public void APluginBindsItsOwnSettings_FromAJsonConfig()
+    {
+        var plugin = new ExamplePlugin();
+        var cfg = ConfigSchema.FromJson("""{ "Plugins": { "example": { "Enabled": true, "Path": "/var/log/x.txt", "IntervalSeconds": 10 } } }""");
+
+        PluginConfigBinder.Bind(plugin, "example", cfg.Plugins!);
+
+        Assert.True(plugin.Settings.Enabled);
+        Assert.Equal("/var/log/x.txt", plugin.Settings.Path);
+        Assert.Equal(10, plugin.Settings.IntervalSeconds);
+    }
+
+    [Fact]
     public void AnUnreadableSection_LeavesThePluginOnDefaults_AndDoesNotThrow()
     {
-        // A malformed block for one plugin must not stop the others loading, and must not stop the bridge:
-        // Config.Plugins was typed as JsonNode once, which YamlDotNet cannot construct, and a config
-        // carrying any Plugins section failed to parse at all.
         var plugin = new ExamplePlugin();
         var warnings = new List<string>();
         var sections = new Dictionary<string, object?> { ["example"] = "not an object" };
@@ -92,14 +95,12 @@ public class PluginContractTests
     [Fact]
     public void APluginsSettingsClass_BecomesARenderedPage()
     {
-        // No TypeScript ships with a plugin. The GUI's form is drawn from this, so a settings class has to
-        // arrive as typed fields with their descriptions and defaults intact.
         var plugin = new ExamplePlugin();
         var schema = ConfigSchema.Build([(plugin.Id, plugin.DisplayName, plugin.ConfigType, plugin.Group.ToString())]);
 
         var section = schema.Single(n => n.Key == "example");
-        Assert.True(section.IsPlugin);                     // so the form binds it under Config.Plugins
-        Assert.Equal("Destinations", section.Group);       // so it lands in the right nav group
+        Assert.True(section.IsPlugin);
+        Assert.Equal("Destinations", section.Group);
         Assert.Equal("bool", section.Properties!.Single(p => p.Key == "Enabled").Type);
         Assert.Equal("int", section.Properties!.Single(p => p.Key == "IntervalSeconds").Type);
         Assert.Equal("Where to write it.", section.Properties!.Single(p => p.Key == "Path").Description);
@@ -111,10 +112,8 @@ public class PluginContractTests
         var plugin = new ExamplePlugin();
         var actions = IntegrationActions.For(plugin);
 
-        // probe comes from IIntegration itself — a plugin declares nothing to get it.
         Assert.Contains(actions, a => a.Name == IntegrationActions.Probe);
         Assert.Contains(actions, a => a.Name == "peek");
-        // It publishes nothing, so it is not offered a publish or a sweep.
         Assert.DoesNotContain(actions, a => a.Name == IntegrationActions.Publish);
         Assert.DoesNotContain(actions, a => a.Name == IntegrationActions.Sweep);
     }
@@ -139,11 +138,9 @@ public class PluginContractTests
         var cfg = new Config();
         var status = new IntegrationStatus();
 
-        // Off is not a problem, and must not be coloured like one.
         Assert.Equal(HealthLevel.Off, IntegrationHealthDefaults.For(plugin, cfg, status.For(plugin.Id)).Level);
 
         plugin.Settings.Enabled = true;
-        // Enabled and yet to report is its own state — not healthy, not failing.
         Assert.Equal(HealthLevel.Warn, IntegrationHealthDefaults.For(plugin, cfg, status.For(plugin.Id)).Level);
 
         status.RecordSuccess(plugin.Id, 12);
@@ -162,7 +159,7 @@ public class PluginContractTests
 
         Assert.Equal(["destination", "actions"], IntegrationRegistry.Capabilities(registry.ById("example")!));
         Assert.NotNull(registry.Action("example", "peek"));
-        Assert.NotNull(registry.Action("EXAMPLE", "PEEK"));   // ids and actions are matched case-insensitively
+        Assert.NotNull(registry.Action("EXAMPLE", "PEEK"));
         Assert.Null(registry.Action("example", "nope"));
     }
 }
