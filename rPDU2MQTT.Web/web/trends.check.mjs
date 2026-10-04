@@ -71,7 +71,7 @@ if (!asked.length || !/days=31/.test(asked[0]) || !/metric=energy(&|$)/.test(ask
 
 const charts = query(sec, 'svg', true);
 const headings = query(sec, 'h3', true).map(h => h.textContent);
-for (const want of ['Grid per day', 'Self-sufficiency per day', 'Where the day’s energy came from'])
+for (const want of ['Grid per day', 'Self-sufficiency per day', 'Net solar coverage per day', 'Where the day’s energy came from'])
   if (!headings.includes(want)) fail(`no "${want}" chart (got: ${headings.join(', ')})`);
 
 // The page opens as stacked areas.
@@ -143,6 +143,13 @@ if (!query(sandbox.document.body, '.trend-card').textContent.includes('70.97')) 
 ssHits.find(h => h.attrs['data-day'] === '2026-08-03').dispatch('mouseenter', { clientX: 10, clientY: 10 });
 if (!/no reading|—/.test(query(sandbox.document.body, '.trend-card').textContent)) fail('a day missing an input was given a percentage anyway');
 
+// Net solar on 2026-08-05: 28 of the home's 31: 90.32%, with a reference line at 100%.
+const nsChart = charts[headings.indexOf('Net solar coverage per day')];
+query(nsChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit')
+  .find(h => h.attrs['data-day'] === '2026-08-05').dispatch('mouseenter', { clientX: 10, clientY: 10 });
+if (!query(sandbox.document.body, '.trend-card').textContent.includes('90.32')) fail('net solar coverage for the day is wrong');
+if (!query(nsChart, 'line', true).some(l => l.attrs.class === 'trend-ref')) fail('no 100% line on the net solar chart');
+
 // Charge and export are below the line and subtract: 28 + 7 + 9 - 9 - 4 = 31.
 const supplyChart = charts[headings.indexOf('Where the day’s energy came from')];
 query(supplyChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit')
@@ -178,7 +185,7 @@ rangeSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
 const intraHeads = query(sec, 'h3', true).map(h => h.textContent);
 if (!intraHeads.includes('Grid')) fail(`the grid is not charted within a day: ${intraHeads.join(', ')}`);
-if (intraHeads.some(h => /Self-sufficiency/.test(h))) fail('self-sufficiency was drawn from instantaneous power');
+if (intraHeads.some(h => /Self-sufficiency|Net solar/.test(h))) fail('a share of energy was drawn from instantaneous power');
 
 // The chart type applies here too. Stacking is not a choice on this page: import and export, supply and
 // return have to net against each other.

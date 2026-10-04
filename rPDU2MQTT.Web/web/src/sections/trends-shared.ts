@@ -171,7 +171,7 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     return customRange({ from: to - w, to });
   };
 
-  const intervalSel = el('select', { title: 'How far apart the samples are. Auto fits them to the width of the chart; per day is one total for each day.' }) as HTMLSelectElement;
+  const intervalSel = el('select', { title: 'Sample spacing. Auto fits the chart width.' }) as HTMLSelectElement;
   INTERVALS.forEach(([v, t]) => intervalSel.appendChild(el('option', { value: v, text: t })));
   intervalSel.value = 'auto';
   // Per day only exists across days.
@@ -198,7 +198,7 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     { metric: 'realpower', units: 'W', epoch: 'instant' },
     { metric: 'energy', units: 'kWh', epoch: 'lifetime' },
   ];
-  const metricSel = el('select', { title: 'Which measurement to chart. What the history backend was given is what it can be asked for.' }) as HTMLSelectElement;
+  const metricSel = el('select', { title: 'Measurement to chart.' }) as HTMLSelectElement;
   let metricChosen = false;
   const unitsOf = (m: string) => (chartable().find(x => x.metric === m) || { units: '' }).units;
   const epochOf = (m: string) => (chartable().find(x => x.metric === m) || {}).epoch || '';
@@ -234,7 +234,7 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   const stackBox = el('input') as HTMLInputElement;
   stackBox.type = 'checkbox';
   stackBox.checked = true;
-  stackBox.title = 'Stack the series on top of each other. Off, bars sit side by side and areas overlap.';
+  stackBox.title = 'Stack the series.';
   // Lines are never stacked.
   const syncStack = () => { stackBox.disabled = chartSel.value === 'line'; };
   chartSel.onchange = () => { syncStack(); draw(); };
@@ -320,22 +320,9 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   };
 
   const describe = () => {
-    const from = 'read from the history backend.';
-    if (perDay()) {
-      desc.textContent = `Daily ${metricName()} totals over time, ${from} A day the backend has no reading `
-        + 'for is left empty rather than drawn as zero, and is left out of every total.';
-      return;
-    }
+    if (perDay()) { desc.textContent = `Daily ${metricName()} totals.`; return; }
     const every = body?.stepSeconds ? `every ${durationText(body.stepSeconds)}` : 'sampled';
-    const name = `${metricName().charAt(0).toUpperCase()}${metricName().slice(1)}`;
-    if (body?.deltas) {
-      desc.textContent = `${name} ${every} through the window, ${from} Each bar is what changed between two `
-        + 'readings of the counter, so the bars add up rather than each restating it. An interval either reading is missing from is left empty.';
-      return;
-    }
-    desc.textContent = `${name} ${every} through the window, ${from} A sample the backend has no reading `
-      + 'for is left empty rather than drawn as zero.'
-      + (rate() ? ' These are instantaneous readings, so they are not added up.' : '');
+    desc.textContent = `${metricName().charAt(0).toUpperCase()}${metricName().slice(1)}${body?.deltas ? ' change' : ''}, ${every}.`;
   };
 
   const section = (title: string, note: string, made: { svg: any; gaps: number }, legend: Line[]) => {
