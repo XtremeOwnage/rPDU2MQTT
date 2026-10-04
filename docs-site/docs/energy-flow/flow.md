@@ -33,17 +33,19 @@ Mouse:
 
 | Action | Result |
 | --- | --- |
-| Hover | Node details |
-| Click a node | Trace where its power comes from |
+| Hover | Node value, readings (apparent power, current, voltage, power factor, frequency, energy), feeders and what it feeds |
+| Click or right-click a node | **Trace its supply**, **Last 7 days…**, **History…**, **Drill into this**, **Clear the trace**, **Edit this node** |
 | Click a group | Expand or collapse it |
 | Double-click a node | Drill into it. Double-click the top node to go back one level. |
-| Right-click a node | **History…**, **Drill into this**, **Trace its supply**, **Edit this node** |
 | Right-click the canvas | Clear trace, fit, refresh |
 | Drag / Ctrl + scroll | Pan / zoom. **Fit** resets. |
+
+![Node menu](../assets/screenshots/flow-node-menu.webp)
 
 - **Energy (kWh)** is today's energy (`energy_d`). See [Totals and counters](totals.md).
 - **Cost ($)** uses `Gui.EnergyPrice`.
 - Nodes marked **⚠** have more leaving than arriving. A banner lists sources being withheld and why.
+- **Last 7 days…** opens **History…** on the last 7 days.
 - **History…** charts the last hour, 6 hours, 24 hours, 7 days or 30 days, with what the node feeds broken out.
 
 ## Hierarchy
