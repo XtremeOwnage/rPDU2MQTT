@@ -44,6 +44,8 @@ export type HistoryRequest = {
   /// from the same reading, so where a total went can be read off without asking again.
   parts?: string[];
   partsLabel?: string;
+  /// The window to open on, instead of the last one picked.
+  window?: string;
 };
 
 /// Open the history of one or more nodes, over a window picked in the sheet.
@@ -57,7 +59,7 @@ export function openHistorySheet(o: HistoryRequest) {
   const breakdown = el('div', { class: 'hs-parts' });
   // A part that is the whole is not a breakdown; two legs summed into one line are.
   const parts = (o.parts || []).filter(id => id && !(nodes.length === 1 && nodes[0] === id));
-  let window = rememberedWindow();
+  let window = o.window && HISTORY_WINDOWS.some(([q]) => q === o.window) ? o.window : rememberedWindow();
   let metricNow = metric;
 
   const load = async () => {

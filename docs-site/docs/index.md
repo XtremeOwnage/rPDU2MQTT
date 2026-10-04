@@ -19,7 +19,7 @@ Whole-house energy monitoring, from the solar array to the outlet. Configured in
 
 Every node, every metric, live. Sankey, sunburst or treemap.
 
-![Sankey diagram: solar and grid through the inverter and main panel to circuits and PDU outlets](assets/screenshots/home-sankey.webp)
+![Sankey diagram with a circuit's readings on hover](assets/screenshots/home-sankey.webp)
 
 === "Treemap"
 
