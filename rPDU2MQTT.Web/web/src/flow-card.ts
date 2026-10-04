@@ -1,7 +1,6 @@
 // The details card for one node in the sunburst and the treemap: the Sankey's hover card, plus where the
 // node sits in the tree those two views draw — its share of the whole and of its parent, and the path to it.
 import { api, el, formatMeasure } from './helpers.js';
-import { state } from './state.js';
 import { metricLabel } from './flow-vocabulary.js';
 
 /// Where a node sits in the drawn tree. A node fed from two parents is drawn once under each, so this is
@@ -64,14 +63,6 @@ export function flowCardRows(n: any, place: TreePlace, ctx: { units: string; met
         el('span', { class: 'nh-num', text: fmt(own) })));
   }
 
-  const cfg = (state.data?.EnergyFlow?.Nodes || []).find((x: any) => x.Id === n.id);
-  const bound = (cfg?.Sources || []).concat(cfg?.Mqtt ? cfg.Mqtt.map((m: any) => ({ Type: 'mqtt', ...m })) : []);
-  if (bound.length) {
-    rows.push(el('div', { class: 'nh-head', text: 'Bound sources' }));
-    bound.forEach((s: any) => rows.push(el('div', { class: 'nh-row' },
-      el('span', { class: 'nh-name', text: metricLabel(s.Metric) }),
-      el('span', { class: 'nh-src', text: s.Type === 'modbus' ? `${s.Connection || 'modbus'} reg ${s.Register}` : (s.Topic || '') }))));
-  }
   if ((n.tags || []).length) rows.push(el('div', { class: 'nh-sub', style: { margin: '6px 0 0' }, text: '#' + n.tags.join(' #') }));
   return rows;
 }

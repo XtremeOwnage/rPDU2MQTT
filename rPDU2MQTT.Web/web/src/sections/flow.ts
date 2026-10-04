@@ -992,17 +992,6 @@ export function addFlowSection(nav: any, sections: any) {
         side('Fed by', incoming[n.id] || [], (l: any) => l.source);
         side('Feeds', outgoing[n.id] || [], (l: any) => l.target);
 
-        // What the node is bound to, so a wrong topic or register is visible from the diagram itself.
-        const cfg = (state.data?.EnergyFlow?.Nodes || []).find((x: any) => x.Id === n.id);
-        const bound = (cfg?.Sources || []).concat(cfg?.Mqtt ? cfg.Mqtt.map((m: any) => ({ Type: 'mqtt', ...m })) : []);
-        if (bound.length) {
-          rows.push(el('div', { class: 'nh-head', text: 'Bound sources' }));
-          bound.forEach((s: any) => rows.push(el('div', { class: 'nh-row' },
-            el('span', { class: 'nh-name', text: metricLabel(s.Metric) }),
-            el('span', { class: 'nh-src', text: s.Type === 'modbus' ? `${s.Connection || 'modbus'} reg ${s.Register}` : (s.Topic || '') }))));
-        } else if (cfg) {
-          rows.push(el('div', { class: 'nh-head', text: cfg.Value != null ? 'Fixed value' : 'No source bound' }));
-        }
         return rows;
       };
       [rect, lab].forEach((elm: any) => {

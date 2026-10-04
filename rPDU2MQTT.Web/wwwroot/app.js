@@ -5372,14 +5372,6 @@ function flowCardRows(n     , place           , ctx                             
         el('span', { class: 'nh-num', text: fmt(own) })));
   }
 
-  const cfg = (state.data?.EnergyFlow?.Nodes || []).find((x     ) => x.Id === n.id);
-  const bound = (cfg?.Sources || []).concat(cfg?.Mqtt ? cfg.Mqtt.map((m     ) => ({ Type: 'mqtt', ...m })) : []);
-  if (bound.length) {
-    rows.push(el('div', { class: 'nh-head', text: 'Bound sources' }));
-    bound.forEach((s     ) => rows.push(el('div', { class: 'nh-row' },
-      el('span', { class: 'nh-name', text: metricLabel(s.Metric) }),
-      el('span', { class: 'nh-src', text: s.Type === 'modbus' ? `${s.Connection || 'modbus'} reg ${s.Register}` : (s.Topic || '') }))));
-  }
   if ((n.tags || []).length) rows.push(el('div', { class: 'nh-sub', style: { margin: '6px 0 0' }, text: '#' + n.tags.join(' #') }));
   return rows;
 }
@@ -6657,17 +6649,6 @@ function addFlowSection(nav     , sections     ) {
         side('Fed by', incoming[n.id] || [], (l     ) => l.source);
         side('Feeds', outgoing[n.id] || [], (l     ) => l.target);
 
-        // What the node is bound to, so a wrong topic or register is visible from the diagram itself.
-        const cfg = (state.data?.EnergyFlow?.Nodes || []).find((x     ) => x.Id === n.id);
-        const bound = (cfg?.Sources || []).concat(cfg?.Mqtt ? cfg.Mqtt.map((m     ) => ({ Type: 'mqtt', ...m })) : []);
-        if (bound.length) {
-          rows.push(el('div', { class: 'nh-head', text: 'Bound sources' }));
-          bound.forEach((s     ) => rows.push(el('div', { class: 'nh-row' },
-            el('span', { class: 'nh-name', text: metricLabel(s.Metric) }),
-            el('span', { class: 'nh-src', text: s.Type === 'modbus' ? `${s.Connection || 'modbus'} reg ${s.Register}` : (s.Topic || '') }))));
-        } else if (cfg) {
-          rows.push(el('div', { class: 'nh-head', text: cfg.Value != null ? 'Fixed value' : 'No source bound' }));
-        }
         return rows;
       };
       [rect, lab].forEach((elm     ) => {
