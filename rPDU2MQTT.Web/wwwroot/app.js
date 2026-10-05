@@ -473,6 +473,21 @@ function withInstance(path        , instSel     ) {
   return v ? path + (path.includes('?') ? '&' : '?') + 'instance=' + encodeURIComponent(v) : path;
 }
 
+// ── temp-units.ts ───────────────────────────────────────────────
+// Temperatures are stored in °C and shown in the unit picked under Gui.TemperatureUnits.
+
+function tempIsF()          {
+  const pref = state.data?.Gui?.TemperatureUnits;
+  if (pref === 'fahrenheit') return true;
+  if (pref === 'celsius') return false;
+  const l = String((globalThis       ).navigator?.language || '').toLowerCase();
+  return /^en-(us|lr|bs|bz|ky|pw)\b/.test(l) || l === 'en-us';
+}
+const tempUnit = () => (tempIsF() ? '°F' : '°C');
+const toTemp = (c        ) => (tempIsF() ? c * 9 / 5 + 32 : c);
+const fromTemp = (v        ) => (tempIsF() ? (v - 32) * 5 / 9 : v);
+const fmtTemp = (c        , digits = 0) => `${(Number(toTemp(c).toFixed(digits)) || 0).toFixed(digits)} ${tempUnit()}`;
+
 // ── theme.ts ────────────────────────────────────────────────────
 // Light / dark / follow-the-system theming.
 //
@@ -2223,6 +2238,10 @@ function openHistorySheet(o                ) {
     catch (e     ) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
     const body = r?.body;
     if (!body?.ok) { note.textContent = body?.message || 'Could not read the history.'; return; }
+    if (metricNow === 'temperature') {
+      (body.series || []).forEach((s     ) => { s.values = (s.values || []).map((v     ) => (typeof v === 'number' ? toTemp(v) : v)); });
+      body.units = tempUnit();
+    }
     const all = body.series || [];
     const series = all.filter((s     ) => nodes.includes(s.node));
     if (!series.length) { note.textContent = `The history backend holds nothing for ${nodes.join(', ')} in this window.`; return; }
@@ -2292,7 +2311,7 @@ function openHistorySheet(o                ) {
   const markWindow = () => buttons.forEach((b, i) => b.classList.toggle('primary', HISTORY_WINDOWS[i][0] === window));
   markWindow();
   const metricSel = el('select', { class: 'hs-metric', title: 'Which measurement to chart.' })                     ;
-  HISTORY_METRICS.forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
+  HISTORY_METRICS.forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t.replace('°C', tempUnit()) })));
   if (!HISTORY_METRICS.some(([v]) => v === metricNow)) metricSel.appendChild(el('option', { value: metricNow, text: metricNow }));
   metricSel.value = metricNow;
   metricSel.onchange = () => { metricNow = metricSel.value; load(); };
@@ -10578,7 +10597,8 @@ const UNITS                                   = {
   percent: ['Percentage', '%'], temperature: ['Temperature', '°C'],
 };
 const metricName = (m        ) => (UNITS[m] || [m, ''])[0];
-const metricUnit = (m        ) => (UNITS[m] || [m, ''])[1];
+const metricUnit = (m        ) => (m === 'temperature' ? tempUnit() : (UNITS[m] || [m, ''])[1]);
+const shownAs = (m        , v        ) => (m === 'temperature' ? toTemp(v) : v);
 
 /// How far back the timeline reaches.
 const NODE_DATA_WINDOWS                     = [[60, '1 hour'], [360, '6 hours'], [1440, '24 hours'], [10080, '7 days']];
@@ -10769,8 +10789,8 @@ function addNodeDataSection(nav     , sections     ) {
       // source that cannot report ages showed "—" here while the diagram beside it drew that very number.
       const shown = r.fixed != null ? null : shownOf(r);
       const val = el('td', { class: 'num' });
-      if (r.fixed != null) val.append(el('span', { text: `${formatNum(r.fixed)} ${metricUnit(r.metric)}`.trim() }));
-      else if (shown != null) val.append(el('span', { text: `${formatNum(shown)} ${metricUnit(r.metric)}`.trim() }));
+      if (r.fixed != null) val.append(el('span', { text: `${formatNum(shownAs(r.metric, r.fixed))} ${metricUnit(r.metric)}`.trim() }));
+      else if (shown != null) val.append(el('span', { text: `${formatNum(shownAs(r.metric, shown))} ${metricUnit(r.metric)}`.trim() }));
       else { val.append(el('span', { style: { color: 'var(--muted)' }, text: '—' })); missing++; }
       tr.appendChild(val);
       if (past()) { tb.appendChild(tr); return; }
@@ -17025,7 +17045,8 @@ async function loadPluginPages() {
   } catch { pluginPages = []; }
 }
 
-const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection });
+const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection,
+  temp: { unit: tempUnit, to: toTemp, from: fromTemp, fmt: fmtTemp } });
 
 function pluginPageTool(p            ) {
   return (nav     , sections     ) => {

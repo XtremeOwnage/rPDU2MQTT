@@ -5,6 +5,7 @@ import { refreshDirty } from './dirty.js';
 import { saveConfig } from './sections/flow.js';
 import { openHistorySheet } from './history-sheet.js';
 import { busyInSection } from './realtime.js';
+import { tempUnit, toTemp, fromTemp, fmtTemp } from './temp-units.js';
 
 export type PluginPage = { integration: string; id: string; title: string; group: string; icon?: string; configSection?: string };
 
@@ -18,7 +19,8 @@ export async function loadPluginPages() {
   } catch { pluginPages = []; }
 }
 
-const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection });
+const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection,
+  temp: { unit: tempUnit, to: toTemp, from: fromTemp, fmt: fmtTemp } });
 
 export function pluginPageTool(p: PluginPage) {
   return (nav: any, sections: any) => {

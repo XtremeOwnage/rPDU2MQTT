@@ -151,7 +151,7 @@ public string? PageAsset(string file) => GuiPageAssets.Read(typeof(MyPlugin).Ass
 - Served from `GET /api/integrations/{id}/pages/{file}`. File names match `^[a-z0-9][a-z0-9-]*\.(js|css)$`.
 - The script is a function body that returns `mount(section, host)`. It runs on the page's first open.
 - `mount` may return `{ show }`. `show` runs each time the page opens.
-- `host`: `api`, `btn`, `el`, `ensure`, `toast`, `state`, `refreshDirty`, `saveConfig`, `openHistorySheet`, `busyInSection`.
+- `host`: `api`, `btn`, `el`, `ensure`, `toast`, `state`, `refreshDirty`, `saveConfig`, `openHistorySheet`, `busyInSection`, `temp` (`unit`, `to`, `from`, `fmt`: °C to the chosen unit and back).
 
 ## Supplying values, or being a device
 
