@@ -49,3 +49,15 @@ history, configuration publisher), Prometheus, Home Assistant (discovery, Energy
 - Each plugin gets its own `AssemblyLoadContext`; host types resolve to the host's copy.
 - A plugin that fails to load is reported and skipped.
 - The CRD does not describe plugin settings. They live under the open `Plugins` map.
+
+### Bundled plugins
+
+| Plugin | Project | Output folder |
+|--------|---------|---------------|
+| Tigo TAP | `plugins/rPDU2MQTT.Plugin.Tigo` | `plugins/tigo/` |
+
+- Each references only `rPDU2MQTT.Core`.
+- The host project builds them and copies each DLL into `plugins/<name>/` of its build and publish output.
+- They load through `PluginLoader`, the same as a third-party DLL.
+- A volume mounted over `/app/plugins`, or `RPDU2MQTT_PLUGINS` set to another directory, replaces the bundled
+  plugins. Copy `plugins/tigo/` into that directory to keep Tigo.

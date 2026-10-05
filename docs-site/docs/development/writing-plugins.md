@@ -153,6 +153,7 @@ public string? PageAsset(string file) => GuiPageAssets.Read(typeof(MyPlugin).Ass
 - The script is a function body that returns `mount(section, host)`. It runs on the page's first open.
 - `mount` may return `{ show }`. `show` runs each time the page opens.
 - `host`: `api`, `btn`, `el`, `ensure`, `toast`, `state`, `refreshDirty`, `saveConfig`, `openHistorySheet`, `busyInSection`, `timelineStrip`, `stepToFit`, `temp` (`unit`, `to`, `from`, `fmt`: °C to the chosen unit and back).
+- Example: the Tigo plugin's Solar Array page, `plugins/rPDU2MQTT.Plugin.Tigo/web/`.
 
 ## Supplying values, or being a device
 
