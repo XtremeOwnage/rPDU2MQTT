@@ -458,7 +458,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     /// <summary>One value per node per day across a window.</summary>
     private async Task<object> BuildSeriesAsync(string? instance, string metric, IReadOnlyList<DateTime> when,
                                                 IReadOnlyList<string>? labels, string? partialLabel, CancellationToken ct,
-                                                int? requestedStepSeconds = null)
+                                                int? requestedStepSeconds = null, IReadOnlyCollection<string>? only = null)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(60));
@@ -472,6 +472,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
             var shape = FlowGraphBuilder.Build(data, config.EnergyFlow, metric, live);
             var lanes = FlowLanes.For(shape.Nodes);
+            // ?nodes=a,b limits the series to those nodes, for a caller that charts only a few.
+            if (only is { Count: > 0 }) lanes = lanes.Where(l => only.Contains(l.Id, StringComparer.OrdinalIgnoreCase)).ToList();
             if (lanes.Count == 0) return new { ok = false, message = "No nodes to chart yet." };
 
             var perDay = await history.SeriesAsync(lanes.Select(l => l.Id).ToList(), metric, when, cts.Token);
@@ -1972,6 +1974,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         // One value per node per day over a window, for the Trends page.
         app.MapGet("/api/flow/series", async (HttpContext ctx) =>
         {
+            var only = ctx.Request.Query["nodes"].ToString().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             DateTime end = DateTime.TryParse(ctx.Request.Query["at"].ToString(), null,
                 System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed)
                 ? parsed : DateTime.UtcNow;
@@ -1985,7 +1988,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var stepPicked = SeriesWindow.ClampStep(int.TryParse(ctx.Request.Query["step"].ToString(), out var sp) ? sp : null, 300);
                 var metricPicked = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
                 return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricPicked,
-                    SeriesWindow.Instants(picked.From, picked.To, stepPicked), null, null, ctx.RequestAborted, stepPicked), ConfigSchema.Json);
+                    SeriesWindow.Instants(picked.From, picked.To, stepPicked), null, null, ctx.RequestAborted, stepPicked, only), ConfigSchema.Json);
             }
 
             if (ctx.Request.Query["today"] == "1")
@@ -1997,7 +2000,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var stepToday = SeriesWindow.ClampStep(int.TryParse(ctx.Request.Query["step"].ToString(), out var ts) ? ts : null, 300);
                 var metricToday = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
                 return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricToday,
-                    SeriesWindow.Instants(began, end, stepToday), null, null, ctx.RequestAborted, stepToday), ConfigSchema.Json);
+                    SeriesWindow.Instants(began, end, stepToday), null, null, ctx.RequestAborted, stepToday, only), ConfigSchema.Json);
             }
 
             if (int.TryParse(ctx.Request.Query["minutes"].ToString(), out var mins))
@@ -2006,7 +2009,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var span = TimeSpan.FromMinutes(Math.Clamp(mins, 5, SeriesWindow.MaxMinutes));
                 var metricNow = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
                 return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricNow,
-                    SeriesWindow.Instants(end - span, end, step), null, null, ctx.RequestAborted, step), ConfigSchema.Json);
+                    SeriesWindow.Instants(end - span, end, step), null, null, ctx.RequestAborted, step, only), ConfigSchema.Json);
             }
 
             // Up to a year.
@@ -2021,14 +2024,14 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var stepDays = SeriesWindow.ClampStep(sd, 3600);
                 var (from, _) = EnergyPeriod.Window(end, zone, config.EnergyFlow.Aggregation.PeriodStartHour, days - 1);
                 return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metric,
-                    SeriesWindow.Instants(from, end, stepDays), null, null, ctx.RequestAborted, stepDays), ConfigSchema.Json);
+                    SeriesWindow.Instants(from, end, stepDays), null, null, ctx.RequestAborted, stepDays, only), ConfigSchema.Json);
             }
 
             // Each day read at its own rollover.
             var periods = EnergyPeriod.RecentPeriodEnds(end, zone, config.EnergyFlow.Aggregation.PeriodStartHour, days);
             return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metric,
                 periods.Select(p => p.AtUtc).ToList(), periods.Select(p => p.Day).ToList(),
-                periods[^1].Complete ? null : periods[^1].Day, ctx.RequestAborted), ConfigSchema.Json);
+                periods[^1].Complete ? null : periods[^1].Day, ctx.RequestAborted, null, only), ConfigSchema.Json);
         });
 
         // Exported history metrics with units.

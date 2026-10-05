@@ -5,6 +5,8 @@ import { refreshDirty } from './dirty.js';
 import { saveConfig } from './sections/flow.js';
 import { openHistorySheet } from './history-sheet.js';
 import { busyInSection } from './realtime.js';
+import { timelineStrip } from './sections/timeline.js';
+import { stepToFit } from './sections/trends-shared.js';
 
 export type PluginPage = { integration: string; id: string; title: string; group: string; icon?: string; configSection?: string };
 
@@ -18,7 +20,7 @@ export async function loadPluginPages() {
   } catch { pluginPages = []; }
 }
 
-const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection });
+const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection, timelineStrip, stepToFit });
 
 export function pluginPageTool(p: PluginPage) {
   return (nav: any, sections: any) => {

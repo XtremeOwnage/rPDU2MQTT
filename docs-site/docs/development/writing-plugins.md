@@ -57,6 +57,7 @@ Implement any combination.
 | `IStatusProvider` | Decide what your own health means. |
 | `IConfigurablePlugin` | Carry your own settings section. |
 | `IGuiPageProvider` | Ship your own GUI pages. |
+| `IPluginStoreUser` | Keep named hashes across restarts (Valkey/Redis when the cache is on). |
 
 ### Receiving data
 
@@ -151,7 +152,7 @@ public string? PageAsset(string file) => GuiPageAssets.Read(typeof(MyPlugin).Ass
 - Served from `GET /api/integrations/{id}/pages/{file}`. File names match `^[a-z0-9][a-z0-9-]*\.(js|css)$`.
 - The script is a function body that returns `mount(section, host)`. It runs on the page's first open.
 - `mount` may return `{ show }`. `show` runs each time the page opens.
-- `host`: `api`, `btn`, `el`, `ensure`, `toast`, `state`, `refreshDirty`, `saveConfig`, `openHistorySheet`, `busyInSection`.
+- `host`: `api`, `btn`, `el`, `ensure`, `toast`, `state`, `refreshDirty`, `saveConfig`, `openHistorySheet`, `busyInSection`, `timelineStrip`, `stepToFit`.
 
 ## Supplying values, or being a device
 

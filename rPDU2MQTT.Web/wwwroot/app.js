@@ -16983,7 +16983,7 @@ async function loadPluginPages() {
   } catch { pluginPages = []; }
 }
 
-const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection });
+const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection, timelineStrip, stepToFit });
 
 function pluginPageTool(p            ) {
   return (nav     , sections     ) => {
