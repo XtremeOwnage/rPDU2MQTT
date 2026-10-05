@@ -55,7 +55,7 @@ export function renameInBalance(flow: any, from: string, to: string | null) {
 
 export function addBalanceSection(nav: any, sections: any) {
   const link = navLink(nav, 'Balance', '⚖');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Balance';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Energy balance' }));

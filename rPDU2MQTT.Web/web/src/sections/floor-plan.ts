@@ -83,7 +83,7 @@ function fpToolIcon(tool: string): any {
 
 export function addFloorPlanSection(nav: any, sections: any) {
   const link = navLink(nav, 'Floor Plans', '⌗');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Sites,EnergyFlow.Placements,EnergyFlow.Runs,EnergyFlow.AutoLocations,EnergyFlow.Panels';
   const sec = el('div', { class: 'section fp' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Floor Plans' }));

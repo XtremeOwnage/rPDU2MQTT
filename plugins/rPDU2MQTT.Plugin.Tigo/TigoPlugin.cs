@@ -14,8 +14,8 @@ public sealed class TigoPlugin : IIntegration, IConfigurablePlugin, IValueSource
 
     public IReadOnlyList<GuiPage> Pages { get; } =
     [
-        new("solar-array", "Solar Array", "Energy Flow", "☀", "EnergyFlow"),
-        new("panel-types", "Panel Types", "Energy Flow", "▦", "Plugins"),
+        new("solar-array", "Solar Array", "Energy Flow", "☀", "Plugins.tigo.Strings,Plugins.tigo.StringPanels,Plugins.tigo.Mppts,Plugins.tigo.GroupPanels"),
+        new("panel-types", "Panel Types", "Energy Flow", "▦", "Plugins.tigo.PanelTypes"),
     ];
     public string? PageAsset(string file) => GuiPageAssets.Read(typeof(TigoPlugin).Assembly, file);
     public IReadOnlyList<string> PageSettings { get; } = ["PanelTypes", "Strings", "StringPanels", "Mppts", "GroupPanels"];

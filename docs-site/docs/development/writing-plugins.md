@@ -146,7 +146,7 @@ public string? PageAsset(string file) => GuiPageAssets.Read(typeof(MyPlugin).Ass
 | `Title` | Nav entry text. |
 | `Group` | `Sources`, `Energy Flow`, `Integrations`, `Destinations` or `System`. |
 | `Icon` | Nav glyph. Optional. |
-| `ConfigSection` | Config section the page edits. Its unsaved edits count on the nav entry. Optional. |
+| `ConfigSection` | Comma-separated config paths the page edits (e.g. `Plugins.tigo.Strings`). Their unsaved edits count on the nav entry. Optional. |
 
 - Embed `{Id}.js` and, optionally, `{Id}.css` in the plugin assembly.
 - Served from `GET /api/integrations/{id}/pages/{file}`. File names match `^[a-z0-9][a-z0-9-]*\.(js|css)$`.

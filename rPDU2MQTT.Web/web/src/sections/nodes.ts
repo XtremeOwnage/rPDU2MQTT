@@ -354,7 +354,7 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
 
 export function addNodesSection(nav: any, sections: any) {
   const link = navLink(nav, "Nodes", "⬡");
-  link.dataset.section = "EnergyFlow";
+  link.dataset.section = 'EnergyFlow.Nodes,EnergyFlow.Links,EnergyFlow.AutoTags';
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';

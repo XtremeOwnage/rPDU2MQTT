@@ -51,8 +51,6 @@ const CONTRADICTION_SHARE = 0.25;
 
 export function addFlowSection(nav: any, sections: any) {
   const link = navLink(nav, "Flow", "⇄");
-  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
-  link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   // One line over the diagram: title, what is drawn, and two buttons for everything else. The paragraph, the
   // period row, the date row and two rows of view switches put the diagram half way down the screen.
@@ -175,11 +173,10 @@ export function addFlowSection(nav: any, sections: any) {
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
   // Each job below the diagram gets its own page under Energy Flow, so the Flow page is the diagram.
-  const subPage = (label: string, icon: string, desc: string) => {
+  const subPage = (label: string, icon: string, desc: string, paths?: string) => {
     const l = navLink(nav, label, icon);
     l.classList.add('nav-child');
-    // These edit the same EnergyFlow document as the Flow and Nodes pages, so they carry its edit count.
-    l.dataset.section = 'EnergyFlow';
+    if (paths) l.dataset.section = paths;
     const s = document.createElement('div'); s.className = 'section'; sections.appendChild(s);
     s.appendChild(el('h2', { text: label }));
     s.appendChild(el('div', { class: 'desc', text: desc }));
@@ -191,10 +188,10 @@ export function addFlowSection(nav: any, sections: any) {
     'What each node rolls up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
   const treePanel = treePage.body;
   const edPage = subPage('Hierarchy', '⑃',
-    'How the nodes are wired together. Energy flows left → right.');
+    'How the nodes are wired together. Energy flows left → right.', 'EnergyFlow.Links,EnergyFlow.Parents');
   const ed: any = edPage.body;
   const settingsPage = subPage('Settings', '⚙',
-    'Everything that governs the energy roll-up and its export. These were scattered across the pages they affected.');
+    'Energy roll-up and export settings.', 'EnergyFlow.*');
   let lastGraph: any = null;
   // Bindings the server is dropping on purpose.
   let withheldSources: any[] = [];

@@ -700,8 +700,9 @@ let navBadgesOff: any = null;
 function wireNavBadges(nav: any) {
   navBadgesOff?.();
   const links = ([...nav.querySelectorAll('a')] as any[]).filter(a => a.dataset?.section);
+  const claimed = links.flatMap(a => String(a.dataset.section).split(',').map((s: string) => s.trim()));
   navBadgesOff = onDirty(() => links.forEach(a => {
-    const n = changeCountFor(a.dataset.section);
+    const n = changeCountFor(a.dataset.section, claimed);
     const existing = a.querySelector('.nav-badge');
     if (!n) { existing?.remove(); return; }
     if (existing) existing.textContent = String(n);

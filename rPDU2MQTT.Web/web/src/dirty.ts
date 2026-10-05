@@ -65,9 +65,14 @@ export function discardChanges() {
   return state.data;
 }
 
-// Count of pending edits inside one top-level config section (drives the nav badges).
-export function changeCountFor(sectionKey: string) {
-  return dirtyChanges.filter(c => c.path[0] === sectionKey).length;
+// Pending edits under a nav entry's paths ("EnergyFlow.Groups,EnergyFlow.Nodes"). "X.*" takes what no other entry claims under X.
+export function changeCountFor(spec: string, claimed: string[] = []) {
+  const under = (path: string[], p: string) => p.split('.').every((k, i) => path[i] === k);
+  const prefixes = spec.split(',').map(s => s.trim()).filter(Boolean);
+  const owners = claimed.filter(q => !q.endsWith('.*'));
+  return dirtyChanges.filter(c => prefixes.some(p => p.endsWith('.*')
+    ? under(c.path, p.slice(0, -2)) && !owners.some(q => under(c.path, q))
+    : under(c.path, p))).length;
 }
 
 // --- Diff ------------------------------------------------------------------------------------------

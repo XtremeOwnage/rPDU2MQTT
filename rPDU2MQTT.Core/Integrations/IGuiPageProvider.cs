@@ -8,7 +8,7 @@ namespace rPDU2MQTT.Core.Integrations;
 /// <param name="Title">The nav entry.</param>
 /// <param name="Group">The nav group: "Sources", "Energy Flow", "Integrations", "Destinations" or "System".</param>
 /// <param name="Icon">A glyph for the nav entry.</param>
-/// <param name="ConfigSection">The config section the page edits.</param>
+/// <param name="ConfigSection">Comma-separated config paths the page edits, for its nav badge (e.g. "Plugins.tigo.Strings").</param>
 public sealed record GuiPage(string Id, string Title, string Group, string? Icon = null, string? ConfigSection = null);
 
 /// <summary>An integration with its own GUI pages; each script is a function body returning <c>mount(section, host)</c>.</summary>

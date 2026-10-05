@@ -12,6 +12,7 @@ import { flowCandidates, renderAutoTagRules } from './nodes.js';
 
 export function addTagsSection(nav: any, sections: any) {
   const link = navLink(nav, 'Tags', '#');
+  link.dataset.section = 'EnergyFlow.Tags';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   // The ids the tag rules can match: PDUs and outlets the bridge derives from what it polls.

@@ -43,7 +43,7 @@ const PANEL_CIRCUIT_KINDS = ['breaker', 'outlet', 'load', 'node', 'panel'];
 
 export function addPanelScheduleSection(nav: any, sections: any) {
   const link = navLink(nav, 'Panel Schedule', '🗂');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Panels,EnergyFlow.Clamps,EnergyFlow.Links';
   const sec = el('div', { class: 'section ps' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Panel Schedule' }));

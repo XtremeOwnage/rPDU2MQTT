@@ -787,9 +787,14 @@ function discardChanges() {
   return state.data;
 }
 
-// Count of pending edits inside one top-level config section (drives the nav badges).
-function changeCountFor(sectionKey        ) {
-  return dirtyChanges.filter(c => c.path[0] === sectionKey).length;
+// Pending edits under a nav entry's paths ("EnergyFlow.Groups,EnergyFlow.Nodes"). "X.*" takes what no other entry claims under X.
+function changeCountFor(spec        , claimed           = []) {
+  const under = (path          , p        ) => p.split('.').every((k, i) => path[i] === k);
+  const prefixes = spec.split(',').map(s => s.trim()).filter(Boolean);
+  const owners = claimed.filter(q => !q.endsWith('.*'));
+  return dirtyChanges.filter(c => prefixes.some(p => p.endsWith('.*')
+    ? under(c.path, p.slice(0, -2)) && !owners.some(q => under(c.path, q))
+    : under(c.path, p))).length;
 }
 
 // --- Diff ------------------------------------------------------------------------------------------
@@ -5791,8 +5796,6 @@ const CONTRADICTION_SHARE = 0.25;
 
 function addFlowSection(nav     , sections     ) {
   const link = navLink(nav, "Flow", "⇄");
-  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
-  link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   // One line over the diagram: title, what is drawn, and two buttons for everything else. The paragraph, the
   // period row, the date row and two rows of view switches put the diagram half way down the screen.
@@ -5915,11 +5918,10 @@ function addFlowSection(nav     , sections     ) {
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
   // Each job below the diagram gets its own page under Energy Flow, so the Flow page is the diagram.
-  const subPage = (label        , icon        , desc        ) => {
+  const subPage = (label        , icon        , desc        , paths         ) => {
     const l = navLink(nav, label, icon);
     l.classList.add('nav-child');
-    // These edit the same EnergyFlow document as the Flow and Nodes pages, so they carry its edit count.
-    l.dataset.section = 'EnergyFlow';
+    if (paths) l.dataset.section = paths;
     const s = document.createElement('div'); s.className = 'section'; sections.appendChild(s);
     s.appendChild(el('h2', { text: label }));
     s.appendChild(el('div', { class: 'desc', text: desc }));
@@ -5931,10 +5933,10 @@ function addFlowSection(nav     , sections     ) {
     'What each node rolls up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
   const treePanel = treePage.body;
   const edPage = subPage('Hierarchy', '⑃',
-    'How the nodes are wired together. Energy flows left → right.');
+    'How the nodes are wired together. Energy flows left → right.', 'EnergyFlow.Links,EnergyFlow.Parents');
   const ed      = edPage.body;
   const settingsPage = subPage('Settings', '⚙',
-    'Everything that governs the energy roll-up and its export. These were scattered across the pages they affected.');
+    'Energy roll-up and export settings.', 'EnergyFlow.*');
   let lastGraph      = null;
   // Bindings the server is dropping on purpose.
   let withheldSources        = [];
@@ -8536,7 +8538,7 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
 
 function addNodesSection(nav     , sections     ) {
   const link = navLink(nav, "Nodes", "⬡");
-  link.dataset.section = "EnergyFlow";
+  link.dataset.section = 'EnergyFlow.Nodes,EnergyFlow.Links,EnergyFlow.AutoTags';
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -8612,7 +8614,7 @@ function addNodesSection(nav     , sections     ) {
 
 function addGroupsSection(nav     , sections     ) {
   const link = navLink(nav, 'Groups', '⧉');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Groups';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Node groups' }));
@@ -8697,7 +8699,7 @@ function renameInBalance(flow     , from        , to               ) {
 
 function addBalanceSection(nav     , sections     ) {
   const link = navLink(nav, 'Balance', '⚖');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Balance';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Energy balance' }));
@@ -9233,6 +9235,7 @@ function openRegisterExplorer() {
 
 function addTagsSection(nav     , sections     ) {
   const link = navLink(nav, 'Tags', '#');
+  link.dataset.section = 'EnergyFlow.Tags';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   // The ids the tag rules can match: PDUs and outlets the bridge derives from what it polls.
@@ -10640,8 +10643,7 @@ function renderDiscoverPanel(flow     , rerender            )              {
 
 function addMqttImportSection(nav     , sections     ) {
   const link = navLink(nav, 'MQTT Import', '⇤');
-  // Adding nodes edits the shared EnergyFlow document, so this page carries its unsaved-edit count.
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'MQTT.ImportProfiles,EnergyFlow.Nodes,EnergyFlow.Links';
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'MQTT Import' }));
   sec.appendChild(el('div', {
@@ -10712,7 +10714,6 @@ const ago = (s        ) => s < 1 ? 'just now'
 
 function addNodeDataSection(nav     , sections     ) {
   const link = navLink(nav, 'Node Data', '⊞');
-  link.dataset.section = 'EnergyFlow';
   const sec = el('div', { class: 'section' }); sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Node Data' }));
   sec.appendChild(el('div', { class: 'desc', text: 'Every reading the energy flow is collecting — one row per node and bound metric, whatever the chart happens to be showing. “Updated” is the one to watch: a source that has stopped reporting still lists its last value, marked stale, so a dead publisher can be told apart from a binding that was never right.' }));
@@ -11464,7 +11465,6 @@ const signed = (s     )                    =>
 
 function trendsPage(nav     , sections     , spec            ) {
   const link = navLink(nav, spec.label, spec.icon);
-  link.dataset.section = 'EnergyFlow';
   const sec = el('div', { class: 'section trends-page' }); sections.appendChild(sec);
   sec.appendChild(el('h2', { text: spec.label }));
   // Written when the answer arrives, so it describes what was actually charted.
@@ -12537,7 +12537,6 @@ const clock = (ms        ) => {
 
 function addCircuitFinderSection(nav     , sections     ) {
   const link = navLink(nav, 'Circuit Finder', '🔌');
-  link.dataset.section = 'EnergyFlow';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Circuit Finder' }));
@@ -12708,7 +12707,7 @@ const PANEL_CIRCUIT_KINDS = ['breaker', 'outlet', 'load', 'node', 'panel'];
 
 function addPanelScheduleSection(nav     , sections     ) {
   const link = navLink(nav, 'Panel Schedule', '🗂');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Panels,EnergyFlow.Clamps,EnergyFlow.Links';
   const sec = el('div', { class: 'section ps' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Panel Schedule' }));
@@ -13626,7 +13625,7 @@ function fpToolIcon(tool        )      {
 
 function addFloorPlanSection(nav     , sections     ) {
   const link = navLink(nav, 'Floor Plans', '⌗');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Sites,EnergyFlow.Placements,EnergyFlow.Runs,EnergyFlow.AutoLocations,EnergyFlow.Panels';
   const sec = el('div', { class: 'section fp' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Floor Plans' }));
@@ -17838,8 +17837,9 @@ let navBadgesOff      = null;
 function wireNavBadges(nav     ) {
   navBadgesOff?.();
   const links = ([...nav.querySelectorAll('a')]         ).filter(a => a.dataset?.section);
+  const claimed = links.flatMap(a => String(a.dataset.section).split(',').map((s        ) => s.trim()));
   navBadgesOff = onDirty(() => links.forEach(a => {
-    const n = changeCountFor(a.dataset.section);
+    const n = changeCountFor(a.dataset.section, claimed);
     const existing = a.querySelector('.nav-badge');
     if (!n) { existing?.remove(); return; }
     if (existing) existing.textContent = String(n);

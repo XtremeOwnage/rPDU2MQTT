@@ -6,7 +6,7 @@ import { flowCandidates, renderGroupManager } from './nodes.js';
 
 export function addGroupsSection(nav: any, sections: any) {
   const link = navLink(nav, 'Groups', '⧉');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Groups';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Node groups' }));
