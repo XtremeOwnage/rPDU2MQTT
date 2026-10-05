@@ -136,6 +136,18 @@ export function renderGroupManager(flow: any, cand: Map<string, any>, rerender: 
     head.append(el('code', { text: g.Id, style: { color: 'var(--muted)' } }), labEdit, kindEdit, parentSel, del);
     card.appendChild(head);
 
+    const expRow = el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', margin: '8px 0 0' } });
+    const expSel = el('select', { style: { width: 'auto' }, title: 'How the group draws when expanded' }) as HTMLSelectElement;
+    [['replace', 'Replace with members'], ['parents', 'Nest members as parents'], ['children', 'Nest members as children']]
+      .forEach(([v, t]) => expSel.appendChild(el('option', { value: v, text: t })));
+    expSel.value = g.Expand || 'replace';
+    expSel.onchange = () => { if (expSel.value === 'replace') delete g.Expand; else g.Expand = expSel.value; };
+    const allBox = el('input', { type: 'checkbox', checked: !!g.ExpandChildren }) as HTMLInputElement;
+    allBox.onchange = () => { if (allBox.checked) g.ExpandChildren = true; else delete g.ExpandChildren; };
+    expRow.append(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: 'Expanded' }), expSel,
+      el('label', { style: { display: 'inline-flex', gap: '5px', alignItems: 'center' } }, allBox, 'Expand all children'));
+    card.appendChild(expRow);
+
     const memRow = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '8px 0 0' } });
     memRow.appendChild(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: 'Members' }));
     (g.Members || []).forEach((m: string) => {

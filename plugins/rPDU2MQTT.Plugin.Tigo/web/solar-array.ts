@@ -53,11 +53,11 @@ export function setUntracked(stringId: string, value: { PanelType?: string, Pane
   else all[stringId] = value;
 }
 
-/// Per-string page layout: Plugins.tigo.Strings[stringId] = { Columns }. Hidden there is read for older configs.
-export const layoutOf = (stringId: string): { Columns?: number, Hidden?: boolean } =>
+/// Per-string page layout: Plugins.tigo.Strings[stringId] = { Columns }.
+export const layoutOf = (stringId: string): { Columns?: number } =>
   state.data?.Plugins?.tigo?.Strings?.[stringId] || {};
 
-export const isHidden = (s: any) => !!s?.Hidden || !!layoutOf(s?.Id).Hidden;
+export const isHidden = (s: any) => !!s?.Hidden;
 
 export function setLayout(stringId: string, change: { Columns?: number, Hidden?: boolean }) {
   const all = ensure(ensure(ensure(state.data, 'Plugins', {}), 'tigo', {}), 'Strings', {});

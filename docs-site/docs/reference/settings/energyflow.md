@@ -81,6 +81,8 @@ Virtual upstream nodes (breakers, transfer switches, a “Total”) and their fe
 | `EnergyFlow.Groups[].Kind` | one of `node`, `panel`, `breaker`, `inverter`, `battery`, `solar`, `grid`, `load` | `node` | What the group represents, for diagram styling: 'node', 'panel', 'breaker', 'inverter', 'battery', 'solar', 'grid', or 'load'. |
 | `EnergyFlow.Groups[].Members` | list |  | The ids of the member nodes this group aggregates. |
 | `EnergyFlow.Groups[].Parent` | string |  | Id of the group this group is nested in. It shows only while that group is expanded. |
+| `EnergyFlow.Groups[].Expand` | one of `replace`, `parents`, `children` | `replace` | How the group draws when expanded: 'replace' shows its members in place of the group node, 'parents' draws the members feeding the group node, 'children' draws the group node feeding its members. |
+| `EnergyFlow.Groups[].ExpandChildren` | bool | `false` | Expanding this group also expands every group nested in it. |
 | `EnergyFlow.Balance` | object |  | Which nodes make up the site's Solar, Grid, Battery and Home totals on the energy pages, Trends and the Home Assistant Energy Dashboard. Each list is summed. Leave every list empty to total nodes by their kind instead. |
 | `EnergyFlow.Balance.Solar` | list |  | Nodes whose output is solar production — a PV total, never the strings it is made of. |
 | `EnergyFlow.Balance.Grid` | list |  | Nodes metering the grid connection: import out, export in. |

@@ -830,6 +830,9 @@ Otherwise:
 - Value: sum of members that have data; "no data" when none do.
 - Members keep their own wiring and export individually.
 - `Parent`: the group it is nested in. A nested group shows only while its parent is expanded.
+- `Expand`: how the group draws when expanded. `replace` (default) shows the members in its place, `parents`
+  draws the members feeding the group node, `children` draws the group node feeding the members.
+- `ExpandChildren`: expanding the group also expands every group nested in it.
 - With `EnergyFlow.MqttExport`, the group publishes its total (`{id}` on the MQTT tier topic, its own Home
   Assistant sensor).
 

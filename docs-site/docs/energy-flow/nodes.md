@@ -118,7 +118,9 @@ EnergyFlow:
 - **Add group**: id, label, kind, then **+ add member**.
 - **Or turn an existing node into a group**: the node becomes the group's anchor (for example Solar PV over its MPPTs).
 - **Not nested / In …**: nest the group in another group. It shows only while that group is expanded.
-- Click a group on the Flow diagram to expand it.
+- **Expanded**: *Replace with members* (default), *Nest members as parents* (members feed the group node) or *Nest members as children* (the group node feeds the members).
+- **Expand all children**: expanding the group also expands every group nested in it.
+- Click a group on the Flow diagram to expand it. Click its dashed outline, tab or members to collapse it.
 
 ```yaml
 EnergyFlow:

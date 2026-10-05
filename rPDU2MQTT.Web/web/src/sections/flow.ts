@@ -8,7 +8,7 @@ import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusedNode, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard, updateNodeCard } from '../flow-focus.js';
-import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, groupChips, viewSwitches, applyUnmeasuredPref, collapseGraph, ensureGroupState, hideHiddenNodes, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
+import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, groupChips, viewSwitches, applyUnmeasuredPref, collapseGraph, ensureGroupState, hideHiddenNodes, explodeExpandedGroups, nestExpandedGroups, toggleGroup, drawnMembers, expandMode, foldedInto, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
 import { editNodeOnNextOpen, flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
 import { makeMenu } from '../context-menu.js';
@@ -356,7 +356,8 @@ export function addFlowSection(nav: any, sections: any) {
     const visible = hideHiddenNodes((graph.nodes || []).slice(), (graph.links || []).slice());
     const collapsed = collapseGraph(visible.nodes, visible.links);
     // ...then substitute the members for the anchor on any group left expanded.
-    const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
+    const exploded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
+    const expanded = nestExpandedGroups(exploded.nodes, exploded.links);
     // ...then honour the unmetered-remainder view switch...
     const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
     // ...and finally drop the branches carrying nothing, if that switch is on.
@@ -467,7 +468,14 @@ export function addFlowSection(nav: any, sections: any) {
     // text where it is. Where the width cannot be measured (the DOM stub the checks run against) it falls
     // back to 960, so the geometry those checks pin is unchanged.
     const W = Math.max(960, Math.min(paneW ? paneW - 8 : 960, 2400));
-    const padTop = 22, nodeW = 12, usableH = 520;
+    const shownIds = new Set<string>(nodes.map((n: any) => n.id));
+    const outlined = (d: any) => !collapsedGroups.has(d.Id) && !foldedInto(d) && expandMode(d) === 'replace' && !shownIds.has(d.Id) && drawnMembers(d, shownIds).length > 0;
+    const levels = (x: any, seen: Set<string>): number => Math.max(0, ...flowGroups()
+      .filter((d: any) => d.Parent === x.Id && !seen.has(d.Id) && outlined(d))
+      .map((d: any) => 1 + levels(d, new Set([...seen, d.Id]))));
+    const outlines = flowGroups().filter(outlined);
+    const outlineTop = outlines.length ? 14 + 13 * Math.max(...outlines.map((g: any) => levels(g, new Set([g.Id])))) : 0;
+    const padTop = 22 + outlineTop, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
     const leftPad = 16, rightGutter = 232;
     // What the node has to be tall enough to carry: its own reading.
@@ -892,6 +900,33 @@ export function addFlowSection(nav: any, sections: any) {
     const groupById: Record<string, any> = {};
     flowGroups().forEach((g: any) => { groupById[g.Id] = g; (g.Members || []).forEach((m: string) => { memberGroup[m] = g; }); });
 
+    // Outline around the members of each expanded 'replace' group, with a collapse tab.
+    outlines.forEach((g: any) => {
+      const ids = drawnMembers(g, shownIds).filter(id => pos[id]);
+      if (!ids.length) return;
+      const lvl = levels(g, new Set([g.Id])), padX = 3 + 3 * lvl, padY = 3 + 13 * lvl;
+      const cols: Record<string, { top: number, bottom: number, x: number }> = {};
+      ids.forEach(id => {
+        const p = pos[id], c = cols[p.x] || (cols[p.x] = { top: p.y, bottom: p.y + p.h, x: p.x });
+        c.top = Math.min(c.top, p.y); c.bottom = Math.max(c.bottom, p.y + p.h);
+      });
+      const collapse = () => { toggleGroup(g); redrawBoth(); };
+      Object.values(cols).forEach((c, i) => {
+        const box = svgEl('rect', { x: c.x - padX, y: c.top - padY, width: nodeW + 2 * padX, height: c.bottom - c.top + 2 * padY, rx: 4,
+          fill: 'none', stroke: 'var(--muted)', 'stroke-dasharray': '4 3', 'stroke-width': '1', 'pointer-events': 'stroke', class: 'flow-group-outline' });
+        const t = svgEl('title'); t.textContent = `${g.Label || g.Id}. Click to collapse.`; box.appendChild(t);
+        box.style.cursor = 'pointer'; box.addEventListener('click', collapse);
+        svg.appendChild(box);
+        if (i) return;
+        const tab = svgEl('text', { x: c.x - padX, y: c.top - padY - 3, fill: 'var(--fg)', 'font-size': '10', 'font-weight': '600',
+          'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round', class: 'flow-group-tab' });
+        tab.textContent = `▾ ${g.Label || g.Id}`;
+        const tt = svgEl('title'); tt.textContent = 'Click to collapse'; tab.appendChild(tt);
+        tab.style.cursor = 'pointer'; tab.addEventListener('click', collapse);
+        svg.appendChild(tab);
+      });
+    });
+
     // Nodes + labels, to the right of each node and vertically centered, with a bg halo over ribbons.
     const contradicted: { id: string, label: string, share: number }[] = [];
     nodes.forEach((n: any) => {
@@ -1019,17 +1054,17 @@ export function addFlowSection(nav: any, sections: any) {
       }
 
     // Group node (collapsed), an anchor node (expanded), or a member: make the node the expand/collapse control.
-      const grp = n.group ? n : (memberGroup[n.id] || groupById[n.id]);
+      const anchorOf = groupById[n.id] && (groupById[n.id].Members || []).length ? groupById[n.id] : null;
+      const grp = n.group ? groupById[n.id] : (memberGroup[n.id] || anchorOf);
       if (grp) {
-        const gid = n.group ? n.id : grp.Id;
-        const toggle = () => { collapsedGroups.has(gid) ? collapsedGroups.delete(gid) : collapsedGroups.add(gid); redrawBoth(); };
+        const toggle = () => { toggleGroup(grp); redrawBoth(); };
         [rect, lab].forEach(elm => { elm.style.cursor = 'pointer'; elm.addEventListener('click', toggle); });
         const hint = svgEl('title');
-        hint.textContent = n.group ? `“${n.label}” groups ${(grp.Members || []).length} node(s) — click to expand`
-          : grp.Id === n.id ? `Group of ${(grp.Members || []).length} node(s) — click to collapse`
-          : `In group “${grp.Label || grp.Id}” — click to collapse`;
+        hint.textContent = n.group && !n.expanded ? `${n.label}: ${(grp.Members || []).length} node(s). Click to expand.`
+          : grp.Id === n.id ? `${grp.Label || grp.Id}. Click to collapse.`
+          : `In ${grp.Label || grp.Id}. Click to collapse.`;
         rect.appendChild(hint);
-        if (n.group) lab.textContent = '▸ ' + lab.textContent;   // an affordance that this node opens up
+        if (n.group || anchorOf) lab.textContent = (n.group && !n.expanded ? '▸ ' : '▾ ') + lab.textContent;
       }
     });
 

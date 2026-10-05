@@ -204,6 +204,15 @@ public class EnergyFlowGroup
 
     [Description("Id of the group this group is nested in. It shows only while that group is expanded.")]
     public string? Parent { get; set; }
+
+    [DefaultValue("replace")]
+    [Description("How the group draws when expanded: 'replace' shows its members in place of the group node, 'parents' draws the members feeding the group node, 'children' draws the group node feeding its members.")]
+    [AllowedValues("replace", "parents", "children")]
+    public string Expand { get; set; } = "replace";
+
+    [DefaultValue(false)]
+    [Description("Expanding this group also expands every group nested in it.")]
+    public bool ExpandChildren { get; set; }
 }
 
 /// <summary>A directed energy-flow link: energy flows <see cref="From"/> → <see cref="To"/>.</summary>

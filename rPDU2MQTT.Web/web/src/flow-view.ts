@@ -24,6 +24,75 @@ export function hideHiddenNodes(nodes: any[], links: any[]): { nodes: any[]; lin
   return { nodes: nodes.filter((n: any) => !hidden.has(n.id)), links: links.filter((l: any) => !hidden.has(l.source) && !hidden.has(l.target)) };
 }
 
+export const expandMode = (g: any): string => g?.Expand || 'replace';
+
+export function descendantGroups(g: any): any[] {
+  const all = flowGroups(), out: any[] = [], seen = new Set<string>([g.Id]);
+  for (let i = -1; i < out.length; i++) {
+    const id = i < 0 ? g.Id : out[i].Id;
+    all.forEach((x: any) => { if (x.Parent === id && !seen.has(x.Id)) { seen.add(x.Id); out.push(x); } });
+  }
+  return out;
+}
+
+export function toggleGroup(g: any) {
+  const expand = collapsedGroups.has(g.Id);
+  const ids = [g.Id, ...(g.ExpandChildren ? descendantGroups(g).map((d: any) => d.Id) : [])];
+  ids.forEach(id => expand ? collapsedGroups.delete(id) : collapsedGroups.add(id));
+}
+
+// Drawn node ids an expanded group stands for: its members and its nested groups' members.
+export function drawnMembers(g: any, present: Set<string>): string[] {
+  const ids = new Set<string>();
+  [g, ...descendantGroups(g)].forEach((x: any) => {
+    if (x !== g && present.has(x.Id)) ids.add(x.Id);
+    (x.Members || []).forEach((m: string) => { if (present.has(m)) ids.add(m); });
+  });
+  ids.delete(g.Id);
+  return [...ids];
+}
+
+// An expanded group in 'parents' or 'children' mode keeps a group node beside its members.
+export function nestExpandedGroups(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
+  const depth = (g: any) => { let d = 0; for (let p = g, seen = new Set<string>(); p?.Parent && !seen.has(p.Id); d++) { seen.add(p.Id); p = flowGroups().find((x: any) => x.Id === p.Parent); } return d; };
+  const groups = flowGroups().filter((g: any) => expandMode(g) !== 'replace' && !collapsedGroups.has(g.Id) && !foldedInto(g))
+    .sort((a: any, b: any) => depth(b) - depth(a));
+  let outNodes = nodes, outLinks = links;
+  groups.forEach((g: any) => {
+    const present = new Set<string>(outNodes.map((n: any) => n.id));
+    if (present.has(g.Id)) return;
+    const set = new Set(drawnMembers(g, present));
+    if (!set.size) return;
+    const merged: Record<string, any> = {};
+    const add = (source: string, target: string, value: number, known: boolean) => {
+      const k = source + '\u0000' + target;
+      if (!merged[k]) merged[k] = { source, target, value: 0, known: true };
+      merged[k].value += value || 0;
+      if (!known) merged[k].known = false;
+    };
+    const parents = expandMode(g) === 'parents';
+    const kept: any[] = [];
+    outLinks.forEach((l: any) => {
+      const crosses = parents ? set.has(l.source) && !set.has(l.target) : !set.has(l.source) && set.has(l.target);
+      if (!crosses) { kept.push(l); return; }
+      add(l.source, g.Id, l.value, l.known !== false); add(g.Id, l.target, l.value, l.known !== false);
+    });
+    if (!parents) set.forEach(m => {
+      if (outLinks.some((l: any) => l.target === m)) return;
+      const out = outLinks.filter((l: any) => l.source === m);
+      if (out.length) add(g.Id, m, out.reduce((a: number, l: any) => a + (l.value || 0), 0), out.every((l: any) => l.known !== false));
+    });
+    const own = Object.values(merged).filter((l: any) => l.source === g.Id);
+    if (!own.length) return;
+    const value = own.reduce((a: number, l: any) => a + l.value, 0);
+    const kinds = new Set([...set].map(id => outNodes.find((n: any) => n.id === id)?.kind).filter(Boolean));
+    const kind = g.Kind || (kinds.size === 1 ? [...kinds][0] : 'node');
+    outNodes = outNodes.concat([{ id: g.Id, label: g.Label || g.Id, kind, value, group: true, expanded: true }]);
+    outLinks = kept.concat(Object.values(merged));
+  });
+  return { nodes: outNodes, links: outLinks };
+}
+
 // Groups start collapsed.
 export function ensureGroupState() {
   flowGroups().forEach((g: any) => { if (!seenGroups.has(g.Id)) { seenGroups.add(g.Id); collapsedGroups.add(g.Id); } });
@@ -56,7 +125,7 @@ export function collapsedMemberMap(): Record<string, any> {
 
 // An expanded anchor group is replaced by its members, when the anchor feeds a single target.
 export function explodeExpandedGroups(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
-  const groups = flowGroups().filter((g: any) => g && g.Id && !collapsedGroups.has(g.Id));
+  const groups = flowGroups().filter((g: any) => g && g.Id && !collapsedGroups.has(g.Id) && expandMode(g) === 'replace');
   if (!groups.length) return { nodes, links };
 
   let outNodes = nodes, outLinks = links;
@@ -89,6 +158,7 @@ export function collapseGraph(nodes: any[], links: any[]): { nodes: any[]; links
   const groupNode: Record<string, any> = {};
   flowGroups().forEach((g: any) => {
     if (!collapsedGroups.has(g.Id) || foldedInto(g)) return;
+    if (!Object.keys(memberOf).some(id => memberOf[id] === g && byId[id])) return;
     const anchor = byId[g.Id];
     let sum = 0, known = false;
     (g.Members || []).forEach((m: string) => { const n = byId[m]; if (n && n.value != null) { sum += n.value; known = true; } });
@@ -383,7 +453,7 @@ export function groupChips(onToggle: () => void): HTMLElement | null {
       : on ? `Collapsed. Click to expand its ${count} member(s).` : 'Expanded. Click to collapse into one node.';
     chip.onclick = () => {
       if (count === 0) { toast(`“${g.Label || g.Id}” has no members. Add them on the Groups page.`, false); return; }
-      on ? collapsedGroups.delete(g.Id) : collapsedGroups.add(g.Id); onToggle();
+      toggleGroup(g); onToggle();
     };
     row.appendChild(chip);
   });

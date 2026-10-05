@@ -2745,6 +2745,75 @@ function hideHiddenNodes(nodes       , links       )                            
   return { nodes: nodes.filter((n     ) => !hidden.has(n.id)), links: links.filter((l     ) => !hidden.has(l.source) && !hidden.has(l.target)) };
 }
 
+const expandMode = (g     )         => g?.Expand || 'replace';
+
+function descendantGroups(g     )        {
+  const all = flowGroups(), out        = [], seen = new Set        ([g.Id]);
+  for (let i = -1; i < out.length; i++) {
+    const id = i < 0 ? g.Id : out[i].Id;
+    all.forEach((x     ) => { if (x.Parent === id && !seen.has(x.Id)) { seen.add(x.Id); out.push(x); } });
+  }
+  return out;
+}
+
+function toggleGroup(g     ) {
+  const expand = collapsedGroups.has(g.Id);
+  const ids = [g.Id, ...(g.ExpandChildren ? descendantGroups(g).map((d     ) => d.Id) : [])];
+  ids.forEach(id => expand ? collapsedGroups.delete(id) : collapsedGroups.add(id));
+}
+
+// Drawn node ids an expanded group stands for: its members and its nested groups' members.
+function drawnMembers(g     , present             )           {
+  const ids = new Set        ();
+  [g, ...descendantGroups(g)].forEach((x     ) => {
+    if (x !== g && present.has(x.Id)) ids.add(x.Id);
+    (x.Members || []).forEach((m        ) => { if (present.has(m)) ids.add(m); });
+  });
+  ids.delete(g.Id);
+  return [...ids];
+}
+
+// An expanded group in 'parents' or 'children' mode keeps a group node beside its members.
+function nestExpandedGroups(nodes       , links       )                                 {
+  const depth = (g     ) => { let d = 0; for (let p = g, seen = new Set        (); p?.Parent && !seen.has(p.Id); d++) { seen.add(p.Id); p = flowGroups().find((x     ) => x.Id === p.Parent); } return d; };
+  const groups = flowGroups().filter((g     ) => expandMode(g) !== 'replace' && !collapsedGroups.has(g.Id) && !foldedInto(g))
+    .sort((a     , b     ) => depth(b) - depth(a));
+  let outNodes = nodes, outLinks = links;
+  groups.forEach((g     ) => {
+    const present = new Set        (outNodes.map((n     ) => n.id));
+    if (present.has(g.Id)) return;
+    const set = new Set(drawnMembers(g, present));
+    if (!set.size) return;
+    const merged                      = {};
+    const add = (source        , target        , value        , known         ) => {
+      const k = source + '\u0000' + target;
+      if (!merged[k]) merged[k] = { source, target, value: 0, known: true };
+      merged[k].value += value || 0;
+      if (!known) merged[k].known = false;
+    };
+    const parents = expandMode(g) === 'parents';
+    const kept        = [];
+    outLinks.forEach((l     ) => {
+      const crosses = parents ? set.has(l.source) && !set.has(l.target) : !set.has(l.source) && set.has(l.target);
+      if (!crosses) { kept.push(l); return; }
+      add(l.source, g.Id, l.value, l.known !== false); add(g.Id, l.target, l.value, l.known !== false);
+    });
+    if (!parents) set.forEach(m => {
+      if (outLinks.some((l     ) => l.target === m)) return;
+      const out = outLinks.filter((l     ) => l.source === m);
+      if (out.length) add(g.Id, m, out.reduce((a        , l     ) => a + (l.value || 0), 0), out.every((l     ) => l.known !== false));
+    });
+    const own = Object.values(merged).filter((l     ) => l.source === g.Id);
+    if (!own.length) return;
+    const value = own.reduce((a        , l     ) => a + l.value, 0);
+    const kinds = new Set([...set].map(id => outNodes.find((n     ) => n.id === id)?.kind).filter(Boolean));
+    const kind = g.Kind || (kinds.size === 1 ? [...kinds][0] : 'node');
+    outNodes = outNodes.concat([{ id: g.Id, label: g.Label || g.Id, kind, value, group: true, expanded: true }]);
+    outLinks = kept.concat(Object.values(merged));
+  });
+  return { nodes: outNodes, links: outLinks };
+}
+
 // Groups start collapsed.
 function ensureGroupState() {
   flowGroups().forEach((g     ) => { if (!seenGroups.has(g.Id)) { seenGroups.add(g.Id); collapsedGroups.add(g.Id); } });
@@ -2777,7 +2846,7 @@ function collapsedMemberMap()                      {
 
 // An expanded anchor group is replaced by its members, when the anchor feeds a single target.
 function explodeExpandedGroups(nodes       , links       )                                 {
-  const groups = flowGroups().filter((g     ) => g && g.Id && !collapsedGroups.has(g.Id));
+  const groups = flowGroups().filter((g     ) => g && g.Id && !collapsedGroups.has(g.Id) && expandMode(g) === 'replace');
   if (!groups.length) return { nodes, links };
 
   let outNodes = nodes, outLinks = links;
@@ -2810,6 +2879,7 @@ function collapseGraph(nodes       , links       )                              
   const groupNode                      = {};
   flowGroups().forEach((g     ) => {
     if (!collapsedGroups.has(g.Id) || foldedInto(g)) return;
+    if (!Object.keys(memberOf).some(id => memberOf[id] === g && byId[id])) return;
     const anchor = byId[g.Id];
     let sum = 0, known = false;
     (g.Members || []).forEach((m        ) => { const n = byId[m]; if (n && n.value != null) { sum += n.value; known = true; } });
@@ -3101,7 +3171,7 @@ function groupChips(onToggle            )                     {
       : on ? `Collapsed. Click to expand its ${count} member(s).` : 'Expanded. Click to collapse into one node.';
     chip.onclick = () => {
       if (count === 0) { toast(`“${g.Label || g.Id}” has no members. Add them on the Groups page.`, false); return; }
-      on ? collapsedGroups.delete(g.Id) : collapsedGroups.add(g.Id); onToggle();
+      toggleGroup(g); onToggle();
     };
     row.appendChild(chip);
   });
@@ -6026,7 +6096,8 @@ function addFlowSection(nav     , sections     ) {
     const visible = hideHiddenNodes((graph.nodes || []).slice(), (graph.links || []).slice());
     const collapsed = collapseGraph(visible.nodes, visible.links);
     // ...then substitute the members for the anchor on any group left expanded.
-    const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
+    const exploded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
+    const expanded = nestExpandedGroups(exploded.nodes, exploded.links);
     // ...then honour the unmetered-remainder view switch...
     const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
     // ...and finally drop the branches carrying nothing, if that switch is on.
@@ -6136,7 +6207,14 @@ function addFlowSection(nav     , sections     ) {
     // text where it is. Where the width cannot be measured (the DOM stub the checks run against) it falls
     // back to 960, so the geometry those checks pin is unchanged.
     const W = Math.max(960, Math.min(paneW ? paneW - 8 : 960, 2400));
-    const padTop = 22, nodeW = 12, usableH = 520;
+    const shownIds = new Set        (nodes.map((n     ) => n.id));
+    const outlined = (d     ) => !collapsedGroups.has(d.Id) && !foldedInto(d) && expandMode(d) === 'replace' && !shownIds.has(d.Id) && drawnMembers(d, shownIds).length > 0;
+    const levels = (x     , seen             )         => Math.max(0, ...flowGroups()
+      .filter((d     ) => d.Parent === x.Id && !seen.has(d.Id) && outlined(d))
+      .map((d     ) => 1 + levels(d, new Set([...seen, d.Id]))));
+    const outlines = flowGroups().filter(outlined);
+    const outlineTop = outlines.length ? 14 + 13 * Math.max(...outlines.map((g     ) => levels(g, new Set([g.Id])))) : 0;
+    const padTop = 22 + outlineTop, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
     const leftPad = 16, rightGutter = 232;
     // What the node has to be tall enough to carry: its own reading.
@@ -6561,6 +6639,33 @@ function addFlowSection(nav     , sections     ) {
     const groupById                      = {};
     flowGroups().forEach((g     ) => { groupById[g.Id] = g; (g.Members || []).forEach((m        ) => { memberGroup[m] = g; }); });
 
+    // Outline around the members of each expanded 'replace' group, with a collapse tab.
+    outlines.forEach((g     ) => {
+      const ids = drawnMembers(g, shownIds).filter(id => pos[id]);
+      if (!ids.length) return;
+      const lvl = levels(g, new Set([g.Id])), padX = 3 + 3 * lvl, padY = 3 + 13 * lvl;
+      const cols                                                             = {};
+      ids.forEach(id => {
+        const p = pos[id], c = cols[p.x] || (cols[p.x] = { top: p.y, bottom: p.y + p.h, x: p.x });
+        c.top = Math.min(c.top, p.y); c.bottom = Math.max(c.bottom, p.y + p.h);
+      });
+      const collapse = () => { toggleGroup(g); redrawBoth(); };
+      Object.values(cols).forEach((c, i) => {
+        const box = svgEl('rect', { x: c.x - padX, y: c.top - padY, width: nodeW + 2 * padX, height: c.bottom - c.top + 2 * padY, rx: 4,
+          fill: 'none', stroke: 'var(--muted)', 'stroke-dasharray': '4 3', 'stroke-width': '1', 'pointer-events': 'stroke', class: 'flow-group-outline' });
+        const t = svgEl('title'); t.textContent = `${g.Label || g.Id}. Click to collapse.`; box.appendChild(t);
+        box.style.cursor = 'pointer'; box.addEventListener('click', collapse);
+        svg.appendChild(box);
+        if (i) return;
+        const tab = svgEl('text', { x: c.x - padX, y: c.top - padY - 3, fill: 'var(--fg)', 'font-size': '10', 'font-weight': '600',
+          'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round', class: 'flow-group-tab' });
+        tab.textContent = `▾ ${g.Label || g.Id}`;
+        const tt = svgEl('title'); tt.textContent = 'Click to collapse'; tab.appendChild(tt);
+        tab.style.cursor = 'pointer'; tab.addEventListener('click', collapse);
+        svg.appendChild(tab);
+      });
+    });
+
     // Nodes + labels, to the right of each node and vertically centered, with a bg halo over ribbons.
     const contradicted                                                 = [];
     nodes.forEach((n     ) => {
@@ -6688,17 +6793,17 @@ function addFlowSection(nav     , sections     ) {
       }
 
     // Group node (collapsed), an anchor node (expanded), or a member: make the node the expand/collapse control.
-      const grp = n.group ? n : (memberGroup[n.id] || groupById[n.id]);
+      const anchorOf = groupById[n.id] && (groupById[n.id].Members || []).length ? groupById[n.id] : null;
+      const grp = n.group ? groupById[n.id] : (memberGroup[n.id] || anchorOf);
       if (grp) {
-        const gid = n.group ? n.id : grp.Id;
-        const toggle = () => { collapsedGroups.has(gid) ? collapsedGroups.delete(gid) : collapsedGroups.add(gid); redrawBoth(); };
+        const toggle = () => { toggleGroup(grp); redrawBoth(); };
         [rect, lab].forEach(elm => { elm.style.cursor = 'pointer'; elm.addEventListener('click', toggle); });
         const hint = svgEl('title');
-        hint.textContent = n.group ? `“${n.label}” groups ${(grp.Members || []).length} node(s) — click to expand`
-          : grp.Id === n.id ? `Group of ${(grp.Members || []).length} node(s) — click to collapse`
-          : `In group “${grp.Label || grp.Id}” — click to collapse`;
+        hint.textContent = n.group && !n.expanded ? `${n.label}: ${(grp.Members || []).length} node(s). Click to expand.`
+          : grp.Id === n.id ? `${grp.Label || grp.Id}. Click to collapse.`
+          : `In ${grp.Label || grp.Id}. Click to collapse.`;
         rect.appendChild(hint);
-        if (n.group) lab.textContent = '▸ ' + lab.textContent;   // an affordance that this node opens up
+        if (n.group || anchorOf) lab.textContent = (n.group && !n.expanded ? '▸ ' : '▾ ') + lab.textContent;
       }
     });
 
@@ -8212,6 +8317,18 @@ function renderGroupManager(flow     , cand                  , rerender         
     parentSel.onchange = () => { if (parentSel.value) g.Parent = parentSel.value; else delete g.Parent; };
     head.append(el('code', { text: g.Id, style: { color: 'var(--muted)' } }), labEdit, kindEdit, parentSel, del);
     card.appendChild(head);
+
+    const expRow = el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', margin: '8px 0 0' } });
+    const expSel = el('select', { style: { width: 'auto' }, title: 'How the group draws when expanded' })                     ;
+    [['replace', 'Replace with members'], ['parents', 'Nest members as parents'], ['children', 'Nest members as children']]
+      .forEach(([v, t]) => expSel.appendChild(el('option', { value: v, text: t })));
+    expSel.value = g.Expand || 'replace';
+    expSel.onchange = () => { if (expSel.value === 'replace') delete g.Expand; else g.Expand = expSel.value; };
+    const allBox = el('input', { type: 'checkbox', checked: !!g.ExpandChildren })                    ;
+    allBox.onchange = () => { if (allBox.checked) g.ExpandChildren = true; else delete g.ExpandChildren; };
+    expRow.append(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: 'Expanded' }), expSel,
+      el('label', { style: { display: 'inline-flex', gap: '5px', alignItems: 'center' } }, allBox, 'Expand all children'));
+    card.appendChild(expRow);
 
     const memRow = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '8px 0 0' } });
     memRow.appendChild(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: 'Members' }));
