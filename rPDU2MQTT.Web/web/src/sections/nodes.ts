@@ -1,4 +1,4 @@
-// The Nodes page: the virtual-node table, node groups, and the tag rules for PDUs and outlets.
+// Nodes page and the group manager.
 import { api, btn, el, ensure, activate, navLink, toast } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty, onDirty } from '../dirty.js';
@@ -19,7 +19,7 @@ export function flowCandidates(lastGraph: any, customNodes: any[]) {
   return cand;
 }
 
-// Tags for the nodes nobody typed out (#342).
+// Auto-tag rules.
 export function renderAutoTagRules(flow: any, cand: Map<string, any>, rerender: () => void) {
   const rules = ensure(flow, 'AutoTags', []);
   const box = el('div', { style: { margin: '18px 0' } });
@@ -43,7 +43,6 @@ export function renderAutoTagRules(flow: any, cand: Map<string, any>, rerender: 
     const tags = ensure(r, 'Tags', []);
     tr.appendChild(el('td', {}, tagInput(tags, { placeholder: 'rack-1, critical', onChange: rerender })));
 
-    // What the pattern covers right now, from the nodes actually on the graph.
     const hits = ids.filter(id => globMatches(r.Match || '', id));
     tr.appendChild(el('td', {}, el('span', {
       class: 'desc', style: { margin: '0', color: hits.length ? '' : 'var(--warn)' },
@@ -66,19 +65,19 @@ export function renderAutoTagRules(flow: any, cand: Map<string, any>, rerender: 
   return box;
 }
 
-/// The same match the server applies (AutoTags.Matches): '*' is the only wildcard.
+/// Matches AutoTags.Matches: '*' is the only wildcard.
 export function globMatches(pattern: string, id: string): boolean {
   if (!pattern) return false;
   const rx = '^' + pattern.split('*').map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$';
   return new RegExp(rx, 'i').test(id);
 }
 
-// Group manager (#groups): named groups of nodes that collapse into one node on the flow graphs.
+// Group manager.
 export function renderGroupManager(flow: any, cand: Map<string, any>, rerender: () => void) {
   const groups = ensure(flow, 'Groups', []);
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Groups', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Show several nodes as one collapsible node on the flow graphs. Either make a new group (its value is the members’ sum), or turn an existing node into a group — e.g. make “Solar PV” a group over its three MPPTs: collapsed, the flow chart shows only Solar PV reporting its own value; click it to expand the strings. Collapse/expand from the toggles above either graph, or by clicking the node.' }));
+  box.appendChild(el('div', { class: 'desc', text: 'Nodes shown as one collapsible node on the flow graphs.' }));
 
   const nm = (id: string) => (cand.get(id) || {}).label || id;
 
@@ -100,7 +99,6 @@ export function renderGroupManager(flow: any, cand: Map<string, any>, rerender: 
   addBar.append(idIn, labIn, kindSel, addBtn);
   box.appendChild(addBar);
 
-  // Anchor a group on an existing node: that node becomes the group (keeping its own value).
   const anchorRow = el('div', { class: 'ld-toolbar' });
   anchorRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Or turn an existing node into a group:' }));
   const anchorSel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
@@ -128,11 +126,16 @@ export function renderGroupManager(flow: any, cand: Map<string, any>, rerender: 
     kindEdit.value = g.Kind || 'node';
     kindEdit.onchange = () => { g.Kind = kindEdit.value === 'node' ? undefined : kindEdit.value; };
     const del = btn('Delete', 'danger');
-    del.onclick = () => { groups.splice(groups.indexOf(g), 1); toast(`Group ${g.Label || g.Id} deleted.`, true); rerender(); };
-    head.append(el('code', { text: g.Id, style: { color: 'var(--muted)' } }), labEdit, kindEdit, del);
+    del.onclick = () => { groups.splice(groups.indexOf(g), 1); groups.forEach((x: any) => { if (x.Parent === g.Id) delete x.Parent; }); toast(`Group ${g.Label || g.Id} deleted.`, true); rerender(); };
+    const within = (x: any) => { for (let p: any = x, n = 0; p && n < groups.length; p = groups.find((q: any) => q.Id === p.Parent), n++) if (p === g) return true; return false; };
+    const parentSel = el('select', { style: { width: 'auto' }, title: 'Group this group is nested in' }) as HTMLSelectElement;
+    parentSel.appendChild(el('option', { value: '', text: 'Not nested' }));
+    groups.filter((x: any) => !within(x)).forEach((x: any) => parentSel.appendChild(el('option', { value: x.Id, text: `In ${x.Label || x.Id}` })));
+    parentSel.value = g.Parent || '';
+    parentSel.onchange = () => { if (parentSel.value) g.Parent = parentSel.value; else delete g.Parent; };
+    head.append(el('code', { text: g.Id, style: { color: 'var(--muted)' } }), labEdit, kindEdit, parentSel, del);
     card.appendChild(head);
 
-    // Members as removable chips, plus a picker of candidates not already in the group.
     const memRow = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '8px 0 0' } });
     memRow.appendChild(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: 'Members' }));
     (g.Members || []).forEach((m: string) => {
@@ -154,14 +157,12 @@ export function renderGroupManager(flow: any, cand: Map<string, any>, rerender: 
   return box;
 }
 
-// The open node editor, as a modal over the table (#292).
 export let nodeModal: { id: string, body: any, close: () => void } | null = null;
 
-// A node another page created, opened in the editor the next time the Nodes page loads.
 let editOnOpen: string | null = null;
 export function editNodeOnNextOpen(id: string) { editOnOpen = id; }
 
-/// Close the editor. `andDeselect` is a person closing it (Done), which also clears the row they were on.
+/// `andDeselect` also clears the selected row.
 export function closeNodeModal(andDeselect = false) {
   const m = nodeModal;
   nodeModal = null;
@@ -173,10 +174,8 @@ let nodeModalDone: (() => void) | null = null;
 export function syncNodeModal(node: any, links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: () => void) {
   if (!node) { closeNodeModal(); return; }
   nodeModalDone = () => { editing.id = null; rerender(); };
-  if (nodeModal && nodeModal.id !== node.Id) closeNodeModal();   // switched rows: a fresh panel, fresh title
+  if (nodeModal && nodeModal.id !== node.Id) closeNodeModal();
   if (!nodeModal) {
-    // The page's save bar is under the backdrop, so the dialog carries its own: what is unsaved, and Save.
-    // Closing first to reach the bar was the only way to save, and nothing said so.
     const status = el('span', { class: 'sheet-dirty' });
     const save = el('button', { class: 'primary', type: 'button', text: 'Save' }) as HTMLButtonElement;
     const done = el('button', { type: 'button', text: 'Done' }) as HTMLButtonElement;
@@ -211,14 +210,13 @@ export function wouldLoop(links: any[], from: string, to: string) {
   return false;
 }
 
-// Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab).
+// Virtual-node manager.
 export function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void, query = '') {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
 
-  // What the filter leaves. The node being edited stays whatever is typed, so narrowing the table never
-  // closes the editor out from under whoever is using it.
+  // The node being edited always stays.
   const q = query.trim().toLowerCase();
   const all = customNodes;
   if (q) {
@@ -258,30 +256,25 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     tr.appendChild(el('td', { class: 'num', text: n.Max ?? '—' }));
     tr.appendChild(el('td', { text: (n.Tags || []).join(', ') || '—' }));
 
-    // Wiring without dragging, in the direction the hierarchy is built in: what supplies this node.
     const incoming = links.filter((l: any) => l.To === n.Id).map((l: any) => l.From);
     const fedByCell = el('td');
     if (incoming.length > 1) {
-      // Several feeders is legitimate — a transfer switch fed by grid, generator and inverter.
       fedByCell.appendChild(el('span', { text: incoming.map((f: string) => (cand.get(f) || {}).label || f).join(', ') }));
     } else {
       const sel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
       sel.appendChild(el('option', { value: '', text: '— none —' }));
       [...cand.keys()]
-        // A load uses power rather than passing it on; the feeder already wired stays listed so it still shows.
         .filter(id => id !== n.Id && !String(id).includes('#') && (!feedsNothing((cand.get(id) || {}).kind) || id === incoming[0]))
         .sort((a, b) => ((cand.get(a) || {}).label || a).localeCompare((cand.get(b) || {}).label || b))
         .forEach(id => sel.appendChild(el('option', { value: id, text: (cand.get(id) || {}).label || id })));
       sel.value = incoming[0] || '';
       sel.onchange = () => {
         const feeder = sel.value;
-        // Energy would have to arrive from something this node already supplies.
         if (feeder && wouldLoop(links.filter((l: any) => l.To !== n.Id), feeder, n.Id)) {
           toast('That would create a feeder loop.', false);
           sel.value = incoming[0] || '';
           return;
         }
-        // One incoming link is what this control manages: drop the old one, add the new.
         for (let i = links.length - 1; i >= 0; i--) if (links[i].To === n.Id) links.splice(i, 1);
         if (feeder) links.push({ From: feeder, To: n.Id });
         rerender();
@@ -289,7 +282,7 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
       fedByCell.appendChild(sel);
     }
     tr.appendChild(fedByCell);
-    // Flag a node that's measured but has no energy (kWh) source — it can't feed HA's Energy Dashboard (#262).
+    // Measured but no kWh source.
     const srcs = [...(n.Sources || []), ...(n.Mqtt || [])];
     const nb = srcs.length;
     const hasEnergy = srcs.some((s: any) => String(s.Metric || 'realpower').toLowerCase() === 'energy');
@@ -313,7 +306,6 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
       openRenameDialog(n, flow, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
     };
 
-    // Copy: the same node under a free id, opened for renaming.
     const copy = btn('Copy');
     copy.title = 'Duplicate this node (kind, mode, value and bindings) under a new id — rename it, then wire it up.';
     copy.onclick = () => {
@@ -332,7 +324,6 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     rm.onclick = () => {
       customNodes.splice(customNodes.indexOf(n), 1);
       for (let j = links.length - 1; j >= 0; j--) if (links[j].From === n.Id || links[j].To === n.Id) links.splice(j, 1);
-      // A deleted node is no longer part of any total.
       renameInBalance(flow, n.Id, null);
       if (editing.id === n.Id) editing.id = null;
       toast(`${n.Label || n.Id} deleted.`, true);
@@ -343,18 +334,14 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     body.appendChild(tr);
   });
   tbl.appendChild(body);
-  // Scrolls within itself: a table wider than a phone widened the whole page, so the page scrolled sideways
-  // and a dialog opened over it landed off to one side.
   box.appendChild(el('div', { class: 'nodes-scroll' }, tbl));
 
-  // A deleted or renamed-away node leaves editing.id dangling; find() returning nothing closes the panel.
   syncNodeModal(editing.id ? customNodes.find((n: any) => n.Id === editing.id) : null, links, cand, editing, rerender);
   return box;
 }
 
 export function addNodesSection(nav: any, sections: any) {
   const link = navLink(nav, "Nodes", "⬡");
-  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
   link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
@@ -364,7 +351,6 @@ export function addNodesSection(nav: any, sections: any) {
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
   const instSel = instanceSelector(() => load());
-  // A hierarchy of any size is a long table: type to narrow it by id, name, kind or tag.
   const hunt = el('input', { type: 'search', class: 'nd-hunt', placeholder: 'filter by id, name, kind or tag…' }) as HTMLInputElement;
   hunt.oninput = () => render();
   const count = document.createElement('span'); count.className = 'ld-count';
@@ -393,24 +379,21 @@ export function addNodesSection(nav: any, sections: any) {
     addBtn.onclick = () => {
       const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
       if (customNodes.some((n: any) => n.Id === id) || (lastGraph?.nodes || []).some((n: any) => n.id === id)) { toast('That id already exists.', false); return; }
-      // Mode 'none' by default: a brand-new node has nothing measuring it.
       const node: any = { Id: id, Label: (labIn.value || '').trim() || id, Mode: 'none' };
       if (kindSel.value !== 'node') node.Kind = kindSel.value;
-      customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
+      customNodes.push(node); editing.id = id; render();
     };
     save.onclick = () => saveConfig(load);
     addBar.append(idIn, labIn, kindSel, addBtn, importBtn, save); ed.appendChild(addBar);
 
-    // Import-device-template panel, toggled by the button (existing ids guard against prefix clashes).
     const existingIds = new Set<string>([...customNodes.map((n: any) => n.Id), ...((lastGraph?.nodes || []).map((n: any) => n.id))]);
     const impWrap = el('div'); ed.appendChild(impWrap);
     importBtn.onclick = () => {
-      if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }   // toggle closed
+      if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }
       impWrap.appendChild(renderImportPanel(flow, existingIds, render));
     };
 
     const cand = flowCandidates(lastGraph, customNodes);
-    // Groups and the PDU/outlet tag rules have pages of their own: this one is for the nodes.
     const goTo = (label: string) => (document.querySelector(`nav a[data-label="${label}"]`) as any)?.click();
     ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 0 0' } },
       el('span', { text: 'Groups are managed on the ' }),
@@ -422,12 +405,10 @@ export function addNodesSection(nav: any, sections: any) {
   };
 
   const load = async () => {
-    // The flow graph gives the auto (pdu/outlet) node ids for the feeder/children pickers.
     const r = await api(withInstance('/api/flow', instSel));
     lastGraph = r.body?.ok ? r.body : null;
     render();
   };
   link.onclick = () => { activate(link, sec); load(); };
-  // The editor panel is mounted on <body>.
   nav.addEventListener('click', (e: any) => { if (nodeModal && !link.contains(e.target)) { editing.id = null; closeNodeModal(); } });
 }

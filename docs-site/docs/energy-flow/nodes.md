@@ -116,6 +116,7 @@ EnergyFlow:
 
 - **Add group**: id, label, kind, then **+ add member**.
 - **Or turn an existing node into a group**: the node becomes the group's anchor (for example Solar PV over its MPPTs).
+- **Not nested / In …**: nest the group in another group. It shows only while that group is expanded.
 - Click a group on the Flow diagram to expand it.
 
 ```yaml

@@ -85,7 +85,11 @@ function syncGroups() {
     if (!members.length) return;
     const g = groups.find(x => saSame(x.Id, s.Id));
     if (g) { g.Members = members; g.Label = s.Label || s.Id; }
-    else added.push([removedAt.get(String(s.Id).toLowerCase()) ?? Infinity, { Id: s.Id, Kind: 'solar', Label: s.Label || s.Id, Members: members }]);
+    else {
+      const parent = groups.find(x => (x.Members || []).some((m        ) => saSame(m, saMpptOf(s.Id))));
+      const g = { Id: s.Id, Kind: 'solar', Label: s.Label || s.Id, Members: members, ...(parent ? { Parent: parent.Id } : {}) };
+      added.push([removedAt.get(String(s.Id).toLowerCase()) ?? Infinity, g]);
+    }
   });
   added.sort((a, b) => a[0] - b[0]).forEach(([i, g]) => groups.splice(Math.min(i, groups.length), 0, g));
 }

@@ -201,6 +201,9 @@ public class EnergyFlowGroup
 
     [Description("The ids of the member nodes this group aggregates.")]
     public List<string> Members { get; set; } = new();
+
+    [Description("Id of the group this group is nested in. It shows only while that group is expanded.")]
+    public string? Parent { get; set; }
 }
 
 /// <summary>A directed energy-flow link: energy flows <see cref="From"/> → <see cref="To"/>.</summary>

@@ -1,29 +1,45 @@
-// How much of the flow chart to draw: the unmetered-remainder and animation switches (browser-local).
+// Flow diagram view switches and node groups.
 import { btn, el, toast } from './helpers.js';
 import { state } from './state.js';
 
-// --- Node groups (#groups): several nodes shown as one collapsible node on both flow graphs.
 export const collapsedGroups = new Set<string>();
-export const seenGroups = new Set<string>();   // groups we've applied the default (collapsed) to at least once
+export const seenGroups = new Set<string>();
 
 export function flowGroups(): any[] {
   return (state.data?.EnergyFlow?.Groups || []).filter((g: any) => g && g.Id);
 }
 
-// Collapse each group the first time we see it; after that, respect the viewer's choice.
+// Groups start collapsed.
 export function ensureGroupState() {
   flowGroups().forEach((g: any) => { if (!seenGroups.has(g.Id)) { seenGroups.add(g.Id); collapsedGroups.add(g.Id); } });
 }
 
-// A member's owning group id, only when that group is currently collapsed.
+// The outermost collapsed group this group is nested in.
+export function foldedInto(g: any): any | null {
+  const byId: Record<string, any> = {};
+  flowGroups().forEach((x: any) => { byId[x.Id] = x; });
+  const seen = new Set<string>([g.Id]);
+  let host: any = null;
+  for (let p = byId[g.Parent]; p && !seen.has(p.Id); p = byId[p.Parent]) {
+    seen.add(p.Id);
+    if (collapsedGroups.has(p.Id)) host = p;
+  }
+  return host;
+}
+
+// Node id -> the collapsed group it folds into.
 export function collapsedMemberMap(): Record<string, any> {
   const map: Record<string, any> = {};
-  flowGroups().forEach((g: any) => { if (collapsedGroups.has(g.Id)) (g.Members || []).forEach((m: string) => { map[m] = g; }); });
+  flowGroups().forEach((g: any) => {
+    const host = foldedInto(g) || (collapsedGroups.has(g.Id) ? g : null);
+    if (!host) return;
+    (g.Members || []).forEach((m: string) => { map[m] = host; });
+    if (host !== g) map[g.Id] = host;
+  });
   return map;
 }
 
-// An expanded group shows its members instead of its anchor: they take over its outgoing links and it drops
-// out. Skipped when the anchor feeds more than one target, where splitting members across them is invented.
+// An expanded anchor group is replaced by its members, when the anchor feeds a single target.
 export function explodeExpandedGroups(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
   const groups = flowGroups().filter((g: any) => g && g.Id && !collapsedGroups.has(g.Id));
   if (!groups.length) return { nodes, links };
@@ -31,7 +47,7 @@ export function explodeExpandedGroups(nodes: any[], links: any[]): { nodes: any[
   let outNodes = nodes, outLinks = links;
   groups.forEach((g: any) => {
     const byId: any = {}; outNodes.forEach((n: any) => { byId[n.id] = n; });
-    if (!byId[g.Id]) return;                                    // synthetic group: nothing to substitute
+    if (!byId[g.Id]) return;
     const members = (g.Members || []).filter((m: string) => byId[m]);
     if (!members.length) return;
 
@@ -57,40 +73,34 @@ export function collapseGraph(nodes: any[], links: any[]): { nodes: any[]; links
   const byId: any = {}; nodes.forEach(n => { byId[n.id] = n; });
   const groupNode: Record<string, any> = {};
   flowGroups().forEach((g: any) => {
-    if (!collapsedGroups.has(g.Id)) return;
-    const anchor = byId[g.Id];   // id matches a real node -> an "anchor" group (e.g. Solar PV over its MPPTs)
+    if (!collapsedGroups.has(g.Id) || foldedInto(g)) return;
+    const anchor = byId[g.Id];
     let sum = 0, known = false;
     (g.Members || []).forEach((m: string) => { const n = byId[m]; if (n && n.value != null) { sum += n.value; known = true; } });
-    // A group given no kind is what its members are, when they agree: a group of MPPTs is solar.
     const kinds = new Set((g.Members || []).map((m: string) => byId[m]?.kind).filter(Boolean));
     const kind = g.Kind || (kinds.size === 1 ? [...kinds][0] : 'node');
     groupNode[g.Id] = anchor
-      // The anchor keeps its own identity and value; only if it has none does it fall back to the members' sum.
       ? { ...anchor, value: anchor.value != null ? anchor.value : (known ? sum : null), group: true }
       : { id: g.Id, label: g.Label || g.Id, kind, value: known ? sum : null, group: true };
   });
 
   const remap = (id: string) => (memberOf[id] ? memberOf[id].Id : id);
-  // Drop the collapsed members, keep everyone else.
   const present = new Set<string>();
-  // Drop collapsed members and any anchor node (it's re-added as its group node, so it isn't duplicated).
   const outNodes = nodes.filter(n => !memberOf[n.id] && !groupNode[n.id]);
   const merged: Record<string, any> = {};
   links.forEach(l => {
     const s = remap(l.source), t = remap(l.target);
-    if (s === t) return;                       // a link fully inside one collapsed group
+    if (s === t) return;
     present.add(s); present.add(t);
     const k = s + '\u0000' + t;
     if (!merged[k]) merged[k] = { source: s, target: t, value: 0, known: true };
     merged[k].value += (l.value || 0);
     if (l.known === false) merged[k].known = false;
   });
-  // An anchor group always appears (its node was already in the graph); a synthetic group only if a member was.
   Object.values(groupNode).forEach((gn: any) => { if (present.has(gn.id) || byId[gn.id]) outNodes.push(gn); });
   return { nodes: outNodes, links: Object.values(merged) };
 }
 
-// The toggle strip above the diagram: one chip per group, click to collapse/expand on both graphs.
 
 export let showUnmeasured = (() => { try { return localStorage.getItem('rpdu-flow-unmeasured') !== '0'; } catch { return true; } })();
 
@@ -110,8 +120,7 @@ export function applyUnmeasuredPref(nodes: any[], links: any[]): { nodes: any[];
   };
 }
 
-/// Hide the branches that are carrying nothing. On by default: a rack of switched-off outlets is most of
-/// the diagram and none of the information.
+/// "Hide empty" preference.
 export let hideEmpty = (() => { try { return localStorage.getItem('rpdu-flow-hide-empty') !== '0'; } catch { return true; } })();
 
 export function setHideEmpty(on: boolean) {
@@ -119,15 +128,7 @@ export function setHideEmpty(on: boolean) {
   try { localStorage.setItem('rpdu-flow-hide-empty', on ? '1' : '0'); } catch { /* private mode: this session only */ }
 }
 
-/// Drop nodes reading zero when nothing downstream of them is carrying anything either.
-///
-/// A node with NO value is left alone. "0 A" and "no data" are different statements: the first is a
-/// measurement, the second is a gap in the model — nothing measures that node — and hiding it by default
-/// would bury exactly the sort of thing this diagram exists to surface.
-///
-/// The test is downstream only. A zero node still on a live supply path stays, so the solar chain after
-/// dark — MPPTs at 0 feeding an aggregate at 0 feeding a live inverter — is drawn as the connected thing
-/// it is. A zero node with nothing live below it is a switched-off outlet, and that is what goes.
+/// Drop zero nodes with nothing live downstream. Nodes with no value stay.
 export function applyHideEmptyPref(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
   if (!hideEmpty) return { nodes, links };
 
@@ -136,8 +137,6 @@ export function applyHideEmptyPref(nodes: any[], links: any[]): { nodes: any[]; 
   const out = new Map<string, string[]>();
   links.forEach((l: any) => out.set(l.source, [...(out.get(l.source) || []), l.target]));
 
-  // Memoised so a wide fan-out is walked once, and cycle-safe because a node in progress answers false
-  // rather than recursing back into itself.
   const feedsSomethingLive = new Map<string, boolean>();
   const walking = new Set<string>();
   const live = (id: string): boolean => {
@@ -165,9 +164,7 @@ export function applyHideEmptyPref(nodes: any[], links: any[]): { nodes: any[]; 
   };
 }
 
-/// Hide the branches carrying next to nothing (#497): a share of the diagram's total, below which a branch is
-/// hidden. Off (0) by default, and per-viewer like the other switches. A share rather than watts, so it
-/// means the same on a power, current or energy view and on a small house or a rack.
+/// "Hide small" threshold, as a share of the total.
 export const HIDE_SMALL_CHOICES: [number, string][] = [[0, 'Off'], [0.5, 'under 0.5%'], [1, 'under 1%'], [2, 'under 2%'], [5, 'under 5%']];
 export let hideSmallPercent = (() => {
   try {
@@ -181,13 +178,7 @@ export function setHideSmall(percent: number) {
   try { localStorage.setItem('rpdu-flow-hide-small', String(percent)); } catch { /* private mode: this session only */ }
 }
 
-/// Drop nodes reading under the chosen share of the total when nothing downstream of them reaches it
-/// either, and say how many went.
-///
-/// The total is what enters the diagram: the sum of the nodes nothing feeds. The rules are the ones "Hide
-/// empty" keeps. A node with no data is left alone: it is a gap in the model, not a small reading. A small
-/// node above a large one stays, so what it feeds is never cut off from its supply. Signs are ignored:
-/// 40 W exported is as large as 40 W drawn.
+/// Drop nodes under the share of the total with nothing larger downstream; returns how many went.
 export function applyHideSmallPref(nodes: any[], links: any[], percent = hideSmallPercent): { nodes: any[]; links: any[]; hidden: number } {
   if (!(percent > 0)) return { nodes, links, hidden: 0 };
 
@@ -204,7 +195,6 @@ export function applyHideSmallPref(nodes: any[], links: any[], percent = hideSma
   const floor = total * percent / 100;
   const large = (n: any) => size(n) == null || size(n)! >= floor;
 
-  // Memoised, and cycle-safe: a node in progress answers false rather than recursing into itself.
   const feedsLarge = new Map<string, boolean>();
   const walking = new Set<string>();
   const reaches = (id: string): boolean => {
@@ -246,8 +236,7 @@ export function hideSmallSelect(onChange: () => void): HTMLElement {
   return lbl;
 }
 
-/// Hide the nodes nothing measures. Off by default: a node with no data is a gap in the model, and surfacing
-/// those is what this diagram is for — but once the gaps are known, a column of them is only clutter.
+/// "Hide no data" preference.
 export let hideNoData = (() => { try { return localStorage.getItem('rpdu-flow-hide-no-data') === '1'; } catch { return false; } })();
 
 export function setHideNoData(on: boolean) {
@@ -255,10 +244,7 @@ export function setHideNoData(on: boolean) {
   try { localStorage.setItem('rpdu-flow-hide-no-data', on ? '1' : '0'); } catch { /* private mode: this session only */ }
 }
 
-/// Drop nodes with no data when nothing downstream of them has data either, and say how many went.
-///
-/// The test is downstream, as it is for empty branches: a panel nothing meters, above circuits that are
-/// metered, stays — removing it would cut the measured circuits off from everything that feeds them.
+/// Drop no-data nodes with no data downstream; returns how many went.
 export function applyHideNoDataPref(nodes: any[], links: any[]): { nodes: any[]; links: any[]; hidden: number } {
   if (!hideNoData) return { nodes, links, hidden: 0 };
 
@@ -266,7 +252,6 @@ export function applyHideNoDataPref(nodes: any[], links: any[]): { nodes: any[];
   const out = new Map<string, string[]>();
   links.forEach((l: any) => out.set(l.source, [...(out.get(l.source) || []), l.target]));
 
-  // Memoised, and cycle-safe: a node in progress answers false rather than recursing into itself.
   const reachesData = new Map<string, boolean>();
   const walking = new Set<string>();
   const feedsData = (id: string): boolean => {
@@ -303,12 +288,7 @@ export function unmeasuredToggle(onToggle: () => void): HTMLElement {
   return lbl;
 }
 
-/// How the ribbons are routed between bars.
-///
-/// The default is the curved band this diagram has always drawn. The other two route on a grid instead:
-/// out horizontally, one vertical run, back in horizontally — at most two bends, never a staircase. On a
-/// dense hierarchy that reads more like a wiring diagram than a river, which is easier to follow when what
-/// you want to know is which circuit goes where rather than how much is moving.
+/// Ribbon routing.
 export type RibbonStyle = 'curved' | 'ortho' | 'ortho-round';
 
 const RIBBON_KEY = 'rpdu-flow-ribbon';
@@ -330,7 +310,7 @@ export function setRibbonStyle(v: RibbonStyle) {
   try { localStorage.setItem(RIBBON_KEY, v); } catch { /* private mode: this session only */ }
 }
 
-/// The routing picker, beside the other switches that change how the diagram is drawn.
+/// Ribbon routing picker.
 export function ribbonStyleSelect(onChange: () => void): HTMLElement {
   const lbl = el('label', {
     class: 'desc',
@@ -349,7 +329,7 @@ export function ribbonStyleSelect(onChange: () => void): HTMLElement {
   return lbl;
 }
 
-/// The "Animate flow" view switch. Purely local: a per-viewer preference.
+/// "Animate flow" switch.
 export function animateToggle(onToggle: () => void): HTMLElement {
   const lbl = el('label', {
     class: 'desc',
@@ -365,10 +345,8 @@ export function animateToggle(onToggle: () => void): HTMLElement {
   return lbl;
 }
 
-// The "show a past moment" control, and the wording for what comes back, live in history-control.ts.
 
-/// The switches that change what the diagram draws — hide empty/small/no data, the unmeasured remainder,
-/// animation and ribbon routing.
+/// The diagram view switches.
 export function viewSwitches(onToggle: () => void): HTMLElement {
   const row = el('div', { class: 'flow-view-switches' });
   row.append(hideEmptyToggle(onToggle), hideSmallSelect(onToggle), hideNoDataToggle(onToggle),
@@ -376,16 +354,16 @@ export function viewSwitches(onToggle: () => void): HTMLElement {
   return row;
 }
 
-/// One chip per group: collapse it into one node, or expand it into its members. Null with no groups.
+/// One collapse/expand chip per visible group.
 export function groupChips(onToggle: () => void): HTMLElement | null {
   const groups = flowGroups();
   if (!groups.length) return null;
   const row = el('div', { class: 'flow-view-chips' });
   groups.forEach((g: any) => {
+    if (foldedInto(g)) return;
     const on = collapsedGroups.has(g.Id);
     const count = (g.Members || []).length;
     const chip = btn(`${on ? '▸' : '▾'} ${g.Label || g.Id} (${count})`);
-    // A group with no members has nothing to fold — collapsing/expanding it is a no-op.
     chip.title = count === 0 ? 'No members. Add them on the Groups page.'
       : on ? `Collapsed. Click to expand its ${count} member(s).` : 'Expanded. Click to collapse into one node.';
     chip.onclick = () => {
@@ -397,7 +375,7 @@ export function groupChips(onToggle: () => void): HTMLElement | null {
   return row;
 }
 
-/// The switches and the group chips in one strip — for the Roll-up page, which has no View panel.
+/// View switches and group chips in one strip.
 export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | null {
   const chips = groupChips(onToggle);
   if (!drawn && !chips) return null;
@@ -409,7 +387,7 @@ export function groupToggles(onToggle: () => void, drawn = true): HTMLElement | 
 
 // The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
 
-/// The "Hide no data" view switch. Per-viewer, like the others here.
+/// "Hide no data" switch.
 export function hideNoDataToggle(onToggle: () => void): HTMLElement {
   const lbl = el('label', {
     class: 'desc',
@@ -425,7 +403,7 @@ export function hideNoDataToggle(onToggle: () => void): HTMLElement {
   return lbl;
 }
 
-/// The "Hide empty" view switch. Per-viewer, like the others here.
+/// "Hide empty" switch.
 export function hideEmptyToggle(onToggle: () => void): HTMLElement {
   const lbl = el('label', {
     class: 'desc',

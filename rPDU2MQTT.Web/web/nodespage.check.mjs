@@ -96,7 +96,7 @@ if (!/Groups page/.test(nodesText()) || !/Tags page/.test(nodesText()))
 
 // --- Groups, on a page of their own -------------------------------------------------------------------
 sec = await openPage('Groups');
-if (!/Incoming PV/.test(sec.textContent || '')) fail('the Groups page does not hold the groups');
+if (!/Add group/.test(sec.textContent || '')) fail('the Groups page does not hold the groups');
 if (!query(sec, 'button', true).some(b => b.textContent === 'Save')) fail('the Groups page offers no way to save');
 if (!/1 group\(s\)/.test(sec.textContent || '')) fail('the Groups page does not say how many there are');
 // It edits the same config the Nodes page does.
