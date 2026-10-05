@@ -47,10 +47,10 @@ export function squarify<T>(items: { area: number; item: T }[], r: TmRect): { it
 const TM_HEAD = 20, TM_PAD = 3;
 
 /// Every box, laid out in a W×H frame: the root, then each node inside its parent's box under its header.
-export function layoutTreemap(nodes: any[], links: any[], W: number, H: number):
+export function layoutTreemap(nodes: any[], links: any[], W: number, H: number, dir: 'in' | 'out' = 'out'):
   { root: TmRect; hub: string | null; total: number; cells: { t: TreeNode; r: TmRect; nested: boolean }[]; rests: { r: TmRect; value: number }[] } {
   const { hub } = findHub(nodes, links);
-  const { top, total } = flowTree(nodes, links, hub);
+  const { top, total } = flowTree(nodes, links, hub, hub ? dir : 'out');
   const cells: { t: TreeNode; r: TmRect; nested: boolean }[] = [];
   /// What a node keeps rather than passes on: the empty part of its box.
   const rests: { r: TmRect; value: number }[] = [];
@@ -80,7 +80,8 @@ export function drawTreemap(nodes: any[], links: any[], opts: TreeViewOpts & { w
   const W = Math.max(320, opts.width || 1000);
   // A phone is taller than wide; a desktop pane is wide, and never taller than the screen can show.
   const H = W < 640 ? Math.round(W * 1.35) : Math.round(Math.min(W * 0.58, 700));
-  const { root, hub, total, cells, rests } = layoutTreemap(nodes, links, W, H);
+  const { root, hub, total, cells, rests } = layoutTreemap(nodes, links, W, H, opts.dir);
+  const inward = !!hub && opts.dir === 'in';
   const byId = new Map(nodes.map(n => [n.id, n]));
   const fmt = (v: number) => formatMeasure(v, opts.units);
   const hubNode = hub ? byId.get(hub) : null;
@@ -102,7 +103,7 @@ export function drawTreemap(nodes: any[], links: any[], opts: TreeViewOpts & { w
   box.appendChild(head);
 
   cells.forEach(({ t, r, nested }) => {
-    const leaf = !opens(links, t.id);
+    const leaf = inward || !opens(links, t.id);
     const c = el('div', { class: 'treemap-cell' + (nested ? ' is-nested' : '') + (leaf ? ' is-leaf' : '') });
     c.dataset.node = t.id;
     c.style.background = treeFill(t);
@@ -123,9 +124,9 @@ export function drawTreemap(nodes: any[], links: any[], opts: TreeViewOpts & { w
   rests.forEach(({ r, value }) => {
     const c = el('div', { class: 'treemap-rest' });
     at(c, r);
-    if (r.h >= 15 && r.w >= 60) c.appendChild(el('span', { class: 'treemap-name', text: 'not passed on' }));
+    if (r.h >= 15 && r.w >= 60) c.appendChild(el('span', { class: 'treemap-name', text: inward ? 'unaccounted' : 'not passed on' }));
     if (r.h >= 30 && r.w >= 40) c.appendChild(el('span', { class: 'treemap-val', text: fmt(value) }));
-    c.title = `${fmt(value)} not passed on to anything drawn here: the node's own use, or loads nothing measures`;
+    c.title = inward ? `${fmt(value)} not accounted for by its feeders` : `${fmt(value)} not passed on to anything drawn here`;
     box.appendChild(c);
   });
   return box;

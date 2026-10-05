@@ -22,7 +22,7 @@ title: Flow diagrams
 
 | Control | Options |
 | --- | --- |
-| View | Sankey, Sunburst, Treemap |
+| View | Sankey, Sunburst, Treemap. Sunburst and Treemap draw two charts from the hub node: Sources (what feeds it) and Destinations (what it feeds). |
 | Metric | Power (W), Energy (kWh), Cost ($), Apparent (VA), Current (A) |
 | Showing | The whole diagram, or one node and everything under it |
 | History | Show a past moment |

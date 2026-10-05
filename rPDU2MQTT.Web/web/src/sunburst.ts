@@ -20,6 +20,8 @@ export type TreeViewOpts = {
   card?: (id: string, place: TreePlace) => any[];
   /// Where the card belongs.
   host?: any;
+  /// 'out' draws what the hub feeds, 'in' what feeds it.
+  dir?: 'in' | 'out';
 };
 
 type Arc = { id: string; label: string; value: number; depth: number; a0: number; a1: number; hue: number; key: string; node: TreeNode };
@@ -31,8 +33,8 @@ const SUPPLY_FILL: Record<string, string> = { solar: '#f2b01e', grid: '#8b95a7',
 
 /// Every arc, laid out: a child's angle is its share of what its parent passes on, measured against the
 /// parent's scale, so a node that keeps some for itself leaves a gap at the end of its ring.
-export function layoutSunburst(nodes: any[], links: any[], hub: string | null, _supply?: string[]): { arcs: Arc[]; depth: number; total: number } {
-  const { top, total, depth } = flowTree(nodes, links, hub);
+export function layoutSunburst(nodes: any[], links: any[], hub: string | null, dir: 'in' | 'out' = 'out'): { arcs: Arc[]; depth: number; total: number } {
+  const { top, total, depth } = flowTree(nodes, links, hub, dir);
   const arcs: Arc[] = [];
   if (!(total > 0)) return { arcs, depth, total };
   const place = (t: TreeNode, a0: number, a1: number) => {
@@ -63,7 +65,8 @@ export const opens = (links: any[], id: string) => links.some((l: any) => l.sour
 
 export function drawSunburst(nodes: any[], links: any[], opts: TreeViewOpts): SVGElement {
   const { hub, supply } = findHub(nodes, links);
-  const { arcs, depth, total } = layoutSunburst(nodes, links, hub);
+  const dir = hub ? opts.dir || 'out' : 'out';
+  const { arcs, depth, total } = layoutSunburst(nodes, links, hub, dir);
   const byId = new Map(nodes.map(n => [n.id, n]));
   const svg = svgEl('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'sunburst-svg', role: 'img' }) as any;
   const ringW = Math.max(26, Math.min(70, (C - 8 - RING0) / Math.max(1, depth)));
@@ -103,7 +106,7 @@ export function drawSunburst(nodes: any[], links: any[], opts: TreeViewOpts): SV
 
   // The supply mix: a thin ring just outside the hub.
   const supplyTotal = supply.reduce((s, id) => s + Math.max(0, byId.get(id)?.value ?? 0), 0);
-  if (hub && supplyTotal > 0) {
+  if (hub && dir === 'out' && supplyTotal > 0) {
     let a = 0;
     supply.forEach((id, i) => {
       const v = Math.max(0, byId.get(id)?.value ?? 0);
@@ -125,7 +128,7 @@ export function drawSunburst(nodes: any[], links: any[], opts: TreeViewOpts): SV
     if ((arc.a1 - arc.a0 - 0.004) * r0 < 3) return;
     const p = svgEl('path', { d: arcPath(r0, r1, arc.a0 + 0.002, arc.a1 - 0.002), fill: treeFill(arc.node), class: 'sunburst-arc' });
     p.dataset.node = arc.id;
-    const leaf = !opens(links, arc.id);
+    const leaf = dir === 'in' ? true : !opens(links, arc.id);
     if (leaf) p.classList.add('is-leaf');
     p.addEventListener('click', (e: any) => { e.stopPropagation?.(); if (!leaf) opts.onOpen(arc.id); });
     hover(p, arc.id, arc.key, {

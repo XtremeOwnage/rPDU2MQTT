@@ -5323,12 +5323,11 @@ function addLiveDataSection(nav     , sections     ) {
 // ── flow-tree.ts ────────────────────────────────────────────────
 // The flow as a tree, for the views that draw it as one: the sunburst and the treemap.
 //
-// The root is the hub the supply converges on — an inverter, a main panel — or, with none, every root side
-// by side. Each node's children are what it feeds. A node fed from two parents is a child of each, carrying
-// that parent's share of it, so every level still adds up.
+// The root is the hub the supply converges on, or with none every root side by side. Each node's children are
+// what it feeds ('out') or what feeds it ('in'). A node with two parents carries each one's share.
 
-/// Where the supply converges: the first node every root reaches, followed on while it feeds only one node.
-/// Its direct feeders are the supply. With no such node the hub is null.
+/// Where the supply converges: the first node reached by the roots carrying nearly all the supply, followed on
+/// while it feeds only one node. Its direct feeders are the supply. With no such node the hub is null.
 function findHub(nodes       , links       )                                           {
   const ids = new Set(nodes.map(n => n.id));
   const out = new Map                  ();
@@ -5336,13 +5335,17 @@ function findHub(nodes       , links       )                                    
   const fed = new Set(links.map(l => l.target));
   const roots = nodes.filter(n => !fed.has(n.id)).map(n => n.id);
   if (!roots.length) return { hub: null, supply: [] };
+  const sent = (id        ) => links.filter(l => l.source === id).reduce((s, l) => s + Math.max(0, l.value ?? 0), 0);
+  let weight = new Map(roots.map(r => [r, sent(r)]));
+  if (![...weight.values()].some(w => w > 0)) weight = new Map(roots.map(r => [r, 1]));
+  const all = [...weight.values()].reduce((s, w) => s + w, 0);
   const reached = new Map                ();
   roots.forEach(r => {
     const seen = new Set        ([r]);
     for (let todo = [r]; todo.length;) (out.get(todo.pop() ) || []).forEach(t => { if (!seen.has(t)) { seen.add(t); todo.push(t); } });
-    seen.forEach(id => reached.set(id, (reached.get(id) || 0) + 1));
+    seen.forEach(id => reached.set(id, (reached.get(id) || 0) + weight.get(r) ));
   });
-  const common = new Set([...reached].filter(([, n]) => n === roots.length).map(([id]) => id));
+  const common = new Set([...reached].filter(([, w]) => w >= all * 0.95).map(([id]) => id));
   const firsts = [...common].filter(id => !links.some(l => l.target === id && common.has(l.source)));
   if (firsts.length !== 1) return { hub: null, supply: [] };
   let hub = firsts[0];
@@ -5354,7 +5357,8 @@ function findHub(nodes       , links       )                                    
 }
 
 /// The top-level branches, largest first, each with its subtree; and the total they add up to.
-function flowTree(nodes       , links       , hub               )                                                    {
+function flowTree(nodes       , links       , hub               , dir               = 'out')                                                    {
+  if (dir === 'in') links = links.map(l => ({ ...l, source: l.target, target: l.source }));
   const byId = new Map(nodes.map(n => [n.id, n]));
   const out = new Map               ();
   links.forEach(l => { if ((l.value ?? 0) > 0) (out.get(l.source) ?? out.set(l.source, []).get(l.source) ).push(l); });
@@ -5372,8 +5376,6 @@ function flowTree(nodes       , links       , hub               )               
     const t           = { id, label: n.label || id, value, scale: value, depth: d, branch, parent, children: [],
                           key: (parent ? parent.key + '>' : '') + id };
     depth = Math.max(depth, d);
-    // This piece may be only part of the node — one parent's share of something fed from two — so its
-    // children are that same share of the node's own links.
     const share = (n.value ?? 0) > 0 ? Math.min(1, value / n.value) : 1;
     const next = new Set(path).add(id);
     (out.get(id) || [])
@@ -5511,8 +5513,8 @@ const SUPPLY_FILL                         = { solar: '#f2b01e', grid: '#8b95a7',
 
 /// Every arc, laid out: a child's angle is its share of what its parent passes on, measured against the
 /// parent's scale, so a node that keeps some for itself leaves a gap at the end of its ring.
-function layoutSunburst(nodes       , links       , hub               , _supply           )                                                {
-  const { top, total, depth } = flowTree(nodes, links, hub);
+function layoutSunburst(nodes       , links       , hub               , dir               = 'out')                                                {
+  const { top, total, depth } = flowTree(nodes, links, hub, dir);
   const arcs        = [];
   if (!(total > 0)) return { arcs, depth, total };
   const place = (t          , a0        , a1        ) => {
@@ -5543,7 +5545,8 @@ const opens = (links       , id        ) => links.some((l     ) => l.source === 
 
 function drawSunburst(nodes       , links       , opts              )             {
   const { hub, supply } = findHub(nodes, links);
-  const { arcs, depth, total } = layoutSunburst(nodes, links, hub);
+  const dir = hub ? opts.dir || 'out' : 'out';
+  const { arcs, depth, total } = layoutSunburst(nodes, links, hub, dir);
   const byId = new Map(nodes.map(n => [n.id, n]));
   const svg = svgEl('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'sunburst-svg', role: 'img' })       ;
   const ringW = Math.max(26, Math.min(70, (C - 8 - RING0) / Math.max(1, depth)));
@@ -5583,7 +5586,7 @@ function drawSunburst(nodes       , links       , opts              )           
 
   // The supply mix: a thin ring just outside the hub.
   const supplyTotal = supply.reduce((s, id) => s + Math.max(0, byId.get(id)?.value ?? 0), 0);
-  if (hub && supplyTotal > 0) {
+  if (hub && dir === 'out' && supplyTotal > 0) {
     let a = 0;
     supply.forEach((id, i) => {
       const v = Math.max(0, byId.get(id)?.value ?? 0);
@@ -5605,7 +5608,7 @@ function drawSunburst(nodes       , links       , opts              )           
     if ((arc.a1 - arc.a0 - 0.004) * r0 < 3) return;
     const p = svgEl('path', { d: arcPath(r0, r1, arc.a0 + 0.002, arc.a1 - 0.002), fill: treeFill(arc.node), class: 'sunburst-arc' });
     p.dataset.node = arc.id;
-    const leaf = !opens(links, arc.id);
+    const leaf = dir === 'in' ? true : !opens(links, arc.id);
     if (leaf) p.classList.add('is-leaf');
     p.addEventListener('click', (e     ) => { e.stopPropagation?.(); if (!leaf) opts.onOpen(arc.id); });
     hover(p, arc.id, arc.key, {
@@ -5677,10 +5680,10 @@ function squarify   (items                             , r        )             
 const TM_HEAD = 20, TM_PAD = 3;
 
 /// Every box, laid out in a W×H frame: the root, then each node inside its parent's box under its header.
-function layoutTreemap(nodes       , links       , W        , H        )
+function layoutTreemap(nodes       , links       , W        , H        , dir               = 'out')
                                                                                                                                                    {
   const { hub } = findHub(nodes, links);
-  const { top, total } = flowTree(nodes, links, hub);
+  const { top, total } = flowTree(nodes, links, hub, hub ? dir : 'out');
   const cells                                                = [];
   /// What a node keeps rather than passes on: the empty part of its box.
   const rests                                 = [];
@@ -5710,7 +5713,8 @@ function drawTreemap(nodes       , links       , opts                           
   const W = Math.max(320, opts.width || 1000);
   // A phone is taller than wide; a desktop pane is wide, and never taller than the screen can show.
   const H = W < 640 ? Math.round(W * 1.35) : Math.round(Math.min(W * 0.58, 700));
-  const { root, hub, total, cells, rests } = layoutTreemap(nodes, links, W, H);
+  const { root, hub, total, cells, rests } = layoutTreemap(nodes, links, W, H, opts.dir);
+  const inward = !!hub && opts.dir === 'in';
   const byId = new Map(nodes.map(n => [n.id, n]));
   const fmt = (v        ) => formatMeasure(v, opts.units);
   const hubNode = hub ? byId.get(hub) : null;
@@ -5732,7 +5736,7 @@ function drawTreemap(nodes       , links       , opts                           
   box.appendChild(head);
 
   cells.forEach(({ t, r, nested }) => {
-    const leaf = !opens(links, t.id);
+    const leaf = inward || !opens(links, t.id);
     const c = el('div', { class: 'treemap-cell' + (nested ? ' is-nested' : '') + (leaf ? ' is-leaf' : '') });
     c.dataset.node = t.id;
     c.style.background = treeFill(t);
@@ -5753,9 +5757,9 @@ function drawTreemap(nodes       , links       , opts                           
   rests.forEach(({ r, value }) => {
     const c = el('div', { class: 'treemap-rest' });
     at(c, r);
-    if (r.h >= 15 && r.w >= 60) c.appendChild(el('span', { class: 'treemap-name', text: 'not passed on' }));
+    if (r.h >= 15 && r.w >= 60) c.appendChild(el('span', { class: 'treemap-name', text: inward ? 'unaccounted' : 'not passed on' }));
     if (r.h >= 30 && r.w >= 40) c.appendChild(el('span', { class: 'treemap-val', text: fmt(value) }));
-    c.title = `${fmt(value)} not passed on to anything drawn here: the node's own use, or loads nothing measures`;
+    c.title = inward ? `${fmt(value)} not accounted for by its feeders` : `${fmt(value)} not passed on to anything drawn here`;
     box.appendChild(c);
   });
   return box;
@@ -6145,8 +6149,16 @@ function addFlowSection(nav     , sections     ) {
         host: sec,
       };
       const sunburst = modeSel.value === 'sunburst';
-      const view = sunburst ? drawSunburst(nodes, links, viewOpts)
-        : drawTreemap(nodes, links, { ...viewOpts, width: wrap.clientWidth || sec.clientWidth || 1000 });
+      const paneWidth = wrap.clientWidth || sec.clientWidth || 1000;
+      const one = (dir              , width        ) => sunburst ? drawSunburst(nodes, links, { ...viewOpts, dir })
+        : drawTreemap(nodes, links, { ...viewOpts, dir, width });
+      const pair = !!findHub(nodes, links).hub;
+      const side = sunburst && paneWidth >= 900;
+      const view = pair
+        ? el('div', { class: 'flow-tree-pair' + (side ? ' is-side' : '') },
+            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Sources' }), one('in', paneWidth)),
+            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Destinations' }), one('out', paneWidth)))
+        : one('out', paneWidth);
       stage = el('div', { class: 'flow-stage ' + (sunburst ? 'sunburst-stage' : 'treemap-stage') }, view, menu.el);
       wrap.appendChild(stage);
       wrap.appendChild(el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px' },

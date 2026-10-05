@@ -1,17 +1,14 @@
 // The flow as a tree, for the views that draw it as one: the sunburst and the treemap.
 //
-// The root is the hub the supply converges on — an inverter, a main panel — or, with none, every root side
-// by side. Each node's children are what it feeds. A node fed from two parents is a child of each, carrying
-// that parent's share of it, so every level still adds up.
+// The root is the hub the supply converges on, or with none every root side by side. Each node's children are
+// what it feeds ('out') or what feeds it ('in'). A node with two parents carries each one's share.
 
 export type TreeNode = {
   id: string;
   label: string;
   /// What this piece carries: a parent's share of the node when it has two.
   value: number;
-  /// What the children are measured against: the larger of the value and what it passes on. What a node
-  /// passes on can be less than it takes (its own use), and a reading short of its children must not
-  /// let them overflow it.
+  /// What the children are measured against: the larger of the value and what it passes on.
   scale: number;
   depth: number;
   /// The top-level branch it belongs to, for its colour.
@@ -22,8 +19,8 @@ export type TreeNode = {
   key: string;
 };
 
-/// Where the supply converges: the first node every root reaches, followed on while it feeds only one node.
-/// Its direct feeders are the supply. With no such node the hub is null.
+/// Where the supply converges: the first node reached by the roots carrying nearly all the supply, followed on
+/// while it feeds only one node. Its direct feeders are the supply. With no such node the hub is null.
 export function findHub(nodes: any[], links: any[]): { hub: string | null; supply: string[] } {
   const ids = new Set(nodes.map(n => n.id));
   const out = new Map<string, string[]>();
@@ -31,13 +28,17 @@ export function findHub(nodes: any[], links: any[]): { hub: string | null; suppl
   const fed = new Set(links.map(l => l.target));
   const roots = nodes.filter(n => !fed.has(n.id)).map(n => n.id);
   if (!roots.length) return { hub: null, supply: [] };
+  const sent = (id: string) => links.filter(l => l.source === id).reduce((s, l) => s + Math.max(0, l.value ?? 0), 0);
+  let weight = new Map(roots.map(r => [r, sent(r)]));
+  if (![...weight.values()].some(w => w > 0)) weight = new Map(roots.map(r => [r, 1]));
+  const all = [...weight.values()].reduce((s, w) => s + w, 0);
   const reached = new Map<string, number>();
   roots.forEach(r => {
     const seen = new Set<string>([r]);
     for (let todo = [r]; todo.length;) (out.get(todo.pop()!) || []).forEach(t => { if (!seen.has(t)) { seen.add(t); todo.push(t); } });
-    seen.forEach(id => reached.set(id, (reached.get(id) || 0) + 1));
+    seen.forEach(id => reached.set(id, (reached.get(id) || 0) + weight.get(r)!));
   });
-  const common = new Set([...reached].filter(([, n]) => n === roots.length).map(([id]) => id));
+  const common = new Set([...reached].filter(([, w]) => w >= all * 0.95).map(([id]) => id));
   const firsts = [...common].filter(id => !links.some(l => l.target === id && common.has(l.source)));
   if (firsts.length !== 1) return { hub: null, supply: [] };
   let hub = firsts[0];
@@ -49,7 +50,8 @@ export function findHub(nodes: any[], links: any[]): { hub: string | null; suppl
 }
 
 /// The top-level branches, largest first, each with its subtree; and the total they add up to.
-export function flowTree(nodes: any[], links: any[], hub: string | null): { top: TreeNode[]; total: number; depth: number } {
+export function flowTree(nodes: any[], links: any[], hub: string | null, dir: 'in' | 'out' = 'out'): { top: TreeNode[]; total: number; depth: number } {
+  if (dir === 'in') links = links.map(l => ({ ...l, source: l.target, target: l.source }));
   const byId = new Map(nodes.map(n => [n.id, n]));
   const out = new Map<string, any[]>();
   links.forEach(l => { if ((l.value ?? 0) > 0) (out.get(l.source) ?? out.set(l.source, []).get(l.source)!).push(l); });
@@ -67,8 +69,6 @@ export function flowTree(nodes: any[], links: any[], hub: string | null): { top:
     const t: TreeNode = { id, label: n.label || id, value, scale: value, depth: d, branch, parent, children: [],
                           key: (parent ? parent.key + '>' : '') + id };
     depth = Math.max(depth, d);
-    // This piece may be only part of the node — one parent's share of something fed from two — so its
-    // children are that same share of the node's own links.
     const share = (n.value ?? 0) > 0 ? Math.min(1, value / n.value) : 1;
     const next = new Set(path).add(id);
     (out.get(id) || [])

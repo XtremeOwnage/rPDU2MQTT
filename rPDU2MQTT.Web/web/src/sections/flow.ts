@@ -15,6 +15,7 @@ import { makeMenu } from '../context-menu.js';
 import { openHistorySheet } from '../history-sheet.js';
 import { drawSunburst } from '../sunburst.js';
 import { drawTreemap } from '../treemap.js';
+import { findHub } from '../flow-tree.js';
 import { flowCardRows, readingRows, refreshReadings } from '../flow-card.js';
 import { templateHelp } from '../template-field.js';
 import { COST_OF, currency, energyPrice, priceGraph } from '../cost.js';
@@ -400,8 +401,16 @@ export function addFlowSection(nav: any, sections: any) {
         host: sec,
       };
       const sunburst = modeSel.value === 'sunburst';
-      const view = sunburst ? drawSunburst(nodes, links, viewOpts)
-        : drawTreemap(nodes, links, { ...viewOpts, width: wrap.clientWidth || sec.clientWidth || 1000 });
+      const paneWidth = wrap.clientWidth || sec.clientWidth || 1000;
+      const one = (dir: 'in' | 'out', width: number) => sunburst ? drawSunburst(nodes, links, { ...viewOpts, dir })
+        : drawTreemap(nodes, links, { ...viewOpts, dir, width });
+      const pair = !!findHub(nodes, links).hub;
+      const side = sunburst && paneWidth >= 900;
+      const view = pair
+        ? el('div', { class: 'flow-tree-pair' + (side ? ' is-side' : '') },
+            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Sources' }), one('in', paneWidth)),
+            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Destinations' }), one('out', paneWidth)))
+        : one('out', paneWidth);
       stage = el('div', { class: 'flow-stage ' + (sunburst ? 'sunburst-stage' : 'treemap-stage') }, view, menu.el);
       wrap.appendChild(stage);
       wrap.appendChild(el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px' },

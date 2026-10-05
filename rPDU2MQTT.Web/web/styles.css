@@ -1111,6 +1111,11 @@
 
   /* The flow as a treemap: boxes positioned in % of a frame whose shape is fixed by aspect-ratio. */
   .treemap-stage { display:block; }
+  .flow-tree-pair { display:grid; grid-template-columns:1fr; gap:var(--sp-3, 16px); width:100%; }
+  .flow-tree-pair.is-side { grid-template-columns:1fr 1fr; }
+  .flow-tree-half { min-width:0; display:flex; flex-direction:column; align-items:center; }
+  .flow-tree-half > .treemap { align-self:stretch; }
+  .flow-tree-title { align-self:flex-start; font-size:12px; font-weight:650; color:var(--muted); margin:0 0 4px; }
   .treemap { position:relative; width:100%; max-height:calc(100vh - 170px); min-height:320px; border-radius:var(--r); overflow:hidden; background:var(--panel2); }
   .treemap-root, .treemap-cell { position:absolute; box-sizing:border-box; overflow:hidden; }
   .treemap-root { display:flex; align-items:flex-start; gap:8px; padding:2px 8px; height:20px; background:var(--panel); border:1px solid var(--line); border-radius:var(--r); cursor:pointer; }

@@ -22,6 +22,16 @@ r = hubOf([['grid', 'main'], ['main', 'a'], ['main', 'b']]);
 if (r.hub !== 'main' || r.supply.join() !== 'grid') fail(`a chain: ${JSON.stringify(r)}`);
 r = hubOf([['a', 'x'], ['b', 'y']]);
 if (r.hub !== null) fail(`two separate trees have hub ${r.hub}`);
+sandbox.__g = {
+  nodes: ['p1', 'p2', 's1', 'm1', 'inv', 'load', 'export', 'tiny', 'a1', 'other'].map(id => ({ id, value: 1 })),
+  links: [['p1', 's1', 300], ['p2', 's1', 300], ['s1', 'm1', 600], ['m1', 'inv', 600], ['inv', 'load', 500], ['inv', 'export', 100],
+          ['tiny', 'other', 0.08], ['a1', 'm1', 0]].map(([source, target, value]) => ({ source, target, value })),
+};
+r = vm.runInContext('findHub(__g.nodes, __g.links)', sandbox);
+if (r.hub !== 'inv') fail(`a stray tiny root and an empty one: hub ${r.hub}`);
+const src = vm.runInContext(`(() => { const t = flowTree(__g.nodes.map(n => ({ ...n, value: { p1: 300, p2: 300, s1: 600, m1: 600, inv: 600 }[n.id] })), __g.links, 'inv', 'in');
+  const walk = (x) => x.id + (x.children.length ? '(' + x.children.map(walk).join(',') + ')' : ''); return t.top.map(walk).join(); })()`, sandbox);
+if (src !== 'm1(s1(p1,p2))') fail(`sources tree: ${src}`);
 sandbox.__g = { nodes: ['p1', 'a1', 'm1', 'inv'].map(id => ({ id })), links: [['p1', 'a1'], ['a1', 'm1'], ['m1', 'inv']].map(([source, target]) => ({ source, target })) };
 const shown = vm.runInContext(`state.data = { EnergyFlow: { Nodes: [{ Id: 'a1', Hidden: true }] } }; hideHiddenNodes(__g.nodes, __g.links)`, sandbox);
 if (shown.nodes.map(n => n.id).join() !== 'm1,inv') fail(`hidden node and its only feeder: drew ${shown.nodes.map(n => n.id)}`);
