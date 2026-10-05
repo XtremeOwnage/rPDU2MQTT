@@ -67,20 +67,27 @@ function setLayout(stringId        , change                                     
 /// Plugins.tigo.GroupPanels: one EnergyFlow group per string, its panels as members (collapsed in Flow).
 const groupingOn = () => !!state.data?.Plugins?.tigo?.GroupPanels;
 
+let removedAt = new Map                ();
+
 function syncGroups() {
   const groups        = ensure(saFlow(), 'Groups', []);
   const strings = stringsOf();
   const isString = (id        ) => strings.some(s => saSame(s.Id, id));
   for (let i = groups.length - 1; i >= 0; i--)
-    if (isString(groups[i].Id) && (!groupingOn() || !panelsOf(groups[i].Id).length)) groups.splice(i, 1);
+    if (isString(groups[i].Id) && (!groupingOn() || !panelsOf(groups[i].Id).length)) {
+      removedAt.set(String(groups[i].Id).toLowerCase(), i);
+      groups.splice(i, 1);
+    }
   if (!groupingOn()) return;
+  const added                  = [];
   strings.forEach(s => {
     const members = panelsOf(s.Id);
     if (!members.length) return;
     const g = groups.find(x => saSame(x.Id, s.Id));
     if (g) { g.Members = members; g.Label = s.Label || s.Id; }
-    else groups.push({ Id: s.Id, Kind: 'solar', Label: s.Label || s.Id, Members: members });
+    else added.push([removedAt.get(String(s.Id).toLowerCase()) ?? Infinity, { Id: s.Id, Kind: 'solar', Label: s.Label || s.Id, Members: members }]);
   });
+  added.sort((a, b) => a[0] - b[0]).forEach(([i, g]) => groups.splice(Math.min(i, groups.length), 0, g));
 }
 
 function ratingOf(panelIds          , stringId         )         {
@@ -228,7 +235,7 @@ function mount(sec     , host     ) {
   const editBtn = btn('Edit');
   const save = btn('Save', 'primary');
   const grouping = el('input', { type: 'checkbox' })                    ;
-  const groupLabel = el('label', { class: 'sa-hide', title: 'One Flow group per string; its panels show when you expand it' }, grouping, ' Group panels by string');
+  const groupLabel = el('label', { class: 'sa-hide', title: 'Adds a Flow group per string. Its panels show when the group is expanded.' }, grouping, ' Flow group per string');
   grouping.onchange = () => {
     ensure(ensure(state.data, 'Plugins', {}), 'tigo', {}).GroupPanels = grouping.checked || undefined;
     if (!grouping.checked) delete state.data.Plugins.tigo.GroupPanels;
@@ -430,6 +437,7 @@ function mount(sec     , host     ) {
     showSel.querySelectorAll?.('.sa-show-btn').forEach((b     ) => b.classList.toggle('is-on', b.dataset.show === show));
     editBtn.textContent = editing ? 'Done' : 'Edit';
     grouping.checked = groupingOn();
+    groupLabel.hidden = !editing;
     editBtn.classList.toggle('primary', editing);
 
     buses.innerHTML = '';
