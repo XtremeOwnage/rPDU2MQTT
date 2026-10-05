@@ -198,6 +198,29 @@ await new Promise(r => setTimeout(r, 50));
 const gridSvg = query(sec, 'svg', true)[query(sec, 'h3', true).map(h => h.textContent).indexOf('Grid')];
 if (!['polyline', 'circle'].flatMap(t => query(gridSvg, t, true)).some(e => e.attrs.class === 'trend-line')) fail('choosing lines drew no line on the grid chart');
 
+// A typed date range.
+const rangePick = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'custom'));
+if (!rangePick) fail('there is no custom range option');
+rangePick.value = 'custom';
+rangePick.onchange({});
+const box = query(sec, '.trend-custom');
+if (!box || box.hidden) fail('picking a custom range shows no date inputs');
+const [fromIn, toIn] = query(box, 'input', true);
+fromIn.value = '2026-09-01'; toIn.value = '2026-09-10';
+asked.length = 0;
+query(box, 'button').onclick();
+await new Promise(r => setTimeout(r, 100));
+if (!asked.some(u => /from=2026-(08-31|09-01)/.test(decodeURIComponent(u)) && /to=2026-09-1[01]/.test(decodeURIComponent(u)))) fail(`a custom range was not requested: ${asked[0]}`);
+
+const every = query(sec, 'select', true).find(x => (x.children || []).some(o => o.value === 'day'));
+const perDayOpt = (every.children || []).find(o => o.value === 'day');
+if (perDayOpt.disabled) fail('per day is not offered for a custom range of several days');
+every.value = 'day';
+asked.length = 0;
+every.onchange({});
+await new Promise(r => setTimeout(r, 100));
+if (!asked.some(u => /days=1[01]&at=2026-09-1[01]/.test(decodeURIComponent(u)))) fail(`per day over a custom range was not asked as days ending on its last day: ${asked[0]}`);
+
 console.log('trends: the whole system over the chosen window — grid, self-sufficiency and where the energy came from, '
   + 'signed and netted, a node another one already counts left out of its kind\u2019s total, and the same figures '
   + 'as a table, newest day first, with the net of the meter, an empty day empty and a total that says when it '

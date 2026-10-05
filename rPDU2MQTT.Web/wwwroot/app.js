@@ -1460,9 +1460,10 @@ function priceGraph(g     , price        ) {
 
 /// The periods people actually ask for. One click each, rather than a date, a time and a span to assemble.
 
+/// Shortest first.
 const PERIODS                        = [
-  ['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This week'],
-  ['month', 'This month'], ['year', 'This year'],
+  ['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This week'], ['lastweek', 'Last week'],
+  ['month', 'This month'], ['lastmonth', 'Last month'], ['year', 'This year'],
 ];
 
 /// Which day a period ends on, and how many days it covers — in the reader's own calendar, because that is
@@ -1475,6 +1476,14 @@ function periodWindow(key           , now       = new Date())                   
     return { day: iso(d), days: 1 };
   }
   if (key === 'week') return { day: iso(now), days: now.getDay() + 1 };
+  if (key === 'lastweek') {
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay() - 1);
+    return { day: iso(end), days: 7 };
+  }
+  if (key === 'lastmonth') {
+    const end = new Date(now.getFullYear(), now.getMonth(), 0);
+    return { day: iso(end), days: end.getDate() };
+  }
   if (key === 'month') return { day: iso(now), days: now.getDate() };
   if (key === 'year') {
     const jan1 = new Date(now.getFullYear(), 0, 1);
@@ -1486,9 +1495,11 @@ function periodWindow(key           , now       = new Date())                   
 }
 
 /// A row of one-click periods, with the one being shown marked.
-function periodRow(onPick                          )                                                              {
+/// `before`: buttons for windows shorter than a day, placed first.
+function periodRow(onPick                          , before                = [])                                                              {
   const row = el('div', { class: 'ld-toolbar period-row', style: { gap: '6px', margin: '0 0 8px' } });
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Period:' }));
+  before.forEach(b => row.appendChild(b));
   const buttons = PERIODS.map(([key, label]) => {
     const b = btn(label);
     b.dataset.period = key;
@@ -11366,12 +11377,28 @@ function trendsPage(nav     , sections     , spec            ) {
 
   const rangeSel = el('select', { title: 'How far back to chart.' })                     ;
   RANGES.forEach(r => rangeSel.appendChild(el('option', { value: r.value, text: r.text })));
+  rangeSel.appendChild(el('option', { value: 'custom', text: 'custom range…' }));
   rangeSel.value = 'days=30';
+  // A typed date range: from the start of the first day to the end of the last (or now).
+  const fromDay = el('input', { type: 'date', title: 'First day' })                    ;
+  const toDay = el('input', { type: 'date', title: 'Last day' })                    ;
+  const applyDays = btn('Apply');
+  const customBox = el('span', { class: 'trend-custom', hidden: true }, fromDay, el('span', { text: '–' }), toDay, applyDays);
+  applyDays.onclick = () => {
+    if (!fromDay.value || !toDay.value) return;
+    const from = new Date(`${fromDay.value}T00:00:00`).getTime();
+    const to = Math.min(Date.now(), new Date(`${toDay.value}T23:59:59`).getTime());
+    if (!(to > from)) return;
+    customBox.hidden = true;
+    useRange(customRange({ from, to }));
+  };
   // Windows the period buttons add, which RANGES does not list.
   const added = new Map               ();
   const rangeOf = ()        => RANGES.find(r => r.value === rangeSel.value) || added.get(rangeSel.value)
     || { value: rangeSel.value, text: rangeSel.value, wants: 'power', seconds: 86_400 };
-  const multiDay = () => rangeSel.value.startsWith('days=');
+  /// Whole days a custom range covers, 0 for any other range.
+  const customDays = () => { const sp = spanOfRange(rangeSel.value); return sp ? Math.ceil((sp.to - sp.from) / 86_400_000) : 0; };
+  const multiDay = () => rangeSel.value.startsWith('days=') || customDays() >= 2;
   /// The two instants of a zoomed-to range, or null for any other range.
   const spanOfRange = (value        )              => {
     const m = /^from=([^&]+)&to=([^&]+)$/.exec(value);
@@ -11422,7 +11449,7 @@ function trendsPage(nav     , sections     , spec            ) {
   // The step asked for and the step used once the window is fitted to what the chart can draw; null is per day.
   const plan = ()                                                => {
     const choice = intervalSel.value;
-    if (choice === 'day' || (choice === 'auto' && multiDay())) return { asked: null, used: null };
+    if (choice === 'day' || (choice === 'auto' && rangeSel.value.startsWith('days='))) return { asked: null, used: null };
     const fit = stepToFit(rangeOf().seconds, maxPoints());
     if (choice === 'auto') return { asked: null, used: fit };
     const asked = Number(choice);
@@ -11475,11 +11502,21 @@ function trendsPage(nav     , sections     , spec            ) {
   chartSel.onchange = () => { syncStack(); draw(); };
   stackBox.onchange = () => draw();
 
+  // A recent window is a range the dropdown already lists, so picking one reads back there too.
+  const recentButtons = RECENT.map(([value, label]) => {
+    const b = btn(label);
+    b.title = `Chart the ${label.toLowerCase()} up to now.`;
+    b.onclick = () => { rangeSel.value = value; rangeSel.onchange ({}       ); };
+    return b;
+  });
+  const PERIOD_TEXT                         = { week: 'this week', lastweek: 'last week', month: 'this month', lastmonth: 'last month', year: 'this year' };
   const periods = periodRow((key           ) => {
-    const { days } = periodWindow(key);
-    const range = key === 'yesterday' ? 'today=1&back=1' : days < 2 ? 'today=1' : `days=${days}`;
+    const { day, days } = periodWindow(key);
+    const ended = key === 'lastweek' || key === 'lastmonth';
+    const range = key === 'yesterday' ? 'today=1&back=1' : days < 2 ? 'today=1'
+      : ended ? `days=${days}&at=${encodeURIComponent(new Date(`${day}T23:59:59`).toISOString())}` : `days=${days}`;
     if (days >= 2 && !RANGES.some(r => r.value === range) && !added.has(range)) {
-      const text = `${key === 'week' ? 'this week' : key === 'month' ? 'this month' : 'this year'} (${days} days)`;
+      const text = ended ? `${PERIOD_TEXT[key]} (to ${day})` : `${PERIOD_TEXT[key]} (${days} days)`;
       added.set(range, { value: range, text, wants: 'energy', seconds: days * 86_400 });
       rangeSel.appendChild(el('option', { value: range, text }));
     }
@@ -11491,17 +11528,19 @@ function trendsPage(nav     , sections     , spec            ) {
     periods.mark(key);
     markRecent();
     load();
-  });
-  // A recent window is a range the dropdown already lists, so picking one reads back there too.
-  const recentButtons = RECENT.map(([value, label]) => {
-    const b = btn(label);
-    b.title = `Chart the ${label.toLowerCase()} up to now.`;
-    b.onclick = () => { rangeSel.value = value; rangeSel.onchange ({}       ); };
-    return b;
-  });
-  periods.row.append(...recentButtons);
+  }, recentButtons);
   const markRecent = () => recentButtons.forEach((b, i) => b.classList[RECENT[i][0] === rangeSel.value ? 'add' : 'remove']('primary'));
-  rangeSel.onchange = () => { periods.mark(null); unpick(); syncIntervals(); markRecent(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
+  rangeSel.onchange = () => {
+    if (rangeSel.value === 'custom') {
+      const day = (t        ) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+      toDay.max = fromDay.max = day(Date.now());
+      if (!toDay.value) toDay.value = day(Date.now());
+      if (!fromDay.value) fromDay.value = day(Date.now() - 7 * 86_400_000);
+      customBox.hidden = false;
+      return;
+    }
+    customBox.hidden = true;
+    periods.mark(null); unpick(); syncIntervals(); markRecent(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
 
   // A counter's readings are not a per-bar quantity; the differences between them are.
   //
@@ -11533,7 +11572,7 @@ function trendsPage(nav     , sections     , spec            ) {
 
   const perDay = () => !!body?.days;
   const summable = () => (perDay() || !!body?.deltas) && !rate();
-  const running = () => !rangeSel.value.includes('back=');
+  const running = () => !rangeSel.value.includes('back=') && !rangeSel.value.includes('at=');
   const leadHeight = () => Math.max(240, Math.min(Math.round((window.innerHeight || 900) * 0.34), 420));
 
   // A day carries the server's period key; a sampled instant is named in the reader's clock, with its date past a day.
@@ -11657,7 +11696,10 @@ function trendsPage(nav     , sections     , spec            ) {
     const counterEpoch = epochOf(metricSel.value);
     // A counter's first day needs the reading before it, so one more day-end is asked for and dropped after differencing.
     const lead = p.used == null && counterEpoch === 'lifetime';
-    const range = lead ? rangeSel.value.replace(/days=(\d+)/, (_, n) => `days=${Number(n) + 1}`) : rangeSel.value;
+    // Per day over a custom range: the days ending on its last one.
+    const span = spanOfRange(rangeSel.value);
+    const base = p.used == null && span ? `days=${customDays()}&at=${encodeURIComponent(new Date(span.to).toISOString())}` : rangeSel.value;
+    const range = lead ? base.replace(/days=(\d+)/, (_, n) => `days=${Number(n) + 1}`) : base;
     const query = range + (p.used != null ? `&step=${p.used}` : '') + '&metric=' + encodeURIComponent(asked());
     let r     ;
     try { r = await api(withInstance('/api/flow/series?' + query, instSel)); }
@@ -11700,7 +11742,7 @@ function trendsPage(nav     , sections     , spec            ) {
   opts.onclick = () => { bar.classList.toggle('opts-open'); summarise(); };
   refresh.classList.add('trend-refresh');
   bar.append(opts, refresh,
-    el('label', { class: 'ld-inst' }, 'Show ', rangeSel),
+    el('label', { class: 'ld-inst' }, 'Show ', rangeSel), customBox,
     el('label', { class: 'ld-inst' }, 'every ', intervalSel),
     el('label', { class: 'ld-inst' }, 'of ', metricSel),
     el('label', { class: 'ld-inst' }, 'as ', chartSel),
