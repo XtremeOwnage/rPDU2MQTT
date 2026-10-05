@@ -1842,6 +1842,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 pages = i is Core.Integrations.IGuiPageProvider p && i.Enabled(config)
                     ? p.Pages.Select(g => new { id = g.Id, title = g.Title, group = g.Group, icon = g.Icon, configSection = g.ConfigSection })
                     : null,
+                managedNodes = i is Core.Integrations.INodeManager m && i.Enabled(config)
+                    ? m.ManagedNodes.Select(r => new { sourceType = r.SourceType, tag = r.Tag })
+                    : null,
             });
             return Results.Json(new { ok = true, integrations = list }, ConfigSchema.Json);
         });

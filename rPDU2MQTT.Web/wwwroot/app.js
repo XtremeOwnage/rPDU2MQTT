@@ -2167,6 +2167,22 @@ function rankChart(opts
   return { svg, gaps: 0 };
 }
 
+// ── managed-nodes.ts ────────────────────────────────────────────
+// Nodes an integration manages, from its ManagedNodes rules.
+
+let managedRules                = [];
+function setManagedRules(rules               ) { managedRules = rules; }
+
+const sameText = (a     , b     ) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
+
+/// The integration that manages this node, or null.
+function managedBy(n     )                {
+  const r = managedRules.find(r =>
+    (r.sourceType && (n?.Sources || []).some((s     ) => sameText(s.Type, r.sourceType))) ||
+    (r.tag && (n?.Tags || []).some((t     ) => sameText(t, r.tag))));
+  return r ? r.integration : null;
+}
+
 // ── context-menu.ts ─────────────────────────────────────────────
 // The little menu a right-click opens, positioned inside the box it was aimed at. The floor plan and the
 // flow diagram both use it; each keeps its own class so its own styling still applies.
@@ -8434,7 +8450,7 @@ function wouldLoop(links       , from        , to        ) {
 }
 
 // Virtual-node manager.
-function renderNodeManager(flow     , customNodes       , links       , cand                  , editing                       , rerender                           , query = '') {
+function renderNodeManager(flow     , customNodes       , links       , cand                  , editing                       , rerender                           , query = '', hideManaged = false) {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
@@ -8442,11 +8458,12 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
   // The node being edited always stays.
   const q = query.trim().toLowerCase();
   const all = customNodes;
-  if (q) {
-    const hit = (n     ) => [n.Id, n.Label, n.Kind || 'node', kindMeta(n.Kind)[1], ...(n.Tags || [])]
-      .some((v     ) => String(v || '').toLowerCase().includes(q));
-    customNodes = all.filter((n     ) => hit(n) || n.Id === editing.id);
-    box.appendChild(el('div', { class: 'desc nd-shown', text: `${customNodes.length} of ${all.length} nodes shown` }));
+  const hit = (n     ) => !q || [n.Id, n.Label, n.Kind || 'node', kindMeta(n.Kind)[1], ...(n.Tags || [])]
+    .some((v     ) => String(v || '').toLowerCase().includes(q));
+  const managed = hideManaged ? all.filter((n     ) => managedBy(n) && n.Id !== editing.id).length : 0;
+  if (q || managed) {
+    customNodes = all.filter((n     ) => n.Id === editing.id || (hit(n) && !(hideManaged && managedBy(n))));
+    box.appendChild(el('div', { class: 'desc nd-shown', text: `${customNodes.length} of ${all.length} nodes shown` + (managed ? ` · ${managed} managed hidden` : '') }));
   }
 
   if (!customNodes.length) {
@@ -8577,7 +8594,15 @@ function addNodesSection(nav     , sections     ) {
   const hunt = el('input', { type: 'search', class: 'nd-hunt', placeholder: 'filter by id, name, kind or tag…' })                    ;
   hunt.oninput = () => render();
   const count = document.createElement('span'); count.className = 'ld-count';
-  bar.appendChild(instSel.wrap); bar.appendChild(hunt); bar.appendChild(count); sec.appendChild(bar);
+  let hideManaged = (() => { try { return localStorage.getItem('rpdu-nodes-hide-managed') !== '0'; } catch { return true; } })();
+  const managedBox = el('input', { type: 'checkbox', checked: hideManaged })                    ;
+  managedBox.onchange = () => {
+    hideManaged = managedBox.checked;
+    try { localStorage.setItem('rpdu-nodes-hide-managed', hideManaged ? '1' : '0'); } catch { /* this session only */ }
+    render();
+  };
+  const managedLabel = el('label', { class: 'nd-managed', title: 'Nodes an integration creates and maintains, such as solar panels and strings' }, managedBox, ' Hide managed');
+  bar.appendChild(instSel.wrap); bar.appendChild(hunt); bar.appendChild(managedLabel); bar.appendChild(count); sec.appendChild(bar);
   const ed      = document.createElement('div'); ed.style.marginTop = '8px'; sec.appendChild(ed);
   let lastGraph      = null;
   const editing                        = { id: null };
@@ -8624,7 +8649,8 @@ function addNodesSection(nav     , sections     ) {
       el('span', { text: ', and tags — including the rules that tag PDUs and outlets — on the ' }),
       el('a', { text: 'Tags page', onclick: () => goTo('Tags') }),
       el('span', { text: '.' })));
-    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }, hunt.value));
+    managedLabel.hidden = !customNodes.some((n     ) => managedBy(n));
+    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }, hunt.value, hideManaged));
   };
 
   const load = async () => {
@@ -17162,6 +17188,7 @@ async function loadPluginPages() {
     const r = await api('/api/integrations');
     pluginPages = (r.body?.integrations || []).flatMap((i     ) =>
       (i.pages || []).map((p     ) => ({ ...p, integration: i.id })));
+    setManagedRules((r.body?.integrations || []).flatMap((i     ) => (i.managedNodes || []).map((m     ) => ({ ...m, integration: i.id }))));
   } catch { pluginPages = []; }
 }
 

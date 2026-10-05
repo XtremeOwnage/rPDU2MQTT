@@ -11,6 +11,7 @@ title: Nodes
 ![Nodes page](../assets/screenshots/nodes.webp)
 
 - **Add node**: id, label, kind.
+- **Hide managed** (on by default): hides nodes an integration maintains, such as Tigo panels and strings.
 - **Import device template**: adds pre-wired nodes and the Modbus connection for a known device (EG4 FlexBoss 21). Check register addresses and scales against your device.
 - **Fed by** sets the feeder from the table.
 - **Edit** opens the node editor. **Rename** changes the id and keeps its links. **Copy** duplicates it.

@@ -6,7 +6,7 @@ namespace rPDU2MQTT.Plugin.Tigo;
 
 /// <summary>Tigo TS4 optimizers read from a TAP's RS485 bus.</summary>
 public sealed class TigoPlugin : IIntegration, IConfigurablePlugin, IValueSourcePlugin, INodeProvider, IStatusProvider,
-    IIntegrationApi, ISingleOwnerLeaseUser, IGuiPageProvider, IPluginStoreUser
+    IIntegrationApi, ISingleOwnerLeaseUser, IGuiPageProvider, IPluginStoreUser, INodeManager
 {
     public string Id => "tigo";
     public string DisplayName => "Tigo TAP";
@@ -18,6 +18,7 @@ public sealed class TigoPlugin : IIntegration, IConfigurablePlugin, IValueSource
         new("panel-types", "Panel Types", "Energy Flow", "▦", "Plugins.tigo.PanelTypes"),
     ];
     public string? PageAsset(string file) => GuiPageAssets.Read(typeof(TigoPlugin).Assembly, file);
+    public IReadOnlyList<ManagedNodeRule> ManagedNodes => [new(SourceType: SourceType), new(Tag: "pv-string")];
     public IReadOnlyList<string> PageSettings { get; } = ["PanelTypes", "Strings", "StringPanels", "Mppts", "GroupPanels"];
 
     public string SourceType => "tigo";

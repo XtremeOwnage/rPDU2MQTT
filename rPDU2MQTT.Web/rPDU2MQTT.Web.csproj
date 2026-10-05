@@ -71,6 +71,7 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/solar.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/groupnest.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/navbadge.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/managednodes.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowhub.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/timeline.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/fixedlist.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />

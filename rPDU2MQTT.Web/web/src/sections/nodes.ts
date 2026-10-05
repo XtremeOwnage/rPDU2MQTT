@@ -9,6 +9,7 @@ import { renderNodeEditor, overlay, openRenameDialog } from './node-editor.js';
 import { migrateEnergyFlow, saveConfig } from './flow.js';
 import { tagInput } from '../tags.js';
 import { renameInBalance } from './balance.js';
+import { managedBy } from '../managed-nodes.js';
 
 export function flowCandidates(lastGraph: any, customNodes: any[]) {
   const cand = new Map<string, any>();
@@ -223,7 +224,7 @@ export function wouldLoop(links: any[], from: string, to: string) {
 }
 
 // Virtual-node manager.
-export function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void, query = '') {
+export function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void, query = '', hideManaged = false) {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
@@ -231,11 +232,12 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
   // The node being edited always stays.
   const q = query.trim().toLowerCase();
   const all = customNodes;
-  if (q) {
-    const hit = (n: any) => [n.Id, n.Label, n.Kind || 'node', kindMeta(n.Kind)[1], ...(n.Tags || [])]
-      .some((v: any) => String(v || '').toLowerCase().includes(q));
-    customNodes = all.filter((n: any) => hit(n) || n.Id === editing.id);
-    box.appendChild(el('div', { class: 'desc nd-shown', text: `${customNodes.length} of ${all.length} nodes shown` }));
+  const hit = (n: any) => !q || [n.Id, n.Label, n.Kind || 'node', kindMeta(n.Kind)[1], ...(n.Tags || [])]
+    .some((v: any) => String(v || '').toLowerCase().includes(q));
+  const managed = hideManaged ? all.filter((n: any) => managedBy(n) && n.Id !== editing.id).length : 0;
+  if (q || managed) {
+    customNodes = all.filter((n: any) => n.Id === editing.id || (hit(n) && !(hideManaged && managedBy(n))));
+    box.appendChild(el('div', { class: 'desc nd-shown', text: `${customNodes.length} of ${all.length} nodes shown` + (managed ? ` · ${managed} managed hidden` : '') }));
   }
 
   if (!customNodes.length) {
@@ -366,7 +368,15 @@ export function addNodesSection(nav: any, sections: any) {
   const hunt = el('input', { type: 'search', class: 'nd-hunt', placeholder: 'filter by id, name, kind or tag…' }) as HTMLInputElement;
   hunt.oninput = () => render();
   const count = document.createElement('span'); count.className = 'ld-count';
-  bar.appendChild(instSel.wrap); bar.appendChild(hunt); bar.appendChild(count); sec.appendChild(bar);
+  let hideManaged = (() => { try { return localStorage.getItem('rpdu-nodes-hide-managed') !== '0'; } catch { return true; } })();
+  const managedBox = el('input', { type: 'checkbox', checked: hideManaged }) as HTMLInputElement;
+  managedBox.onchange = () => {
+    hideManaged = managedBox.checked;
+    try { localStorage.setItem('rpdu-nodes-hide-managed', hideManaged ? '1' : '0'); } catch { /* this session only */ }
+    render();
+  };
+  const managedLabel = el('label', { class: 'nd-managed', title: 'Nodes an integration creates and maintains, such as solar panels and strings' }, managedBox, ' Hide managed');
+  bar.appendChild(instSel.wrap); bar.appendChild(hunt); bar.appendChild(managedLabel); bar.appendChild(count); sec.appendChild(bar);
   const ed: any = document.createElement('div'); ed.style.marginTop = '8px'; sec.appendChild(ed);
   let lastGraph: any = null;
   const editing: { id: string | null } = { id: null };
@@ -413,7 +423,8 @@ export function addNodesSection(nav: any, sections: any) {
       el('span', { text: ', and tags — including the rules that tag PDUs and outlets — on the ' }),
       el('a', { text: 'Tags page', onclick: () => goTo('Tags') }),
       el('span', { text: '.' })));
-    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }, hunt.value));
+    managedLabel.hidden = !customNodes.some((n: any) => managedBy(n));
+    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close?: boolean) => { if (close) editing.id = null; render(); }, hunt.value, hideManaged));
   };
 
   const load = async () => {

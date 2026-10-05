@@ -155,6 +155,7 @@ public string? PageAsset(string file) => GuiPageAssets.Read(typeof(MyPlugin).Ass
 - `PageSettings`: keys under `Plugins.{id}` that only the pages read. Saving them needs no restart.
 - `host`: `api`, `btn`, `el`, `ensure`, `toast`, `state`, `refreshDirty`, `saveConfig`, `openHistorySheet`, `busyInSection`, `timelineStrip`, `stepToFit`, `temp` (`unit`, `to`, `from`, `fmt`: °C to the chosen unit and back).
 - Example: the Tigo plugin's Solar Array page, `plugins/rPDU2MQTT.Plugin.Tigo/web/`.
+- `INodeManager.ManagedNodes`: rules (`SourceType` or `Tag`) for the nodes the plugin maintains. **Hide managed** on the Nodes page hides them.
 
 ## Supplying values, or being a device
 
