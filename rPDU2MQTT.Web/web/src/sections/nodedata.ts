@@ -10,6 +10,7 @@
 //
 // With history on, the same table can show a past moment instead, picked on a timeline (#514).
 import { api, btn, el, activate, formatNum, navLink } from '../helpers.js';
+import { tempUnit, toTemp } from '../temp-units.js';
 import { state } from '../state.js';
 import { liveWhileActive, realtimeLive } from '../realtime.js';
 import { timelineStrip } from './timeline.js';
@@ -24,7 +25,8 @@ const UNITS: Record<string, [string, string]> = {
   percent: ['Percentage', '%'], temperature: ['Temperature', '°C'],
 };
 const metricName = (m: string) => (UNITS[m] || [m, ''])[0];
-const metricUnit = (m: string) => (UNITS[m] || [m, ''])[1];
+const metricUnit = (m: string) => (m === 'temperature' ? tempUnit() : (UNITS[m] || [m, ''])[1]);
+const shownAs = (m: string, v: number) => (m === 'temperature' ? toTemp(v) : v);
 
 /// How far back the timeline reaches.
 const NODE_DATA_WINDOWS: [number, string][] = [[60, '1 hour'], [360, '6 hours'], [1440, '24 hours'], [10080, '7 days']];
@@ -215,8 +217,8 @@ export function addNodeDataSection(nav: any, sections: any) {
       // source that cannot report ages showed "—" here while the diagram beside it drew that very number.
       const shown = r.fixed != null ? null : shownOf(r);
       const val = el('td', { class: 'num' });
-      if (r.fixed != null) val.append(el('span', { text: `${formatNum(r.fixed)} ${metricUnit(r.metric)}`.trim() }));
-      else if (shown != null) val.append(el('span', { text: `${formatNum(shown)} ${metricUnit(r.metric)}`.trim() }));
+      if (r.fixed != null) val.append(el('span', { text: `${formatNum(shownAs(r.metric, r.fixed))} ${metricUnit(r.metric)}`.trim() }));
+      else if (shown != null) val.append(el('span', { text: `${formatNum(shownAs(r.metric, shown))} ${metricUnit(r.metric)}`.trim() }));
       else { val.append(el('span', { style: { color: 'var(--muted)' }, text: '—' })); missing++; }
       tr.appendChild(val);
       if (past()) { tb.appendChild(tr); return; }

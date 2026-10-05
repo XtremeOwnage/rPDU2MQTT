@@ -1,4 +1,5 @@
 import { api, btn, closeSheet, el, openSheet } from './helpers.js';
+import { tempUnit, toTemp } from './temp-units.js';
 import { sparkline } from './charts.js';
 import { editNodeOnNextOpen } from './sections/nodes.js';
 
@@ -66,6 +67,10 @@ export function openHistorySheet(o: HistoryRequest) {
     catch (e: any) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
     const body = r?.body;
     if (!body?.ok) { note.textContent = body?.message || 'Could not read the history.'; return; }
+    if (metricNow === 'temperature') {
+      (body.series || []).forEach((s: any) => { s.values = (s.values || []).map((v: any) => (typeof v === 'number' ? toTemp(v) : v)); });
+      body.units = tempUnit();
+    }
     const all = body.series || [];
     const series = all.filter((s: any) => nodes.includes(s.node));
     if (!series.length) { note.textContent = `The history backend holds nothing for ${nodes.join(', ')} in this window.`; return; }
@@ -135,7 +140,7 @@ export function openHistorySheet(o: HistoryRequest) {
   const markWindow = () => buttons.forEach((b, i) => b.classList.toggle('primary', HISTORY_WINDOWS[i][0] === window));
   markWindow();
   const metricSel = el('select', { class: 'hs-metric', title: 'Which measurement to chart.' }) as HTMLSelectElement;
-  HISTORY_METRICS.forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t })));
+  HISTORY_METRICS.forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t.replace('°C', tempUnit()) })));
   if (!HISTORY_METRICS.some(([v]) => v === metricNow)) metricSel.appendChild(el('option', { value: metricNow, text: metricNow }));
   metricSel.value = metricNow;
   metricSel.onchange = () => { metricNow = metricSel.value; load(); };

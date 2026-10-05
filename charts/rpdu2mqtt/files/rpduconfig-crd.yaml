@@ -813,6 +813,14 @@ spec:
                     - imperial
                     - metric
                     description: "How distances and sizes are shown on the floor plans: imperial (feet and inches), metric (metres and centimetres), or auto to follow the browser's language."
+                  TemperatureUnits:
+                    type: string
+                    enum:
+                    - ""
+                    - auto
+                    - celsius
+                    - fahrenheit
+                    description: "How temperatures are shown: celsius, fahrenheit, or auto to follow the browser's language."
                   EnergyPrice:
                     type: number
                     description: What a kWh of energy costs, in your currency. When set, the Trends pages can chart energy as cost. Leave blank to not offer cost.

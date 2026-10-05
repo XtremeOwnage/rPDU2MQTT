@@ -82,6 +82,7 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/derived.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/emoncms.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/units.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/tempunits.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/ribbons.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/sunburst.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/treemap.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
