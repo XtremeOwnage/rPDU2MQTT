@@ -6,6 +6,7 @@ on:
     branches: [ main ]
     paths:
       - 'rPDU2MQTT*/**'
+      - 'plugins/**'
       - 'Examples/Kubernetes/crd/crd.yaml'
       - 'charts/**'
       - 'rPDU2MQTT.sln'
@@ -14,6 +15,7 @@ on:
     branches: [ "main" ]
     paths:
       - 'rPDU2MQTT*/**'
+      - 'plugins/**'
       - 'Examples/Kubernetes/crd/crd.yaml'
       - 'charts/**'
       - 'rPDU2MQTT.sln'

@@ -34,6 +34,7 @@
 		<GuiSource Include="web\styles.css" />
 		<GuiSource Include="web\*.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
+		<GuiSource Include="..\plugins\rPDU2MQTT.Plugin.Tigo\wwwroot\*" />
 	</ItemGroup>
 
 	<!-- Builds the GUI bundle and runs its checks; skipped when node is not installed. -->
@@ -67,6 +68,7 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/pages.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/balance.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/floorplan.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/solar.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/timeline.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/fixedlist.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/plugin.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />

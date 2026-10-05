@@ -16,6 +16,7 @@ COPY ["rPDU2MQTT.Core/rPDU2MQTT.Core.csproj", "rPDU2MQTT.Core/"]
 COPY ["rPDU2MQTT.Engine/rPDU2MQTT.Engine.csproj", "rPDU2MQTT.Engine/"]
 COPY ["rPDU2MQTT.Api/rPDU2MQTT.Api.csproj", "rPDU2MQTT.Api/"]
 COPY ["rPDU2MQTT.Web/rPDU2MQTT.Web.csproj", "rPDU2MQTT.Web/"]
+COPY ["plugins/rPDU2MQTT.Plugin.Tigo/rPDU2MQTT.Plugin.Tigo.csproj", "plugins/rPDU2MQTT.Plugin.Tigo/"]
 RUN dotnet restore "./rPDU2MQTT/rPDU2MQTT.csproj"
 COPY . .
 WORKDIR "/src/rPDU2MQTT"

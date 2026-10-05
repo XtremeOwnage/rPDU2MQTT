@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>rPDU2MQTT.Plugin.Tigo</AssemblyName>
+    <RootNamespace>rPDU2MQTT.Plugin.Tigo</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Ship only the plugin DLL; the host provides Core. -->
+    <ProjectReference Include="..\..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="rPDU2MQTT.Tests" />
+  </ItemGroup>
+
+  <!-- GUI pages: web/*.ts + .css built into wwwroot. -->
+  <ItemGroup>
+    <EmbeddedResource Include="wwwroot\*.js;wwwroot\*.css" />
+    <PageSource Include="web\*" />
+  </ItemGroup>
+
+  <Target Name="BuildGuiPages" BeforeTargets="BeforeBuild" Inputs="@(PageSource)" Outputs="wwwroot\solar-array.js;wwwroot\panel-types.js">
+    <Exec Command="node --version" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="_NodeExitCode" />
+    </Exec>
+    <Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/build.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+  </Target>
+
+</Project>

@@ -1107,6 +1107,130 @@ required. The poll runs only when a feed is bound.
 - Read over the REST API using `HomeAssistant.EnergyDashboard.Url` and a long-lived access token.
 - An entity that is `unavailable` or non-numeric supplies nothing.
 
+### Live sources from Tigo optimizers (plugin)
+
+Per-panel readings from Tigo TS4 optimizers, read from the TAP's RS485 bus.
+
+- Hardware: an RS485-to-Ethernet gateway in raw TCP mode, 38400 baud, 8N1.
+- Plugin: `plugins/rPDU2MQTT.Plugin.Tigo`, loaded from `plugins/tigo/`.
+- Protocol: from [openTAPtoX](https://github.com/jontubs/openTAPtoX) (MIT). Not a Tigo API.
+
+**GUI:** Sources → **Tigo TAP**. Add a connection under **Connections**, then Save.
+
+**YAML:**
+
+```yaml
+Plugins:
+  tigo:
+    Enabled: true
+    StaleSeconds: 180
+    Connections:
+      - Id: roof
+        Host: 192.168.1.50
+        Port: 4196
+        Mode: Listen
+```
+
+| Setting | Default | Value |
+|---------|---------|-------|
+| `Enabled` | `false` | Read Tigo optimizers. |
+| `StaleSeconds` | `180` | Seconds after an optimizer's last report that its reading stops being current. While the TAP still answers, a stale optimizer reads 0 W. |
+| `Connections` | `[]` | One entry per TAP bus. |
+
+Per connection:
+
+| Setting | Default | Value |
+|---------|---------|-------|
+| `Id` | | Stable id, e.g. `roof`. |
+| `Name` | | Friendly name. |
+| `Enabled` | `true` | Read this bus. |
+| `Host` | | Gateway address. |
+| `Port` | `4196` | Gateway raw TCP port. Waveshare: `4196`. USR-TCP232: `8899`. |
+| `Mode` | `Listen` | `Listen` or `Poll`. |
+| `GatewayId` | blank | Poll only. TAP gateway id in hex, e.g. `1209`. Blank: learned from the bus. |
+| `PollIntervalMs` | `1000` | Poll only. Milliseconds between polls. |
+| `AmpsScale` | `0.0056` | Amps per count of the input-current field. |
+
+| Mode | Bus | Transmits |
+|------|-----|-----------|
+| `Listen` | A Tigo CCA polls the TAP; the bridge reads the traffic. | Never |
+| `Poll` | No CCA; the bridge polls the TAP and pages its node table. | Yes. Stops if another controller is heard. |
+
+- **Names.** An optimizer is named by its serial once a node table or topology report is seen. Before that it
+  shows as `node-<gateway>-<n>`.
+- **Lease.** Each connection holds the single-owner lease keyed by `host:port`. Other replicas show Standby.
+- **Restarts.** With `Cache.Enabled`, optimizer names and last readings are kept in Valkey/Redis, so a restart
+  doesn't need the CCA to resend its node table.
+- **Readings.** Input volts, input amps, power (vin × iin), output volts, temperature, duty, RSSI.
+
+**Solar Array page** (Energy Flow → **Solar Array**):
+
+- Strings with their panels in wiring order. Each panel shows Power, Volts, Amps or Temp.
+- Marked: low panels (power under 0.75× the string median) and quiet panels.
+- Click a panel: its history.
+- **Point in time** (needs `History.Enabled`): a timeline of the strings over 1 hour to 7 days, ending today or a picked day; click or drag on it to show every panel and string as recorded then.
+- **Edit**: drag panels to reorder them or move them to another string; drag a string by ⠿ (or use ‹ ›) to reorder strings; rename panels and strings; set each string's MPPT.
+- Unassigned optimizers are listed below the strings. Adding one creates:
+  - a panel: a `solar` node with `Type: tigo` sources for `realpower`, `voltage`, `current` and
+    `temperature`, `Settings.Optimizer: <serial>`;
+  - a link panel → string;
+  - a string: a `solar` node tagged `pv-string`, linked string → MPPT node.
+- `Optimizer` also accepts the label serial (`4-DFA5A5Y`).
+- **Edit** also assigns a panel type, per panel or for a whole string. Strings with typed panels show rated
+  Voc (sum), Isc (highest) and kWp at STC.
+
+**Panel Types page** (Energy Flow → **Panel Types**): module datasheets, stored under `Plugins.tigo.PanelTypes`.
+
+```yaml
+Plugins:
+  tigo:
+    PanelTypes:
+      - { Id: rec-405, Manufacturer: REC, Model: Alpha Pure 405, Watts: 405, Voc: 44.9, Isc: 11.4, Vmp: 37.6, Imp: 10.78 }
+```
+
+A panel's type is `Settings.PanelType: <Id>` on its `tigo` sources.
+
+**MPPT limits** (Solar Array → Edit → MPPTs): per MPPT, max input voltage, MPPT voltage range, max usable current
+and max short-circuit current; plus the site's coldest temperature. Each string is checked against its MPPT:
+
+| Check | Level |
+|---|---|
+| Voc (at the coldest temperature when every panel type has a Voc coefficient, else STC) over max input voltage | error |
+| Voc within 5% of max input voltage | warning |
+| Vmp outside the MPPT range | warning |
+| Isc of the MPPT's parallel strings over max short-circuit current | error |
+| Imp of the MPPT's parallel strings over max usable current (clipping) | warning |
+
+```yaml
+Plugins:
+  tigo:
+    DesignMinTempC: -15
+    Mppts:
+      MPPT_2: { MaxVoltage: 600, MinMpptVoltage: 120, MaxMpptVoltage: 500, MaxCurrent: 15, MaxShortCircuitCurrent: 19 }
+```
+
+**Group panels by string** (Solar Array header) keeps one `EnergyFlow.Groups` entry per string, its panels as
+members, so Flow shows strings and expands one to its panels on click. Stored as `Plugins.tigo.GroupPanels: true`.
+
+Per-string layout, set in **Edit**: columns, and Hidden (shown only in Edit).
+
+```yaml
+Plugins:
+  tigo:
+    Strings:
+      pv_a1: { Columns: 4, Hidden: true }
+```
+
+Panels without optimizers are counted per string, set in **Edit** ("Without optimizers"), drawn as placeholders
+and included in the rating:
+
+```yaml
+Plugins:
+  tigo:
+    StringPanels:
+      pv_a1: { PanelType: jinko-jkm410m-72h, Panels: 4 }
+```
+
 ### Device templates (Nodes tab → "Import device template")
 
 Imports a Modbus connection and pre-wired nodes (solar / battery / grid / inverter) with register bindings.
