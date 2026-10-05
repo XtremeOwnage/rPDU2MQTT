@@ -5567,11 +5567,27 @@ function arcPath(r0        , r1        , a0        , a1        )         {
        + `A${r0},${r0} 0 ${large} 0 ${f2(x3)},${f2(y3)} Z`;
 }
 
-const BASE_SIZE = 10.5;
+const BASE_SIZE = 11.5;
+
+/// Light text on dark fills, dark text on light ones.
+function labelInk(fill        )         {
+  const m = /hsl\((-?[\d.]+)\s+([\d.]+)%\s+([\d.]+)%\)/.exec(fill);
+  let r = 0.5, g = 0.5, b = 0.5;
+  if (m) {
+    const h = +m[1], sat = +m[2] / 100, l = +m[3] / 100, k = (n        ) => (n + h / 30) % 12;
+    const a = sat * Math.min(l, 1 - l), ch = (n        ) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+    [r, g, b] = [ch(0), ch(8), ch(4)];
+  } else if (/^#[\da-f]{6}$/i.test(fill)) {
+    [r, g, b] = [1, 3, 5].map(i => parseInt(fill.slice(i, i + 2), 16) / 255);
+  }
+  const lin = (c        ) => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  const lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return lum < 0.18 ? '#ffffff' : '#0b0e13';
+}
 const clipTo = (text        , n        ) => text.length > n ? text.slice(0, Math.max(3, n - 1)) + '…' : text;
 
 function layoutLabel(label        , span        , mid        , rm        , depth        , size        )           {
-  const charW = 6.2 * size / BASE_SIZE, lineH = 12.5 * size / BASE_SIZE;
+  const charW = 0.59 * size, lineH = 1.19 * size;
   const across = Math.floor((depth - 8) / charW);
   const fits = (r        ) => Math.floor((span * r - 8) / charW);
   const along = fits(rm);
@@ -5672,7 +5688,8 @@ function drawSunburst(nodes       , links       , opts              )           
     // Too thin to draw once the gap between arcs comes off: its parent's card lists it.
     const r0 = RING0 + (arc.depth - 1) * ringW, r1 = r0 + ringW - 2;
     if ((arc.a1 - arc.a0 - 0.004) * r0 < 3) return;
-    const p = svgEl('path', { d: arcPath(r0, r1, arc.a0 + 0.002, arc.a1 - 0.002), fill: treeFill(arc.node), class: 'sunburst-arc' });
+    const fill = treeFill(arc.node);
+    const p = svgEl('path', { d: arcPath(r0, r1, arc.a0 + 0.002, arc.a1 - 0.002), fill, class: 'sunburst-arc' });
     p.dataset.node = arc.id;
     const leaf = dir === 'in' ? true : !opens(links, arc.id);
     if (leaf) p.classList.add('is-leaf');
@@ -5687,10 +5704,10 @@ function drawSunburst(nodes       , links       , opts              )           
     const mid = (arc.a0 + arc.a1) / 2, rm = (r0 + r1) / 2;
     if ((arc.a1 - arc.a0) * rm < 16) return;
     const [x, y] = pt(rm, mid);
-    const label = arcLabel(arc.label, arc.a1 - arc.a0, mid, rm, r1 - r0, arc.depth === 1 ? 15 : arc.depth === 2 ? 12.5 : BASE_SIZE);
-    const fontSize = label.size === BASE_SIZE ? undefined : `font-size:${label.size}px`;
+    const label = arcLabel(arc.label, arc.a1 - arc.a0, mid, rm, r1 - r0, arc.depth === 1 ? 16 : arc.depth === 2 ? 13.5 : BASE_SIZE);
+    const style = `font-size:${label.size}px;fill:${labelInk(fill)}`;
     if (!label.along) {
-      const t = svgEl('text', { x: f2(x), y: f2(y), class: 'sunburst-label', transform: `rotate(${f2(label.deg)} ${f2(x)} ${f2(y)})`, ...(fontSize ? { style: fontSize } : {}) });
+      const t = svgEl('text', { x: f2(x), y: f2(y), class: 'sunburst-label', transform: `rotate(${f2(label.deg)} ${f2(x)} ${f2(y)})`, style });
       t.textContent = label.lines[0];
       svg.appendChild(t);
       return;
@@ -5705,7 +5722,7 @@ function drawSunburst(nodes       , links       , opts              )           
       const [sx, sy] = pt(r, label.flip ? a1 : arc.a0), [ex, ey] = pt(r, label.flip ? arc.a0 : a1);
       const large = a1 - arc.a0 > Math.PI ? 1 : 0;
       defs.appendChild(svgEl('path', { id, d: `M${f2(sx)},${f2(sy)} A${f2(r)},${f2(r)} 0 ${large} ${label.flip ? 0 : 1} ${f2(ex)},${f2(ey)}`, fill: 'none' }));
-      const t = svgEl('text', { class: 'sunburst-label', ...(fontSize ? { style: fontSize } : {}) });
+      const t = svgEl('text', { class: 'sunburst-label', style });
       const tp = svgEl('textPath', { href: `#${id}`, startOffset: '50%' });
       tp.textContent = line;
       t.appendChild(tp);
