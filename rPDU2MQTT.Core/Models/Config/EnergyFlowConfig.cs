@@ -277,6 +277,10 @@ public class EnergyFlowNode
     [Description("The circuit this node is plugged into, as the panel id and breaker number: 'main_panel/B06'. A circuit then shows it among its metered devices and reports what is left unmetered.")]
     public string Circuit { get; set; } = "";
 
+    [DefaultValue(false)]
+    [Description("Left off the flow diagrams. Still listed and editable.")]
+    public bool Hidden { get; set; }
+
     [Description("EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}.")]
     [TemplateVariables("node", "label", "kind")]
     public string? EmonCmsTag { get; set; }

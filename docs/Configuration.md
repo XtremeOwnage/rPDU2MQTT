@@ -1210,16 +1210,18 @@ Plugins:
       MPPT_2: { MaxVoltage: 600, MinMpptVoltage: 120, MaxMpptVoltage: 500, MaxCurrent: 15, MaxShortCircuitCurrent: 19 }
 ```
 
-**Group panels by string** (Solar Array header) keeps one `EnergyFlow.Groups` entry per string, its panels as
-members, so Flow shows strings and expands one to its panels on click. Stored as `Plugins.tigo.GroupPanels: true`.
+**Flow group per string** (Edit) keeps one `EnergyFlow.Groups` entry per string, its panels as members, nested
+in the group holding its MPPT. Stored as `Plugins.tigo.GroupPanels: true`.
 
-Per-string layout, set in **Edit**: columns, and Hidden (shown only in Edit).
+**Hidden** (Edit, per string) sets the string node's `Hidden`: off this page outside Edit and off the flow diagrams.
+
+Per-string columns, set in **Edit**:
 
 ```yaml
 Plugins:
   tigo:
     Strings:
-      pv_a1: { Columns: 4, Hidden: true }
+      pv_a1: { Columns: 4 }
 ```
 
 Panels without optimizers are counted per string, set in **Edit** ("Without optimizers"), drawn as placeholders

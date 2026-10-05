@@ -9,6 +9,21 @@ export function flowGroups(): any[] {
   return (state.data?.EnergyFlow?.Groups || []).filter((g: any) => g && g.Id);
 }
 
+// Drop hidden nodes, and feeders that only feed hidden nodes.
+export function hideHiddenNodes(nodes: any[], links: any[]): { nodes: any[]; links: any[] } {
+  const hidden = new Set<string>((state.data?.EnergyFlow?.Nodes || []).filter((n: any) => n?.Hidden).map((n: any) => n.Id));
+  if (!hidden.size) return { nodes, links };
+  for (let grew = true; grew;) {
+    grew = false;
+    nodes.forEach((n: any) => {
+      if (hidden.has(n.id)) return;
+      const out = links.filter((l: any) => l.source === n.id);
+      if (out.length && out.every((l: any) => hidden.has(l.target))) { hidden.add(n.id); grew = true; }
+    });
+  }
+  return { nodes: nodes.filter((n: any) => !hidden.has(n.id)), links: links.filter((l: any) => !hidden.has(l.source) && !hidden.has(l.target)) };
+}
+
 // Groups start collapsed.
 export function ensureGroupState() {
   flowGroups().forEach((g: any) => { if (!seenGroups.has(g.Id)) { seenGroups.add(g.Id); collapsedGroups.add(g.Id); } });

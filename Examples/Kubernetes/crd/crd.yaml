@@ -960,6 +960,9 @@ spec:
                         Circuit:
                           type: string
                           description: "The circuit this node is plugged into, as the panel id and breaker number: 'main_panel/B06'. A circuit then shows it among its metered devices and reports what is left unmetered."
+                        Hidden:
+                          type: boolean
+                          description: Left off the flow diagrams. Still listed and editable.
                         EmonCmsTag:
                           type: string
                           description: "EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}."

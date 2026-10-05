@@ -27,6 +27,7 @@ Virtual upstream nodes (breakers, transfer switches, a “Total”) and their fe
 | `EnergyFlow.Nodes[].Tags` | list |  | Free-form tags for filtering the diagram and the energy views — e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows. |
 | `EnergyFlow.Nodes[].Location` | string |  | The id of the room, area, floor or site this node is in. Its own consumption counts toward that place. |
 | `EnergyFlow.Nodes[].Circuit` | string |  | The circuit this node is plugged into, as the panel id and breaker number: 'main_panel/B06'. A circuit then shows it among its metered devices and reports what is left unmetered. |
+| `EnergyFlow.Nodes[].Hidden` | bool | `false` | Left off the flow diagrams. Still listed and editable. |
 | `EnergyFlow.Nodes[].EmonCmsTag` | string |  | EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}. |
 | `EnergyFlow.Nodes[].EmonCmsVirtualTag` | string |  | EmonCMS tag this node's virtual feeds are filed under. Blank uses EmonCMS.Feeds.Virtual.Tag. Placeholders: {node}, {label}, {kind}. |
 | `EnergyFlow.Nodes[].StorageKwh` | double |  | For a battery node: usable storage capacity in kWh (display metadata; optional). |

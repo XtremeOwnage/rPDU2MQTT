@@ -2730,6 +2730,21 @@ function flowGroups()        {
   return (state.data?.EnergyFlow?.Groups || []).filter((g     ) => g && g.Id);
 }
 
+// Drop hidden nodes, and feeders that only feed hidden nodes.
+function hideHiddenNodes(nodes       , links       )                                 {
+  const hidden = new Set        ((state.data?.EnergyFlow?.Nodes || []).filter((n     ) => n?.Hidden).map((n     ) => n.Id));
+  if (!hidden.size) return { nodes, links };
+  for (let grew = true; grew;) {
+    grew = false;
+    nodes.forEach((n     ) => {
+      if (hidden.has(n.id)) return;
+      const out = links.filter((l     ) => l.source === n.id);
+      if (out.length && out.every((l     ) => hidden.has(l.target))) { hidden.add(n.id); grew = true; }
+    });
+  }
+  return { nodes: nodes.filter((n     ) => !hidden.has(n.id)), links: links.filter((l     ) => !hidden.has(l.source) && !hidden.has(l.target)) };
+}
+
 // Groups start collapsed.
 function ensureGroupState() {
   flowGroups().forEach((g     ) => { if (!seenGroups.has(g.Id)) { seenGroups.add(g.Id); collapsedGroups.add(g.Id); } });
@@ -5237,24 +5252,30 @@ function addLiveDataSection(nav     , sections     ) {
 // by side. Each node's children are what it feeds. A node fed from two parents is a child of each, carrying
 // that parent's share of it, so every level still adds up.
 
-/// Where the supply converges: follow the roots while everything they feed is one node. What was followed
-/// is the supply; the node it all meets at is the hub. With no such node the hub is null.
+/// Where the supply converges: the first node every root reaches, followed on while it feeds only one node.
+/// Its direct feeders are the supply. With no such node the hub is null.
 function findHub(nodes       , links       )                                           {
   const ids = new Set(nodes.map(n => n.id));
+  const out = new Map                  ();
+  links.forEach(l => { if (ids.has(l.source) && ids.has(l.target)) (out.get(l.source) ?? out.set(l.source, []).get(l.source) ).push(l.target); });
   const fed = new Set(links.map(l => l.target));
-  let frontier = nodes.filter(n => !fed.has(n.id)).map(n => n.id);
-  let supply           = [];
-  const seen = new Set        ();
-  while (frontier.length) {
-    const out = links.filter(l => frontier.includes(l.source));
-    const targets = [...new Set(out.map(l => l.target))].filter(t => ids.has(t));
-    if (frontier.length === 1 && targets.length !== 1) return { hub: frontier[0], supply };
-    if (targets.length !== 1 || seen.has(targets[0])) return { hub: null, supply: [] };
-    seen.add(targets[0]);
-    supply = frontier;
-    frontier = targets;
-  }
-  return { hub: null, supply: [] };
+  const roots = nodes.filter(n => !fed.has(n.id)).map(n => n.id);
+  if (!roots.length) return { hub: null, supply: [] };
+  const reached = new Map                ();
+  roots.forEach(r => {
+    const seen = new Set        ([r]);
+    for (let todo = [r]; todo.length;) (out.get(todo.pop() ) || []).forEach(t => { if (!seen.has(t)) { seen.add(t); todo.push(t); } });
+    seen.forEach(id => reached.set(id, (reached.get(id) || 0) + 1));
+  });
+  const common = new Set([...reached].filter(([, n]) => n === roots.length).map(([id]) => id));
+  const firsts = [...common].filter(id => !links.some(l => l.target === id && common.has(l.source)));
+  if (firsts.length !== 1) return { hub: null, supply: [] };
+  let hub = firsts[0];
+  const seen = new Set        ([hub]);
+  for (let next = out.get(hub) || []; next.length === 1 && !seen.has(next[0]); next = out.get(hub) || []) { hub = next[0]; seen.add(hub); }
+  if ((out.get(hub) || []).length === 0) return { hub: null, supply: [] };
+  const supply = [...new Set(links.filter(l => l.target === hub && ids.has(l.source)).map(l => l.source))];
+  return { hub, supply };
 }
 
 /// The top-level branches, largest first, each with its subtree; and the total they add up to.
@@ -6002,7 +6023,8 @@ function addFlowSection(nav     , sections     ) {
     if (drillTo && !(graph.nodes || []).some((n     ) => n.id === drillTo)) drillTo = null;
     graph = drilled(graph, drillTo);
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
-    const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
+    const visible = hideHiddenNodes((graph.nodes || []).slice(), (graph.links || []).slice());
+    const collapsed = collapseGraph(visible.nodes, visible.links);
     // ...then substitute the members for the anchor on any group left expanded.
     const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
     // ...then honour the unmetered-remainder view switch...
@@ -8011,7 +8033,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
 
   // --- Filing: tags, where it is, and where its EmonCMS feeds go. Folded until something is set. ---
   const more = el('details', { class: 'ne-more' })                      ;
-  const filed = [(node.Tags || []).length, node.Location, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag].filter(Boolean).length;
+  const filed = [(node.Tags || []).length, node.Location, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag, node.Hidden].filter(Boolean).length;
   more.open = filed > 0 || nodeEditorFilingOpen;
   more.addEventListener('toggle', () => { nodeEditorFilingOpen = more.open; });
   more.appendChild(el('summary', { class: 'ne-more-summary' },
@@ -8034,6 +8056,9 @@ function renderNodeEditor(node     , links       , cand                  , reren
   const circSel = choiceSelect(circuitChoices(), node.Circuit || '', '— not known —');
   circSel.onchange = () => { node.Circuit = circSel.value || undefined; };
   moreGrid.appendChild(field('Circuit', circSel, 'Breaker it is on. Counted among its metered devices.'));
+  const hiddenBox = el('input', { type: 'checkbox', checked: !!node.Hidden })                    ;
+  hiddenBox.onchange = () => { node.Hidden = hiddenBox.checked || undefined; };
+  moreGrid.appendChild(field('Hidden', el('span', { class: 'ne-check' }, hiddenBox, el('span', { text: 'hide on the flow diagrams' }))));
 
   // Where this node's EmonCMS feeds are filed; blank uses the EmonCMS page's tags.
   const emonTag = el('input', { type: 'text', value: node.EmonCmsTag || '', placeholder: 'EmonCMS default' })                    ;

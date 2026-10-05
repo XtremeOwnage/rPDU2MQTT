@@ -22,24 +22,30 @@ export type TreeNode = {
   key: string;
 };
 
-/// Where the supply converges: follow the roots while everything they feed is one node. What was followed
-/// is the supply; the node it all meets at is the hub. With no such node the hub is null.
+/// Where the supply converges: the first node every root reaches, followed on while it feeds only one node.
+/// Its direct feeders are the supply. With no such node the hub is null.
 export function findHub(nodes: any[], links: any[]): { hub: string | null; supply: string[] } {
   const ids = new Set(nodes.map(n => n.id));
+  const out = new Map<string, string[]>();
+  links.forEach(l => { if (ids.has(l.source) && ids.has(l.target)) (out.get(l.source) ?? out.set(l.source, []).get(l.source)!).push(l.target); });
   const fed = new Set(links.map(l => l.target));
-  let frontier = nodes.filter(n => !fed.has(n.id)).map(n => n.id);
-  let supply: string[] = [];
-  const seen = new Set<string>();
-  while (frontier.length) {
-    const out = links.filter(l => frontier.includes(l.source));
-    const targets = [...new Set(out.map(l => l.target))].filter(t => ids.has(t));
-    if (frontier.length === 1 && targets.length !== 1) return { hub: frontier[0], supply };
-    if (targets.length !== 1 || seen.has(targets[0])) return { hub: null, supply: [] };
-    seen.add(targets[0]);
-    supply = frontier;
-    frontier = targets;
-  }
-  return { hub: null, supply: [] };
+  const roots = nodes.filter(n => !fed.has(n.id)).map(n => n.id);
+  if (!roots.length) return { hub: null, supply: [] };
+  const reached = new Map<string, number>();
+  roots.forEach(r => {
+    const seen = new Set<string>([r]);
+    for (let todo = [r]; todo.length;) (out.get(todo.pop()!) || []).forEach(t => { if (!seen.has(t)) { seen.add(t); todo.push(t); } });
+    seen.forEach(id => reached.set(id, (reached.get(id) || 0) + 1));
+  });
+  const common = new Set([...reached].filter(([, n]) => n === roots.length).map(([id]) => id));
+  const firsts = [...common].filter(id => !links.some(l => l.target === id && common.has(l.source)));
+  if (firsts.length !== 1) return { hub: null, supply: [] };
+  let hub = firsts[0];
+  const seen = new Set<string>([hub]);
+  for (let next = out.get(hub) || []; next.length === 1 && !seen.has(next[0]); next = out.get(hub) || []) { hub = next[0]; seen.add(hub); }
+  if ((out.get(hub) || []).length === 0) return { hub: null, supply: [] };
+  const supply = [...new Set(links.filter(l => l.target === hub && ids.has(l.source)).map(l => l.source))];
+  return { hub, supply };
 }
 
 /// The top-level branches, largest first, each with its subtree; and the total they add up to.

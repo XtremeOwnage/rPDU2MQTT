@@ -53,9 +53,11 @@ export function setUntracked(stringId: string, value: { PanelType?: string, Pane
   else all[stringId] = value;
 }
 
-/// Per-string page layout: Plugins.tigo.Strings[stringId] = { Columns, Hidden }.
+/// Per-string page layout: Plugins.tigo.Strings[stringId] = { Columns }. Hidden there is read for older configs.
 export const layoutOf = (stringId: string): { Columns?: number, Hidden?: boolean } =>
   state.data?.Plugins?.tigo?.Strings?.[stringId] || {};
+
+export const isHidden = (s: any) => !!s?.Hidden || !!layoutOf(s?.Id).Hidden;
 
 export function setLayout(stringId: string, change: { Columns?: number, Hidden?: boolean }) {
   const all = ensure(ensure(ensure(state.data, 'Plugins', {}), 'tigo', {}), 'Strings', {});
@@ -473,14 +475,14 @@ export default function mount(sec: any, host: any) {
     strings.forEach(s => {
       const panels = panelsOf(s.Id);
       const extra = untrackedOf(s.Id);
-      if (!editing && (layoutOf(s.Id).Hidden || (!panels.length && !extra.Panels))) return;
+      if (!editing && (isHidden(s) || (!panels.length && !extra.Panels))) return;
       const readings = panels.map(readingOf).filter((o: any) => o && !stale(o));
       const watts = readings.reduce((sum: number, o: any) => sum + o.power, 0);
       const sorted = readings.map((o: any) => o.power).sort((a: number, b: number) => a - b);
       const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
       const volts = readings.some((o: any) => o.vout != null) ? readings.reduce((sum: number, o: any) => sum + (o.vout || 0), 0) : null;
 
-      const card = el('div', { class: 'sa-string' + (layoutOf(s.Id).Hidden ? ' is-string-hidden' : '') });
+      const card = el('div', { class: 'sa-string' + (isHidden(s) ? ' is-string-hidden' : '') });
       card.dataset.node = s.Id;
       const mppt = saMpptOf(s.Id);
       const headRow = el('div', { class: 'sa-string-head' });
@@ -520,9 +522,9 @@ export default function mount(sec: any, host: any) {
         grip.draggable = true;
         grip.addEventListener('dragstart', (e: any) => { draggedString = s.Id; e.dataTransfer?.setData('text/plain', s.Id); card.classList.add('is-dragging'); });
         grip.addEventListener('dragend', () => { draggedString = null; card.classList.remove('is-dragging'); sec.querySelectorAll?.('.is-drop').forEach((x: any) => x.classList.remove('is-drop')); });
-        const hide = el('input', { type: 'checkbox', checked: !!layoutOf(s.Id).Hidden }) as HTMLInputElement;
-        hide.onchange = () => { setLayout(s.Id, { Hidden: hide.checked || undefined }); changed(); };
-        const hideLabel = el('label', { class: 'sa-hide', title: 'Hidden strings show only in Edit' }, hide, ' Hidden');
+        const hide = el('input', { type: 'checkbox', checked: isHidden(s) }) as HTMLInputElement;
+        hide.onchange = () => { s.Hidden = hide.checked || undefined; setLayout(s.Id, { Hidden: undefined }); changed(); };
+        const hideLabel = el('label', { class: 'sa-hide', title: 'Hide here and on the flow diagrams' }, hide, ' Hidden');
         headRow.append(grip, name, el('span', { class: 'sa-arrow', text: '→' }), to, across, kinds, hideLabel, earlier, later);
         if (!panels.length) {
           const drop = btn('Delete string', 'danger');

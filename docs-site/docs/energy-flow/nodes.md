@@ -30,6 +30,7 @@ title: Nodes
 | Gauge max | `Max`, in the metric's unit |
 | Live value bindings | `Sources[]`, one per metric |
 | Fed by / Feeds | `Links` |
+| Hidden | `Hidden`: left off the flow diagrams, with any feeders that only feed it |
 
 A `load` cannot feed anything.
 

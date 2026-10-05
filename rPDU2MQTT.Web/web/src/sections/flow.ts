@@ -8,7 +8,7 @@ import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusedNode, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard, updateNodeCard } from '../flow-focus.js';
-import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, groupChips, viewSwitches, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
+import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, groupChips, viewSwitches, applyUnmeasuredPref, collapseGraph, ensureGroupState, hideHiddenNodes, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
 import { editNodeOnNextOpen, flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
 import { makeMenu } from '../context-menu.js';
@@ -353,7 +353,8 @@ export function addFlowSection(nav: any, sections: any) {
     if (drillTo && !(graph.nodes || []).some((n: any) => n.id === drillTo)) drillTo = null;
     graph = drilled(graph, drillTo);
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
-    const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
+    const visible = hideHiddenNodes((graph.nodes || []).slice(), (graph.links || []).slice());
+    const collapsed = collapseGraph(visible.nodes, visible.links);
     // ...then substitute the members for the anchor on any group left expanded.
     const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
     // ...then honour the unmetered-remainder view switch...
