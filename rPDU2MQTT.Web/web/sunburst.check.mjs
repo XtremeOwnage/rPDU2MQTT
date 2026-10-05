@@ -106,4 +106,12 @@ if (drillSel?.value !== 'sub') fail(`clicking the sub panel's arc drilled to "${
 const hubName = query(sec, '.sunburst-hub-name', false);
 if (!String(hubName?._text ?? hubName?.textContent).includes('sub')) fail('the hub does not name the sub panel after opening it');
 
+const lab = (label, span, mid, rm, depth) => vm.runInContext(`arcLabel(${JSON.stringify(label)}, ${span}, ${mid}, ${rm}, ${depth})`, sandbox);
+let lb = lab('B2-1', 0.05, 0.1, 300, 60);
+if (lb.lines.join() !== 'B2-1' || Math.abs(lb.deg - (0.1 * 180 / Math.PI - 90)) > 1e-6) fail(`a short label is not radial: ${JSON.stringify(lb)}`);
+lb = lab('Solar (PV)', 2.5, 2.0, 150, 60);
+if (lb.lines.join() !== 'Solar (PV)') fail(`a wide arc clips its label: ${JSON.stringify(lb)}`);
+if (Math.abs(lb.deg - (2.0 * 180 / Math.PI - 180)) > 1e-6) fail(`a label along the bottom of the ring is upside down: ${lb.deg}`);
+lb = lab('Livingroom Outlets TV', 0.6, 1.0, 200, 60);
+if (lb.lines.length !== 2 || lb.lines[0] !== 'Livingroom Outlets') fail(`a deep ring does not wrap: ${JSON.stringify(lb)}`);
 console.log(`sunburst check passed (${arcs.length} arcs; the hub, the supply ring and opening an arc).`);

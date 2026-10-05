@@ -5567,6 +5567,26 @@ function arcPath(r0        , r1        , a0        , a1        )         {
        + `A${r0},${r0} 0 ${large} 0 ${f2(x3)},${f2(y3)} Z`;
 }
 
+const CHAR_W = 6.2, LINE_H = 12.5;
+const clipTo = (text        , n        ) => text.length > n ? text.slice(0, Math.max(3, n - 1)) + '…' : text;
+
+/// An arc's label: across the ring, or along it (wrapped to two lines when the ring is deep enough), whichever shows more.
+function arcLabel(label        , span        , mid        , rm        , depth        )                                   {
+  const across = Math.floor((depth - 8) / CHAR_W);
+  const along = Math.floor((span * rm - 8) / CHAR_W);
+  let radial = (mid * 180 / Math.PI) - 90;
+  if (radial > 90) radial -= 180;
+  if (label.length <= across || along <= across || depth < LINE_H + 2) return { deg: radial, lines: [clipTo(label, across)] };
+  let tangent = mid * 180 / Math.PI;
+  if (tangent > 90 && tangent < 270) tangent -= 180;
+  if (label.length <= along || depth < 2 * LINE_H + 4) return { deg: tangent, lines: [clipTo(label, along)] };
+  const words = label.split(/\s+/);
+  let first = '';
+  while (words.length && (first ? first + ' ' + words[0] : words[0]).length <= along) first = first ? first + ' ' + words.shift() : words.shift() ;
+  if (!first) return { deg: tangent, lines: [clipTo(label, along)] };
+  return { deg: tangent, lines: words.length ? [first, clipTo(words.join(' '), along)] : [first] };
+}
+
 /// A node opens only when there is something beneath it; opening a leaf would draw an empty diagram.
 const opens = (links       , id        ) => links.some((l     ) => l.source === id && (l.value ?? 0) > 0);
 
@@ -5645,16 +5665,17 @@ function drawSunburst(nodes       , links       , opts              )           
     svg.appendChild(p);
     drawn.push({ p, key: arc.key });
 
-    // A label where it fits: along the ring's middle, turned to read outward, on the arcs big enough to hold it.
     const mid = (arc.a0 + arc.a1) / 2, rm = (r0 + r1) / 2;
     if ((arc.a1 - arc.a0) * rm < 16) return;
     const [x, y] = pt(rm, mid);
-    let deg = (mid * 180 / Math.PI) - 90;
-    if (deg > 90) deg -= 180;
+    const { deg, lines } = arcLabel(arc.label, arc.a1 - arc.a0, mid, rm, r1 - r0);
     const t = svgEl('text', { x: f2(x), y: f2(y), class: 'sunburst-label', transform: `rotate(${f2(deg)} ${f2(x)} ${f2(y)})` });
-    // Radial text: the ring's width is the line's length.
-    const maxChars = Math.floor((ringW - 8) / 6.2);
-    t.textContent = arc.label.length > maxChars ? arc.label.slice(0, Math.max(3, maxChars - 1)) + '…' : arc.label;
+    if (lines.length === 1) t.textContent = lines[0];
+    else lines.forEach((line, i) => {
+      const span = svgEl('tspan', { x: f2(x), dy: i ? '1.15em' : `${-0.575 * (lines.length - 1)}em` });
+      span.textContent = line;
+      t.appendChild(span);
+    });
     svg.appendChild(t);
   });
 
