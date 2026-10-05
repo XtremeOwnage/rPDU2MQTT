@@ -18,6 +18,7 @@ GUI: **System › GUI**.
 | Password | `Gui.Password` | | Basic. Or `RPDU2MQTT_GUI_PASSWORD` |
 | Show Project Link | `Gui.ShowProjectLink` | on | Docs and GitHub links in the footer |
 | Distance Units | `Gui.DistanceUnits` | `auto` | `auto`, `imperial`, `metric`. Floor plans |
+| Temperature Units | `Gui.TemperatureUnits` | `auto` | `auto`, `celsius`, `fahrenheit`. Stored values stay °C |
 | Price per kWh | `Gui.EnergyPrice` | blank | Enables cost charts on Trends |
 | Currency | `Gui.Currency` | `$` | |
 

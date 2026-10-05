@@ -1355,6 +1355,7 @@ configuration cannot be saved.
 ```yaml
 Gui:
   DistanceUnits: imperial            # auto, imperial or metric
+  TemperatureUnits: fahrenheit       # auto, celsius or fahrenheit
 EnergyFlow:
   Sites:
     - Id: home

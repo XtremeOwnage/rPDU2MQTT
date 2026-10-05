@@ -74,6 +74,21 @@ for (const link of pages) {
   if (!button('Last 6 hours').classList.contains('primary') || button('Last hour').classList.contains('primary'))
     fail(`${name}: picking last 6 hours in the dropdown did not move the mark to its button`);
 
+  // Periods, shortest first.
+  const order = query(query(sec, '.period-row'), 'button', true).map(b => b.textContent);
+  const want = ['Last hour', 'Last 6 hours', 'Last 24 hours', 'Today', 'Yesterday', 'This week', 'Last week', 'This month', 'Last month', 'This year'];
+  if (order.join() !== want.join()) fail(`${name}: periods are not shortest first: ${order.join(', ')}`);
+
+  // Last week and last month end on their last day.
+  for (const [label, days] of [['Last week', '7'], ['Last month', '(28|29|30|31)']]) {
+    asked.length = 0;
+    button(label).onclick();
+    await wait(100);
+    if (!new RegExp(`days=${days}&at=`).test(decodeURIComponent(asked.at(-1) || '').replace(/days=(\d+)/, (_, n) => `days=${Number(n) - 1}`))
+        && !new RegExp(`days=${days}&at=`).test(decodeURIComponent(asked.at(-1) || '')))
+      fail(`${name}: ${label} did not ask for the days ending on its last day: ${asked.at(-1)}`);
+  }
+
   // A calendar period takes the mark away.
   button('This week').onclick();
   await wait(100);

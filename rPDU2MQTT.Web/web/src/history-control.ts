@@ -3,11 +3,12 @@ import { el, btn } from '../helpers.js';
 import { state } from '../state.js';
 
 /// The periods people actually ask for. One click each, rather than a date, a time and a span to assemble.
-export type PeriodKey = 'today' | 'yesterday' | 'week' | 'month' | 'year';
+export type PeriodKey = 'today' | 'yesterday' | 'week' | 'lastweek' | 'month' | 'lastmonth' | 'year';
 
+/// Shortest first.
 export const PERIODS: [PeriodKey, string][] = [
-  ['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This week'],
-  ['month', 'This month'], ['year', 'This year'],
+  ['today', 'Today'], ['yesterday', 'Yesterday'], ['week', 'This week'], ['lastweek', 'Last week'],
+  ['month', 'This month'], ['lastmonth', 'Last month'], ['year', 'This year'],
 ];
 
 /// Which day a period ends on, and how many days it covers — in the reader's own calendar, because that is
@@ -20,6 +21,14 @@ export function periodWindow(key: PeriodKey, now: Date = new Date()): { day: str
     return { day: iso(d), days: 1 };
   }
   if (key === 'week') return { day: iso(now), days: now.getDay() + 1 };
+  if (key === 'lastweek') {
+    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay() - 1);
+    return { day: iso(end), days: 7 };
+  }
+  if (key === 'lastmonth') {
+    const end = new Date(now.getFullYear(), now.getMonth(), 0);
+    return { day: iso(end), days: end.getDate() };
+  }
   if (key === 'month') return { day: iso(now), days: now.getDate() };
   if (key === 'year') {
     const jan1 = new Date(now.getFullYear(), 0, 1);
@@ -31,9 +40,11 @@ export function periodWindow(key: PeriodKey, now: Date = new Date()): { day: str
 }
 
 /// A row of one-click periods, with the one being shown marked.
-export function periodRow(onPick: (key: PeriodKey) => void): { row: HTMLElement; mark: (key: PeriodKey | null) => void } {
+/// `before`: buttons for windows shorter than a day, placed first.
+export function periodRow(onPick: (key: PeriodKey) => void, before: HTMLElement[] = []): { row: HTMLElement; mark: (key: PeriodKey | null) => void } {
   const row = el('div', { class: 'ld-toolbar period-row', style: { gap: '6px', margin: '0 0 8px' } });
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Period:' }));
+  before.forEach(b => row.appendChild(b));
   const buttons = PERIODS.map(([key, label]) => {
     const b = btn(label);
     b.dataset.period = key;

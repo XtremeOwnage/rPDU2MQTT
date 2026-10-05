@@ -2018,3 +2018,5 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
   .trends-page table.ld .col-full { display:none; }
 }
 
+.trend-custom:not([hidden]) { display:inline-flex; align-items:center; gap:6px; }
+.trend-custom input[type=date] { width:auto; }

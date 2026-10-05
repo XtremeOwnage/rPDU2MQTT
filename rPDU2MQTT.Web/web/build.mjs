@@ -13,6 +13,7 @@ const outDir = join(here, '..', 'wwwroot');
 const MODULES = [
   'state.ts',
   'helpers.ts',
+  'temp-units.ts',
   'theme.ts',
   'realtime.ts',
   'dirty.ts',

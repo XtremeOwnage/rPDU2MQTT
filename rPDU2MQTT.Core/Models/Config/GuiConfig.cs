@@ -25,6 +25,11 @@ public class GuiConfig
     [Description("How distances and sizes are shown on the floor plans: imperial (feet and inches), metric (metres and centimetres), or auto to follow the browser's language.")]
     public string DistanceUnits { get; set; } = "auto";
 
+    [DefaultValue("auto")]
+    [AllowedValues("auto", "celsius", "fahrenheit")]
+    [Description("How temperatures are shown: celsius, fahrenheit, or auto to follow the browser's language.")]
+    public string TemperatureUnits { get; set; } = "auto";
+
     [Display(Name = "Price per kWh")]
     [Description("What a kWh of energy costs, in your currency. When set, the Trends pages can chart energy as cost. Leave blank to not offer cost.")]
     public double? EnergyPrice { get; set; }

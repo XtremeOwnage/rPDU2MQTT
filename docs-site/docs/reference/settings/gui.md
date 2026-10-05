@@ -14,6 +14,7 @@ Embedded configuration web GUI
 | `Gui.Enabled` | bool | `false` | Enable the embedded configuration web GUI. |
 | `Gui.ShowProjectLink` | bool | `true` | Show links to the documentation and the GitHub page in the GUI. Turn off for a cleaner look on a shared screen. |
 | `Gui.DistanceUnits` | one of `auto`, `imperial`, `metric` | `auto` | How distances and sizes are shown on the floor plans: imperial (feet and inches), metric (metres and centimetres), or auto to follow the browser's language. |
+| `Gui.TemperatureUnits` | one of `auto`, `celsius`, `fahrenheit` | `auto` | How temperatures are shown: celsius, fahrenheit, or auto to follow the browser's language. |
 | `Gui.EnergyPrice` | double |  | What a kWh of energy costs, in your currency. When set, the Trends pages can chart energy as cost. Leave blank to not offer cost. |
 | `Gui.Currency` | string | `$` | The currency symbol cost is shown with, e.g. $, €, £. |
 | `Gui.AuthType` | one of `Basic`, `Oidc`, `None` | `Basic` | How users authenticate to the GUI: Basic (username/password), Oidc (SSO), or None (no login). |
