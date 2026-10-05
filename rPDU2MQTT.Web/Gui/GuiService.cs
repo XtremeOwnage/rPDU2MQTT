@@ -728,7 +728,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 // Config this process is running, before replacement.
-                var stranded = ConfigApply.NeedingRestart(config, parsed);
+                var pageSettings = (integrations?.All ?? []).OfType<Core.Integrations.IGuiPageProvider>()
+                    .SelectMany(p => p.PageSettings.Select(k => $"Plugins.{((Core.Integrations.IIntegration)p).Id}.{k}"));
+                var stranded = ConfigApply.NeedingRestart(config, parsed, pageSettings);
 
                 await configSource.SaveAsync(parsed, ctx.RequestAborted);
                 Log.Information($"Configuration saved via GUI to {configSource.Describe}.");

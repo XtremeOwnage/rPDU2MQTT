@@ -18,6 +18,7 @@ public sealed class TigoPlugin : IIntegration, IConfigurablePlugin, IValueSource
         new("panel-types", "Panel Types", "Energy Flow", "▦", "Plugins"),
     ];
     public string? PageAsset(string file) => GuiPageAssets.Read(typeof(TigoPlugin).Assembly, file);
+    public IReadOnlyList<string> PageSettings { get; } = ["PanelTypes", "Strings", "StringPanels", "Mppts", "GroupPanels"];
 
     public string SourceType => "tigo";
     public string SourceTypeLabel => "Tigo optimizer";

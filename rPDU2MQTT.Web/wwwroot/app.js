@@ -3078,9 +3078,9 @@ function groupChips(onToggle            )                     {
   if (!groups.length) return null;
   const row = el('div', { class: 'flow-view-chips' });
   groups.forEach((g     ) => {
-    if (foldedInto(g)) return;
-    const on = collapsedGroups.has(g.Id);
     const count = (g.Members || []).length;
+    if (foldedInto(g) || (g.Parent && !count)) return;
+    const on = collapsedGroups.has(g.Id);
     const chip = btn(`${on ? '▸' : '▾'} ${g.Label || g.Id} (${count})`);
     chip.title = count === 0 ? 'No members. Add them on the Groups page.'
       : on ? `Collapsed. Click to expand its ${count} member(s).` : 'Expanded. Click to collapse into one node.';

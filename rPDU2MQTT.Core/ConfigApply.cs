@@ -35,8 +35,8 @@ public static class ConfigApply
     ];
 
     /// <summary>Does a change to this setting take effect without a restart?</summary>
-    public static bool AppliesLive(string path) =>
-        AppliedLive.Any(p => path == p || path.StartsWith(p + ".", StringComparison.Ordinal));
+    public static bool AppliesLive(string path, IEnumerable<string>? alsoLive = null) =>
+        AppliedLive.Concat(alsoLive ?? []).Any(p => path == p || path.StartsWith(p + ".", StringComparison.Ordinal));
 
     /// <summary>
     /// Every setting that differs between two configuration documents, as dotted paths.
@@ -64,10 +64,12 @@ public static class ConfigApply
     /// running. Recomputed from scratch on every save, so changing a setting back to what the process is
     /// actually running clears it rather than leaving a restart hanging over nothing.
     /// </summary>
-    public static IReadOnlyList<string> NeedingRestart(Config running, Config saved)
+    /// <param name="alsoLive">More live paths, such as plugin page settings.</param>
+    public static IReadOnlyList<string> NeedingRestart(Config running, Config saved, IEnumerable<string>? alsoLive = null)
     {
         var before = JsonSerializer.SerializeToNode(running, ConfigSchema.ConfigJsonOptions);
         var after = JsonSerializer.SerializeToNode(saved, ConfigSchema.ConfigJsonOptions);
-        return ChangedPaths(before, after).Where(p => !AppliesLive(p)).ToList();
+        var live = alsoLive?.ToList();
+        return ChangedPaths(before, after).Where(p => !AppliesLive(p, live)).ToList();
     }
 }

@@ -74,7 +74,7 @@ export function syncGroups() {
   const strings = stringsOf();
   const isString = (id: string) => strings.some(s => saSame(s.Id, id));
   for (let i = groups.length - 1; i >= 0; i--)
-    if (isString(groups[i].Id) && (!groupingOn() || !panelsOf(groups[i].Id).length)) {
+    if (isString(groups[i].Id) && !groupingOn()) {
       removedAt.set(String(groups[i].Id).toLowerCase(), i);
       groups.splice(i, 1);
     }
@@ -82,7 +82,6 @@ export function syncGroups() {
   const added: [number, any][] = [];
   strings.forEach(s => {
     const members = panelsOf(s.Id);
-    if (!members.length) return;
     const g = groups.find(x => saSame(x.Id, s.Id));
     if (g) { g.Members = members; g.Label = s.Label || s.Id; }
     else {

@@ -13,13 +13,14 @@ sandbox.__flow = {
   Groups: [
     { Id: 'solar', Label: 'Solar', Members: ['m1', 'm2'] },
     { Id: 's1', Label: 'S1', Members: ['p1', 'p2'], Parent: 'solar' },
+    { Id: 'a1', Label: 'A1', Members: [], Parent: 'solar' },
   ],
 };
 const run = (collapsed) => vm.runInContext(`(() => {
   state.data = { EnergyFlow: __flow };
   collapsedGroups.clear(); ${JSON.stringify(collapsed)}.forEach(id => collapsedGroups.add(id));
-  const nodes = ['solar', 'm1', 'm2', 's1', 'p1', 'p2', 'home'].map(id => ({ id, label: id, kind: 'solar', value: 1 }));
-  const links = [['p1','s1'],['p2','s1'],['s1','m1'],['m1','solar'],['m2','solar'],['solar','home']].map(([source, target]) => ({ source, target, value: 1 }));
+  const nodes = ['solar', 'm1', 'm2', 's1', 'p1', 'p2', 'a1', 'home'].map(id => ({ id, label: id, kind: 'solar', value: 1 }));
+  const links = [['p1','s1'],['p2','s1'],['s1','m1'],['m1','solar'],['m2','solar'],['a1','m1'],['solar','home']].map(([source, target]) => ({ source, target, value: 1 }));
   const g = collapseGraph(nodes, links);
   return { nodes: g.nodes.map(n => n.id).sort().join(), chips: [...(groupChips(() => {})?.children || [])].map(c => c.textContent).join('|') };
 })()`, sandbox);
@@ -30,9 +31,10 @@ if (/S1/.test(r.chips)) fail(`a nested group's chip shows while its parent is co
 r = run(['solar']);
 if (r.nodes !== 'home,solar') fail(`an expanded child of a collapsed parent drew ${r.nodes}`);
 r = run(['s1']);
-if (r.nodes !== 'home,m1,m2,s1,solar') fail(`expanded parent with collapsed child drew ${r.nodes}`);
+if (r.nodes !== 'a1,home,m1,m2,s1,solar') fail(`expanded parent with collapsed child drew ${r.nodes}`);
 if (!/S1/.test(r.chips)) fail('a nested group has no chip while its parent is expanded');
+if (/A1/.test(r.chips)) fail('an empty nested group has a chip');
 r = run([]);
-if (r.nodes !== 'home,m1,m2,p1,p2,s1,solar') fail(`all expanded drew ${r.nodes}`);
+if (r.nodes !== 'a1,home,m1,m2,p1,p2,s1,solar') fail(`all expanded drew ${r.nodes}`);
 console.log('group nesting: ok');
 process.exit(0);
