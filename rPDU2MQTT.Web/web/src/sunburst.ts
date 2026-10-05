@@ -63,22 +63,27 @@ function arcPath(r0: number, r1: number, a0: number, a1: number): string {
 const CHAR_W = 6.2, LINE_H = 12.5;
 const clipTo = (text: string, n: number) => text.length > n ? text.slice(0, Math.max(3, n - 1)) + '…' : text;
 
-/// An arc's label: across the ring, or along it (wrapped to two lines when the ring is deep enough), whichever shows more.
-export function arcLabel(label: string, span: number, mid: number, rm: number, depth: number): { deg: number; lines: string[] } {
+/// An arc's label: across the ring, or curved along it (two lines when the ring is deep enough), whichever shows more.
+/// `flip` marks the lower half, where text along the arc runs the other way to stay upright.
+export function arcLabel(label: string, span: number, mid: number, rm: number, depth: number): { along: boolean; flip: boolean; deg: number; lines: string[] } {
   const across = Math.floor((depth - 8) / CHAR_W);
-  const along = Math.floor((span * rm - 8) / CHAR_W);
-  let radial = (mid * 180 / Math.PI) - 90;
-  if (radial > 90) radial -= 180;
-  if (label.length <= across || along <= across || depth < LINE_H + 2) return { deg: radial, lines: [clipTo(label, across)] };
-  let tangent = mid * 180 / Math.PI;
-  if (tangent > 90 && tangent < 270) tangent -= 180;
-  if (label.length <= along || depth < 2 * LINE_H + 4) return { deg: tangent, lines: [clipTo(label, along)] };
+  const fits = (r: number) => Math.floor((span * r - 8) / CHAR_W);
+  const along = fits(rm);
+  let deg = (mid * 180 / Math.PI) - 90;
+  if (deg > 90) deg -= 180;
+  const midDeg = mid * 180 / Math.PI;
+  const flip = midDeg > 90 && midDeg < 270;
+  if (label.length <= across || along <= across || depth < LINE_H + 2) return { along: false, flip, deg, lines: [clipTo(label, across)] };
+  if (label.length <= along || depth < 2 * LINE_H + 4) return { along: true, flip, deg, lines: [clipTo(label, along)] };
+  const inner = fits(rm - LINE_H / 2);
   const words = label.split(/\s+/);
   let first = '';
-  while (words.length && (first ? first + ' ' + words[0] : words[0]).length <= along) first = first ? first + ' ' + words.shift() : words.shift()!;
-  if (!first) return { deg: tangent, lines: [clipTo(label, along)] };
-  return { deg: tangent, lines: words.length ? [first, clipTo(words.join(' '), along)] : [first] };
+  while (words.length && (first ? first + ' ' + words[0] : words[0]).length <= inner) first = first ? first + ' ' + words.shift() : words.shift()!;
+  if (!first) return { along: true, flip, deg, lines: [clipTo(label, along)] };
+  return { along: true, flip, deg, lines: words.length ? [first, clipTo(words.join(' '), inner)] : [first] };
 }
+
+let labelPaths = 0;
 
 /// A node opens only when there is something beneath it; opening a leaf would draw an empty diagram.
 export const opens = (links: any[], id: string) => links.some((l: any) => l.source === id && (l.value ?? 0) > 0);
@@ -89,6 +94,8 @@ export function drawSunburst(nodes: any[], links: any[], opts: TreeViewOpts): SV
   const { arcs, depth, total } = layoutSunburst(nodes, links, hub, dir);
   const byId = new Map(nodes.map(n => [n.id, n]));
   const svg = svgEl('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'sunburst-svg', role: 'img' }) as any;
+  const defs = svgEl('defs', {});
+  svg.appendChild(defs);
   const ringW = Math.max(26, Math.min(70, (C - 8 - RING0) / Math.max(1, depth)));
   const fmt = (v: number) => formatMeasure(v, opts.units);
   const hubNode = hub ? byId.get(hub) : null;
@@ -161,15 +168,29 @@ export function drawSunburst(nodes: any[], links: any[], opts: TreeViewOpts): SV
     const mid = (arc.a0 + arc.a1) / 2, rm = (r0 + r1) / 2;
     if ((arc.a1 - arc.a0) * rm < 16) return;
     const [x, y] = pt(rm, mid);
-    const { deg, lines } = arcLabel(arc.label, arc.a1 - arc.a0, mid, rm, r1 - r0);
-    const t = svgEl('text', { x: f2(x), y: f2(y), class: 'sunburst-label', transform: `rotate(${f2(deg)} ${f2(x)} ${f2(y)})` });
-    if (lines.length === 1) t.textContent = lines[0];
-    else lines.forEach((line, i) => {
-      const span = svgEl('tspan', { x: f2(x), dy: i ? '1.15em' : `${-0.575 * (lines.length - 1)}em` });
-      span.textContent = line;
-      t.appendChild(span);
+    const label = arcLabel(arc.label, arc.a1 - arc.a0, mid, rm, r1 - r0);
+    if (!label.along) {
+      const t = svgEl('text', { x: f2(x), y: f2(y), class: 'sunburst-label', transform: `rotate(${f2(label.deg)} ${f2(x)} ${f2(y)})` });
+      t.textContent = label.lines[0];
+      svg.appendChild(t);
+      return;
+    }
+    // Upper line outward on the top half, inward on the bottom half, where the text runs the other way.
+    const n = label.lines.length;
+    label.lines.forEach((line, i) => {
+      const off = (n - 1) / 2 - i;
+      const r = rm + (label.flip ? -off : off) * LINE_H;
+      const id = `sb-label-${++labelPaths}`;
+      const a1 = arc.a0 + Math.min(arc.a1 - arc.a0, 2 * Math.PI - 0.02);
+      const [sx, sy] = pt(r, label.flip ? a1 : arc.a0), [ex, ey] = pt(r, label.flip ? arc.a0 : a1);
+      const large = a1 - arc.a0 > Math.PI ? 1 : 0;
+      defs.appendChild(svgEl('path', { id, d: `M${f2(sx)},${f2(sy)} A${f2(r)},${f2(r)} 0 ${large} ${label.flip ? 0 : 1} ${f2(ex)},${f2(ey)}`, fill: 'none' }));
+      const t = svgEl('text', { class: 'sunburst-label' });
+      const tp = svgEl('textPath', { href: `#${id}`, startOffset: '50%' });
+      tp.textContent = line;
+      t.appendChild(tp);
+      svg.appendChild(t);
     });
-    svg.appendChild(t);
   });
 
   // The hub on top, so the arcs cannot cover it.
