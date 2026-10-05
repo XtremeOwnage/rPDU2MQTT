@@ -1669,11 +1669,15 @@ function historyControl(onChange                             )
 // ── charts.ts ───────────────────────────────────────────────────
 // Day-by-day bar charts: axis, empty days, signed values, hover card.
 
+// Fixed source colours, the same in every view. Grid is import; export has its own.
+const SOURCE_HUE = { solar: 46, grid: 2, gridExport: 140, battery: 212 };
+const SOURCE_COLOR = { solar: '#f2c230', grid: '#e5534b', gridExport: '#3fb950', battery: '#4f8cff' };
+
 // The kinds worth a colour of their own; anything else shares the neutral run.
 const KIND_COLOR                         = {
-  solar: 'var(--warn, #d08700)',
-  battery: 'var(--good, #46c46a)',
-  grid: 'var(--accent, #4f8cff)',
+  solar: SOURCE_COLOR.solar,
+  battery: SOURCE_COLOR.battery,
+  grid: SOURCE_COLOR.grid,
   load: '#b06fd0',
   outlet: '#7f8ea3',
   pdu: '#5c7fa3',
@@ -1681,6 +1685,13 @@ const KIND_COLOR                         = {
   breaker: '#d9a55c',
   inverter: '#3fb0a8',
 };
+/// The fixed colour for a solar, grid or battery node; a grid node that feeds nothing is export.
+const sourceColor = (kind                    , sink = false)                =>
+  kind === 'solar' ? SOURCE_COLOR.solar : kind === 'battery' ? SOURCE_COLOR.battery
+  : kind === 'grid' ? (sink ? SOURCE_COLOR.gridExport : SOURCE_COLOR.grid) : null;
+const sourceHue = (kind                    , sink = false)                =>
+  kind === 'solar' ? SOURCE_HUE.solar : kind === 'battery' ? SOURCE_HUE.battery
+  : kind === 'grid' ? (sink ? SOURCE_HUE.gridExport : SOURCE_HUE.grid) : null;
 const colorFor = (kind        , i        ) =>
   KIND_COLOR[kind] || ['#4f8cff', '#46c46a', '#d08700', '#b06fd0', '#3fb0a8', '#c05c5c'][i % 6];
 
@@ -5373,7 +5384,8 @@ function flowTree(nodes       , links       , hub               , dir           
   const build = (id        , value        , d        , branch        , parent                 , path             )                  => {
     const n = byId.get(id);
     if (!n || path.has(id) || !(value > 0)) return null;
-    const t           = { id, label: n.label || id, value, scale: value, depth: d, branch, parent, children: [],
+    const hue = sourceHue(n.kind, dir === 'out') ?? parent?.hue ?? null;
+    const t           = { id, label: n.label || id, value, scale: value, depth: d, branch, hue, parent, children: [],
                           key: (parent ? parent.key + '>' : '') + id };
     depth = Math.max(depth, d);
     const share = (n.value ?? 0) > 0 ? Math.min(1, value / n.value) : 1;
@@ -5403,7 +5415,7 @@ function treePath(t          , rootLabel               )           {
 
 /// A colour per top-level branch, lighter with each level down, the same in both views.
 const branchHue = (branch        ) => (branch * 57 + 205) % 360;
-const treeFill = (t          ) => `hsl(${branchHue(t.branch)} 62% ${Math.min(76, 44 + t.depth * 7)}%)`;
+const treeFill = (t          ) => `hsl(${t.hue ?? branchHue(t.branch)} ${t.hue != null ? 78 : 62}% ${Math.min(76, 44 + t.depth * 7)}%)`;
 
 // ── flow-card.ts ────────────────────────────────────────────────
 // The details card for one node in the sunburst and the treemap: the Sankey's hover card, plus where the
@@ -5508,8 +5520,7 @@ function readingRows(id        , drawn        )        {
 
 const SIZE = 720, C = SIZE / 2;
 const HUB_R = 62, SUPPLY_R0 = 68, SUPPLY_R1 = 80, RING0 = 88;
-/// The supply ring by what feeds it, in the colours the Energy page uses.
-const SUPPLY_FILL                         = { solar: '#f2b01e', grid: '#8b95a7', battery: '#3fb950', generator: '#d9730d' };
+const SUPPLY_FILL                         = { solar: SOURCE_COLOR.solar, grid: SOURCE_COLOR.grid, battery: SOURCE_COLOR.battery, generator: '#d9730d' };
 
 /// Every arc, laid out: a child's angle is its share of what its parent passes on, measured against the
 /// parent's scale, so a node that keeps some for itself leaves a gap at the end of its ring.
@@ -5709,10 +5720,10 @@ function layoutTreemap(nodes       , links       , W        , H        , dir    
   return { root, hub, total, cells, rests };
 }
 
-function drawTreemap(nodes       , links       , opts                                  )              {
+function drawTreemap(nodes       , links       , opts                                                   )              {
   const W = Math.max(320, opts.width || 1000);
   // A phone is taller than wide; a desktop pane is wide, and never taller than the screen can show.
-  const H = W < 640 ? Math.round(W * 1.35) : Math.round(Math.min(W * 0.58, 700));
+  const H = opts.height ?? (W < 640 ? Math.round(W * 1.35) : Math.round(Math.min(W * 0.58, 700)));
   const { root, hub, total, cells, rests } = layoutTreemap(nodes, links, W, H, opts.dir);
   const inward = !!hub && opts.dir === 'in';
   const byId = new Map(nodes.map(n => [n.id, n]));
@@ -6150,15 +6161,16 @@ function addFlowSection(nav     , sections     ) {
       };
       const sunburst = modeSel.value === 'sunburst';
       const paneWidth = wrap.clientWidth || sec.clientWidth || 1000;
-      const one = (dir              , width        ) => sunburst ? drawSunburst(nodes, links, { ...viewOpts, dir })
-        : drawTreemap(nodes, links, { ...viewOpts, dir, width });
       const pair = !!findHub(nodes, links).hub;
-      const side = sunburst && paneWidth >= 900;
+      const side = pair && paneWidth >= 900;
+      const half = side ? Math.floor((paneWidth - 6) / 2) : paneWidth;
+      const one = (dir              ) => sunburst ? drawSunburst(nodes, links, { ...viewOpts, dir })
+        : drawTreemap(nodes, links, { ...viewOpts, dir, width: half, height: side ? Math.round(Math.min(half * 1.1, 700)) : undefined });
       const view = pair
-        ? el('div', { class: 'flow-tree-pair' + (side ? ' is-side' : '') },
-            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Sources' }), one('in', paneWidth)),
-            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Destinations' }), one('out', paneWidth)))
-        : one('out', paneWidth);
+        ? el('div', { class: 'flow-tree-pair' + (side ? ' is-side' : '') + (sunburst ? '' : ' is-tight') },
+            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Sources' }), one('in')),
+            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Destinations' }), one('out')))
+        : one('out');
       stage = el('div', { class: 'flow-stage ' + (sunburst ? 'sunburst-stage' : 'treemap-stage') }, view, menu.el);
       wrap.appendChild(stage);
       wrap.appendChild(el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px' },
@@ -6466,7 +6478,10 @@ function addFlowSection(nav     , sections     ) {
     const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, class: 'sankey-svg', style: 'display:block' });
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
-    const tintOf = (id        ) => colors[colMemo[id] % colors.length];
+    const kindOf                         = {};
+    nodes.forEach((n     ) => { kindOf[n.id] = n.kind; });
+    const feedsOut = new Set(links.map((l     ) => l.source));
+    const tintOf = (id        ) => sourceColor(kindOf[id], !feedsOut.has(id)) || colors[colMemo[id] % colors.length];
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
     svg.addEventListener('click', () => { menu.close(); clearFocus(svg); });
     // …and on bare canvas, back out to the whole diagram.
@@ -9818,9 +9833,9 @@ function addEnergyOverviewSection(nav     , sections     ) {
 
     // Animated flow diagram — the arms present in this system, each with its live figure and flow direction.
     const arms        = [];
-    if (solar.present) arms.push({ key: 'solar', icon: '☀️', label: 'Solar', text: fmt(solar.value), color: 'var(--warn)', flow: solar.value, ids: solarIds });
-    if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmt(battNet == null ? null : Math.abs(battNet)), color: 'var(--good)', flow: battNet, ids: battIds });
-    if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmt(gridNet == null ? null : Math.abs(gridNet)), color: 'var(--accent)', flow: gridNet, ids: gridIds });
+    if (solar.present) arms.push({ key: 'solar', icon: '☀️', label: 'Solar', text: fmt(solar.value), color: KIND_COLOR.solar, flow: solar.value, ids: solarIds });
+    if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmt(battNet == null ? null : Math.abs(battNet)), color: KIND_COLOR.battery, flow: battNet, ids: battIds });
+    if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmt(gridNet == null ? null : Math.abs(gridNet)), color: KIND_COLOR.grid, flow: gridNet, ids: gridIds });
     if (home != null || load_.present) arms.push({ key: 'home', icon: '🏠', label: 'Home', text: fmt(home), color: 'var(--muted)', flow: home, ids: loadIds });
     // Updated in place, so the dots keep moving across a refresh.
     if (arms.length) drawFlow(arms); else flowWrap.innerHTML = '';

@@ -4,7 +4,7 @@ import { busyInSection, liveWhileActive, realtimeLive } from '../realtime.js';
 import { state } from '../state.js';
 // The energy rules every view shares — see energy.ts for why they are not written twice.
 import { homeEnergy, selfSufficiencyPct, coveredEnergy, netSelfProducedPct, shareBand } from '../energy.js';
-import { sparkline } from '../charts.js';
+import { sparkline, KIND_COLOR } from '../charts.js';
 import { requestFocus } from '../state.js';
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { drawEnergyFlow, type FlowArm } from '../energy-diagram.js';
@@ -429,9 +429,9 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
 
     // Animated flow diagram — the arms present in this system, each with its live figure and flow direction.
     const arms: any[] = [];
-    if (solar.present) arms.push({ key: 'solar', icon: '☀️', label: 'Solar', text: fmt(solar.value), color: 'var(--warn)', flow: solar.value, ids: solarIds });
-    if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmt(battNet == null ? null : Math.abs(battNet)), color: 'var(--good)', flow: battNet, ids: battIds });
-    if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmt(gridNet == null ? null : Math.abs(gridNet)), color: 'var(--accent)', flow: gridNet, ids: gridIds });
+    if (solar.present) arms.push({ key: 'solar', icon: '☀️', label: 'Solar', text: fmt(solar.value), color: KIND_COLOR.solar, flow: solar.value, ids: solarIds });
+    if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmt(battNet == null ? null : Math.abs(battNet)), color: KIND_COLOR.battery, flow: battNet, ids: battIds });
+    if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmt(gridNet == null ? null : Math.abs(gridNet)), color: KIND_COLOR.grid, flow: gridNet, ids: gridIds });
     if (home != null || load_.present) arms.push({ key: 'home', icon: '🏠', label: 'Home', text: fmt(home), color: 'var(--muted)', flow: home, ids: loadIds });
     // Updated in place, so the dots keep moving across a refresh.
     if (arms.length) drawFlow(arms); else flowWrap.innerHTML = '';

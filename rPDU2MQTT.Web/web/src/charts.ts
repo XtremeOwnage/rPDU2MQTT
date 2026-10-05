@@ -1,11 +1,15 @@
 // Day-by-day bar charts: axis, empty days, signed values, hover card.
 import { el, formatNum } from './helpers.js';
 
+// Fixed source colours, the same in every view. Grid is import; export has its own.
+export const SOURCE_HUE = { solar: 46, grid: 2, gridExport: 140, battery: 212 };
+export const SOURCE_COLOR = { solar: '#f2c230', grid: '#e5534b', gridExport: '#3fb950', battery: '#4f8cff' };
+
 // The kinds worth a colour of their own; anything else shares the neutral run.
 export const KIND_COLOR: Record<string, string> = {
-  solar: 'var(--warn, #d08700)',
-  battery: 'var(--good, #46c46a)',
-  grid: 'var(--accent, #4f8cff)',
+  solar: SOURCE_COLOR.solar,
+  battery: SOURCE_COLOR.battery,
+  grid: SOURCE_COLOR.grid,
   load: '#b06fd0',
   outlet: '#7f8ea3',
   pdu: '#5c7fa3',
@@ -13,6 +17,13 @@ export const KIND_COLOR: Record<string, string> = {
   breaker: '#d9a55c',
   inverter: '#3fb0a8',
 };
+/// The fixed colour for a solar, grid or battery node; a grid node that feeds nothing is export.
+export const sourceColor = (kind: string | undefined, sink = false): string | null =>
+  kind === 'solar' ? SOURCE_COLOR.solar : kind === 'battery' ? SOURCE_COLOR.battery
+  : kind === 'grid' ? (sink ? SOURCE_COLOR.gridExport : SOURCE_COLOR.grid) : null;
+export const sourceHue = (kind: string | undefined, sink = false): number | null =>
+  kind === 'solar' ? SOURCE_HUE.solar : kind === 'battery' ? SOURCE_HUE.battery
+  : kind === 'grid' ? (sink ? SOURCE_HUE.gridExport : SOURCE_HUE.grid) : null;
 export const colorFor = (kind: string, i: number) =>
   KIND_COLOR[kind] || ['#4f8cff', '#46c46a', '#d08700', '#b06fd0', '#3fb0a8', '#c05c5c'][i % 6];
 

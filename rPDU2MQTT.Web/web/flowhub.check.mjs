@@ -32,6 +32,17 @@ if (r.hub !== 'inv') fail(`a stray tiny root and an empty one: hub ${r.hub}`);
 const src = vm.runInContext(`(() => { const t = flowTree(__g.nodes.map(n => ({ ...n, value: { p1: 300, p2: 300, s1: 600, m1: 600, inv: 600 }[n.id] })), __g.links, 'inv', 'in');
   const walk = (x) => x.id + (x.children.length ? '(' + x.children.map(walk).join(',') + ')' : ''); return t.top.map(walk).join(); })()`, sandbox);
 if (src !== 'm1(s1(p1,p2))') fail(`sources tree: ${src}`);
+const hues = vm.runInContext(`(() => {
+  const nodes = [{ id: 'pv', kind: 'solar', value: 5 }, { id: 'p1', value: 5 }, { id: 'gi', kind: 'grid', value: 1 }, { id: 'inv', value: 6 },
+                 { id: 'ge', kind: 'grid', value: 2 }, { id: 'bat', kind: 'battery', value: 1 }, { id: 'load', value: 3 }];
+  const links = [['p1','pv',5],['pv','inv',5],['gi','inv',1],['inv','ge',2],['inv','bat',1],['inv','load',3]].map(([source, target, value]) => ({ source, target, value }));
+  const all = (ts) => ts.flatMap(t => [t, ...all(t.children)]);
+  const hue = (tree) => Object.fromEntries(all(tree.top).map(t => [t.id, t.hue]));
+  return { src: hue(flowTree(nodes, links, 'inv', 'in')), dst: hue(flowTree(nodes, links, 'inv', 'out')) };
+})()`, sandbox);
+if (hues.src.pv !== 46 || hues.src.p1 !== 46) fail(`solar and what feeds it are not yellow: ${JSON.stringify(hues.src)}`);
+if (hues.src.gi !== 2) fail(`grid import is not red: ${hues.src.gi}`);
+if (hues.dst.ge !== 140 || hues.dst.bat !== 212 || hues.dst.load !== null) fail(`destination hues: ${JSON.stringify(hues.dst)}`);
 sandbox.__g = { nodes: ['p1', 'a1', 'm1', 'inv'].map(id => ({ id })), links: [['p1', 'a1'], ['a1', 'm1'], ['m1', 'inv']].map(([source, target]) => ({ source, target })) };
 const shown = vm.runInContext(`state.data = { EnergyFlow: { Nodes: [{ Id: 'a1', Hidden: true }] } }; hideHiddenNodes(__g.nodes, __g.links)`, sandbox);
 if (shown.nodes.map(n => n.id).join() !== 'm1,inv') fail(`hidden node and its only feeder: drew ${shown.nodes.map(n => n.id)}`);

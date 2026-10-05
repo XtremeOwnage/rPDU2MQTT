@@ -6,6 +6,7 @@
 // does it flow"; this answers "what is using it" at a glance, with the big consumers as the big arcs.
 import { formatMeasure, svgEl } from './helpers.js';
 import { findHub, flowTree, treeFill, treePath, type TreeNode } from './flow-tree.js';
+import { SOURCE_COLOR } from './charts.js';
 import type { TreePlace } from './flow-card.js';
 import { showNodeCard, moveNodeCard, hideNodeCard } from './flow-focus.js';
 
@@ -28,8 +29,7 @@ type Arc = { id: string; label: string; value: number; depth: number; a0: number
 
 const SIZE = 720, C = SIZE / 2;
 const HUB_R = 62, SUPPLY_R0 = 68, SUPPLY_R1 = 80, RING0 = 88;
-/// The supply ring by what feeds it, in the colours the Energy page uses.
-const SUPPLY_FILL: Record<string, string> = { solar: '#f2b01e', grid: '#8b95a7', battery: '#3fb950', generator: '#d9730d' };
+const SUPPLY_FILL: Record<string, string> = { solar: SOURCE_COLOR.solar, grid: SOURCE_COLOR.grid, battery: SOURCE_COLOR.battery, generator: '#d9730d' };
 
 /// Every arc, laid out: a child's angle is its share of what its parent passes on, measured against the
 /// parent's scale, so a node that keeps some for itself leaves a gap at the end of its ring.

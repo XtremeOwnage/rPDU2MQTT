@@ -1113,6 +1113,7 @@
   .treemap-stage { display:block; }
   .flow-tree-pair { display:grid; grid-template-columns:1fr; gap:var(--sp-3, 16px); width:100%; }
   .flow-tree-pair.is-side { grid-template-columns:1fr 1fr; }
+  .flow-tree-pair.is-tight { gap:6px; }
   .flow-tree-half { min-width:0; display:flex; flex-direction:column; align-items:center; }
   .flow-tree-half > .treemap { align-self:stretch; }
   .flow-tree-title { align-self:flex-start; font-size:12px; font-weight:650; color:var(--muted); margin:0 0 4px; }

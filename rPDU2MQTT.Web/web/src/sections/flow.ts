@@ -16,6 +16,7 @@ import { openHistorySheet } from '../history-sheet.js';
 import { drawSunburst } from '../sunburst.js';
 import { drawTreemap } from '../treemap.js';
 import { findHub } from '../flow-tree.js';
+import { sourceColor } from '../charts.js';
 import { flowCardRows, readingRows, refreshReadings } from '../flow-card.js';
 import { templateHelp } from '../template-field.js';
 import { COST_OF, currency, energyPrice, priceGraph } from '../cost.js';
@@ -402,15 +403,16 @@ export function addFlowSection(nav: any, sections: any) {
       };
       const sunburst = modeSel.value === 'sunburst';
       const paneWidth = wrap.clientWidth || sec.clientWidth || 1000;
-      const one = (dir: 'in' | 'out', width: number) => sunburst ? drawSunburst(nodes, links, { ...viewOpts, dir })
-        : drawTreemap(nodes, links, { ...viewOpts, dir, width });
       const pair = !!findHub(nodes, links).hub;
-      const side = sunburst && paneWidth >= 900;
+      const side = pair && paneWidth >= 900;
+      const half = side ? Math.floor((paneWidth - 6) / 2) : paneWidth;
+      const one = (dir: 'in' | 'out') => sunburst ? drawSunburst(nodes, links, { ...viewOpts, dir })
+        : drawTreemap(nodes, links, { ...viewOpts, dir, width: half, height: side ? Math.round(Math.min(half * 1.1, 700)) : undefined });
       const view = pair
-        ? el('div', { class: 'flow-tree-pair' + (side ? ' is-side' : '') },
-            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Sources' }), one('in', paneWidth)),
-            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Destinations' }), one('out', paneWidth)))
-        : one('out', paneWidth);
+        ? el('div', { class: 'flow-tree-pair' + (side ? ' is-side' : '') + (sunburst ? '' : ' is-tight') },
+            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Sources' }), one('in')),
+            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Destinations' }), one('out')))
+        : one('out');
       stage = el('div', { class: 'flow-stage ' + (sunburst ? 'sunburst-stage' : 'treemap-stage') }, view, menu.el);
       wrap.appendChild(stage);
       wrap.appendChild(el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px' },
@@ -719,7 +721,10 @@ export function addFlowSection(nav: any, sections: any) {
     const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, class: 'sankey-svg', style: 'display:block' });
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
-    const tintOf = (id: string) => colors[colMemo[id] % colors.length];
+    const kindOf: Record<string, string> = {};
+    nodes.forEach((n: any) => { kindOf[n.id] = n.kind; });
+    const feedsOut = new Set(links.map((l: any) => l.source));
+    const tintOf = (id: string) => sourceColor(kindOf[id], !feedsOut.has(id)) || colors[colMemo[id] % colors.length];
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
     svg.addEventListener('click', () => { menu.close(); clearFocus(svg); });
     // …and on bare canvas, back out to the whole diagram.

@@ -76,10 +76,10 @@ export function layoutTreemap(nodes: any[], links: any[], W: number, H: number, 
   return { root, hub, total, cells, rests };
 }
 
-export function drawTreemap(nodes: any[], links: any[], opts: TreeViewOpts & { width: number }): HTMLElement {
+export function drawTreemap(nodes: any[], links: any[], opts: TreeViewOpts & { width: number; height?: number }): HTMLElement {
   const W = Math.max(320, opts.width || 1000);
   // A phone is taller than wide; a desktop pane is wide, and never taller than the screen can show.
-  const H = W < 640 ? Math.round(W * 1.35) : Math.round(Math.min(W * 0.58, 700));
+  const H = opts.height ?? (W < 640 ? Math.round(W * 1.35) : Math.round(Math.min(W * 0.58, 700)));
   const { root, hub, total, cells, rests } = layoutTreemap(nodes, links, W, H, opts.dir);
   const inward = !!hub && opts.dir === 'in';
   const byId = new Map(nodes.map(n => [n.id, n]));

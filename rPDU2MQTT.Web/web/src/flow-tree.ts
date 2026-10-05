@@ -2,6 +2,7 @@
 //
 // The root is the hub the supply converges on, or with none every root side by side. Each node's children are
 // what it feeds ('out') or what feeds it ('in'). A node with two parents carries each one's share.
+import { sourceHue } from './charts.js';
 
 export type TreeNode = {
   id: string;
@@ -13,6 +14,8 @@ export type TreeNode = {
   depth: number;
   /// The top-level branch it belongs to, for its colour.
   branch: number;
+  /// A fixed hue for solar, grid and battery, inherited by what hangs off them.
+  hue: number | null;
   parent: TreeNode | null;
   children: TreeNode[];
   /// A unique key: the ids from the top down, since one node can appear under two parents.
@@ -66,7 +69,8 @@ export function flowTree(nodes: any[], links: any[], hub: string | null, dir: 'i
   const build = (id: string, value: number, d: number, branch: number, parent: TreeNode | null, path: Set<string>): TreeNode | null => {
     const n = byId.get(id);
     if (!n || path.has(id) || !(value > 0)) return null;
-    const t: TreeNode = { id, label: n.label || id, value, scale: value, depth: d, branch, parent, children: [],
+    const hue = sourceHue(n.kind, dir === 'out') ?? parent?.hue ?? null;
+    const t: TreeNode = { id, label: n.label || id, value, scale: value, depth: d, branch, hue, parent, children: [],
                           key: (parent ? parent.key + '>' : '') + id };
     depth = Math.max(depth, d);
     const share = (n.value ?? 0) > 0 ? Math.min(1, value / n.value) : 1;
@@ -96,4 +100,4 @@ export function treePath(t: TreeNode, rootLabel: string | null): string[] {
 
 /// A colour per top-level branch, lighter with each level down, the same in both views.
 export const branchHue = (branch: number) => (branch * 57 + 205) % 360;
-export const treeFill = (t: TreeNode) => `hsl(${branchHue(t.branch)} 62% ${Math.min(76, 44 + t.depth * 7)}%)`;
+export const treeFill = (t: TreeNode) => `hsl(${t.hue ?? branchHue(t.branch)} ${t.hue != null ? 78 : 62}% ${Math.min(76, 44 + t.depth * 7)}%)`;
