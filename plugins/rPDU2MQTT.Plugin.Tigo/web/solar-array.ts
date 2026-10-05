@@ -480,7 +480,7 @@ export default function mount(sec: any, host: any) {
       const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
       const volts = readings.some((o: any) => o.vout != null) ? readings.reduce((sum: number, o: any) => sum + (o.vout || 0), 0) : null;
 
-      const card = el('div', { class: 'sa-string' + (layoutOf(s.Id).Hidden ? ' is-hidden' : '') });
+      const card = el('div', { class: 'sa-string' + (layoutOf(s.Id).Hidden ? ' is-string-hidden' : '') });
       card.dataset.node = s.Id;
       const mppt = saMpptOf(s.Id);
       const headRow = el('div', { class: 'sa-string-head' });

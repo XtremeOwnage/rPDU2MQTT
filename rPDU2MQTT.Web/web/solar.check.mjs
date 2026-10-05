@@ -214,6 +214,7 @@ hideBox.checked = true;
 hideBox.onchange({});
 if (layout().pv_b?.Hidden !== true) fail('Hidden is not stored');
 if (!cardOf('pv_b')) fail('a hidden string is not shown in Edit');
+if (cardOf('pv_b').classList.contains('is-hidden')) fail('a hidden string carries the host\'s display:none class in Edit');
 button('Done').onclick();
 if (cardOf('pv_b')) fail('a hidden string is shown outside Edit');
 button('Edit').onclick();
