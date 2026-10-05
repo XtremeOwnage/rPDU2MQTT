@@ -214,12 +214,16 @@ public static class ServiceConfiguration
 
         services.AddSingleton(new Services.Gui.PluginSchemaSections(PluginSections));
 
-        // Hands the cluster lease to integrations that ask for it.
+        // Hands the cluster lease and the plugin store to integrations that ask for them.
         services.AddSingleton(sp =>
         {
             var registry = new Core.Integrations.IntegrationRegistry(sp.GetServices<Core.Integrations.IIntegration>());
             var lease = sp.GetRequiredService<Core.Integrations.ISingleOwnerLease>();
             foreach (var user in registry.All.OfType<Core.Integrations.ISingleOwnerLeaseUser>()) user.UseLease(lease);
+            var cache = sp.GetService<Services.ICacheClient>();
+            foreach (var user in registry.All.OfType<Core.Integrations.IPluginStoreUser>())
+                user.UseStore(cache is null ? new Core.Integrations.NullPluginStore()
+                    : new Services.CachePluginStore(cache, cfg.Cache.KeyPrefix, ((Core.Integrations.IIntegration)user).Id, m => Log.Warning(m)));
             return registry;
         });
         // Records enabled-but-unrunnable integrations into the shared faults collection.

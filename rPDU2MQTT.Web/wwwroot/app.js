@@ -17045,7 +17045,7 @@ async function loadPluginPages() {
   } catch { pluginPages = []; }
 }
 
-const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection,
+const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection, timelineStrip, stepToFit,
   temp: { unit: tempUnit, to: toTemp, from: fromTemp, fmt: fmtTemp } });
 
 function pluginPageTool(p            ) {
