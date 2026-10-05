@@ -238,6 +238,14 @@ if (!groups().find(g => g.Id === 'pv_b')?.Members.includes(firstA)) fail('a move
 groupBox.checked = false;
 groupBox.onchange({});
 if (groups().some(g => g.Id === 'pv_a' || g.Id === 'pv_b')) fail('turning grouping off left string groups behind');
+groupBox.checked = true;
+groupBox.onchange({});
+vm.runInContext('state.data.EnergyFlow.Groups.reverse()', sandbox);
+const groupOrder = groups().map(g => g.Id).join();
+groupBox.checked = false; groupBox.onchange({});
+groupBox.checked = true; groupBox.onchange({});
+if (groups().map(g => g.Id).join() !== groupOrder) fail(`toggling grouping off and on reordered the groups: ${groups().map(g => g.Id)} vs ${groupOrder}`);
+groupBox.checked = false; groupBox.onchange({});
 
 // A new string.
 promptAnswer = 'South roof';
