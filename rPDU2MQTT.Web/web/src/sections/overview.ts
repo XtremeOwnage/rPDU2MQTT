@@ -1,7 +1,3 @@
-// The landing page: what the system is doing right now, in one screen.
-//
-// The Status board answered "is the bridge healthy", which is the question you ask second. The first one
-// is "what is my power doing" — and it was three clicks away behind a board of green dots (#395).
 import { api, el, activate, navLink, formatNum, btn } from '../helpers.js';
 import { liveWhileActive, realtimeLive } from '../realtime.js';
 import { drawEnergyFlow, type FlowArm } from '../energy-diagram.js';
@@ -28,12 +24,10 @@ export function addOverviewSection(nav: any, sections: any) {
   const stamp = el('span', { class: 'ld-count' });
   bar.append(showSel, refresh, stamp); sec.appendChild(bar);
 
-  // Anything wrong goes at the top, at full size. When nothing is, it collapses to a single line.
   const alerts = el('div'); sec.appendChild(alerts);
 
   const now = el('div', { class: 'ov-now' }); sec.appendChild(now);
   const flowWrap = el('div', { class: 'energy-flow ov-flow' }); now.appendChild(flowWrap);
-  // Not `ov-battery`: a tile for the battery kind is built as `ov-` + kind, and the two collided.
   const battWrap = el('div', { class: 'ov-batt-side' }); now.appendChild(battWrap);
 
   sec.appendChild(el('h3', { text: 'Today so far', class: 'ov-h3' }));
@@ -46,15 +40,12 @@ export function addOverviewSection(nav: any, sections: any) {
     : Math.abs(w) >= 1000 ? `${formatNum(Math.round(w / 100) / 10)} kW` : `${formatNum(Math.round(w))} W`;
   const fmtKwh = (v: number | null) => v == null ? '—' : `${formatNum(Math.round(v * 10) / 10)} kWh`;
 
-  // The nodes a total is made of, as the server decided: the Balance where one is set, else each node's kind,
-  // counted once. Summing by kind here counted a PV total and its MPPT strings both.
   const idsOfRole = (nodes: any[], role: string) => nodes.filter(n => n.balance === role && !n.id.includes('#')).map(n => n.id);
   const sumOfRole = (nodes: any[], role: string) => {
     const vals = nodes.filter(n => n.balance === role && !n.id.includes('#') && typeof n.value === 'number').map(n => n.value);
     return vals.length ? vals.reduce((a: number, b: number) => a + b, 0) : null;
   };
 
-  /// A figure with its name, and the sub-line that says what it means. Clicking opens that node's day.
   const tile = (kind: string, icon: string, label: string, value: string | Node, sub: string, ids: string[]) => {
     const t = el('div', { class: 'ov-tile ov-' + kind });
     t.append(
@@ -72,7 +63,6 @@ export function addOverviewSection(nav: any, sections: any) {
     return t;
   };
 
-  /// The battery, as the thing people actually look for: how full, which way, and how fast.
   const drawBattery = (soc: number | null, watts: number | null, why: string, volts: number | null) => {
     battWrap.innerHTML = '';
     const charging = watts != null && watts < -1;
@@ -82,7 +72,6 @@ export function addOverviewSection(nav: any, sections: any) {
 
     const card = el('div', { class: 'ov-batt-card' });
     card.appendChild(el('div', { class: 'ov-batt-title', text: 'Battery' }));
-    // A battery drawn as a battery: the fill IS the charge, so the number is confirmation, not the message.
     const body = el('div', { class: 'ov-batt-body ov-batt-' + level });
     const shell = el('div', { class: 'ov-batt-shell' });
     const fill = el('div', { class: 'ov-batt-fill' });
@@ -91,21 +80,14 @@ export function addOverviewSection(nav: any, sections: any) {
     const state = pct == null ? why : idle ? 'idle' : charging ? `charging · ${fmtW(Math.abs(watts!))}` : `discharging · ${fmtW(watts!)}`;
     body.append(shell, el('div', { class: 'ov-batt-read' },
       el('div', { class: 'ov-batt-pct', text: pct == null ? '—' : pct + '%' }),
-      // Volts are how you tell a healthy pack from a sagging one, and the percentage alone never says it.
       el('div', { class: 'ov-batt-volts', text: volts == null ? '' : `${formatNum(Math.round(volts * 10) / 10)} V` }),
       el('div', { class: 'ov-sub', text: state })));
     card.appendChild(body);
     battWrap.appendChild(card);
   };
 
-  /// Bindings the bridge is currently dropping, newest read from /api/flow/withheld.
   let withheld: any[] = [];
 
-  /// One problem, said plainly and at a size that cannot be scrolled past.
-  ///
-  /// A count is not a diagnosis: "2 of 46 binding(s) withheld" says something is wrong and nothing about
-  /// what, and the reason was already known — it just lived on another page. Where the card is a source
-  /// holding readings back, it opens onto the bindings themselves, each with the reason it is being dropped.
   const alertCard = (level: string, title: string, state: string, detail: string, id?: string, onDismiss?: () => void) => {
     const mine = withheld.filter((w: any) => !id || !w.integration || w.integration === id);
     const card = el('div', { class: 'ov-alert ' + level },
@@ -139,7 +121,6 @@ export function addOverviewSection(nav: any, sections: any) {
     return card;
   };
 
-  /// Alerts this viewer dismissed, kept in the browser: a per-viewer choice, not a setting.
   const DISMISS_KEY = 'rpdu-ov-dismissed';
   const dismissed = new Set<string>();
   try { (JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]') as string[]).forEach(k => dismissed.add(k)); } catch { /* none */ }
@@ -160,8 +141,6 @@ export function addOverviewSection(nav: any, sections: any) {
     }
     wrong.sort((a: any, b: any) => (a.level === 'bad' ? 0 : 1) - (b.level === 'bad' ? 0 : 1));
 
-    // A dismissal holds while the problem stays as it was. One that clears is forgotten, so it shows again
-    // if it comes back; one that changes state (warn -> bad, Stale -> Failing) is a new problem.
     const keyOf = (c: any) => `${c.id || c.title}|${c.level}|${c.state}`;
     const present = new Set(wrong.map(keyOf));
     dismissed.forEach(k => { if (!present.has(k)) dismissed.delete(k); });
@@ -189,15 +168,12 @@ export function addOverviewSection(nav: any, sections: any) {
   };
 
   let lastDay: any = null;
-  /// What the daily figures actually cover. A restart with nothing in the store starts them again, and a
-  /// tile reading "0 kWh since the day rolled over" is then a claim about a day nobody measured.
   let origin: { carriedOver: number; accumulatingSinceUtc?: string; store?: string } | null = null;
   const sinceLabel = () => {
     if (!origin || origin.carriedOver > 0 || !origin.accumulatingSinceUtc) return 'since the day rolled over';
     const from = new Date(origin.accumulatingSinceUtc);
     return `only since ${from.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} — totals did not carry over`;
   };
-  /// Said once, above the figures it applies to, rather than repeated on each of them.
   const originNote = () => {
     if (!origin || origin.carriedOver > 0 || !origin.accumulatingSinceUtc) return null;
     const where = origin.store === 'file' ? 'a file inside the container'
@@ -220,8 +196,6 @@ export function addOverviewSection(nav: any, sections: any) {
       return;
     }
     const steps = ((body.series || [])[0]?.values || []).length;
-    /// Sum a set of series step by step. Only a step EVERY one of them reported counts: a partial sum reads
-    /// as a dip that never happened.
     const sumSeries = (list: any[]) => !list.length ? [] : Array.from({ length: steps }, (_, i) => {
       let total = 0;
       for (const s of list) { const v = s.values[i]; if (typeof v !== 'number') return null; total += v; }
@@ -230,9 +204,6 @@ export function addOverviewSection(nav: any, sections: any) {
     const ofRole = (role: string, returns = false) => (body.series || [])
       .filter((s: any) => s.balance === role && String(s.node).endsWith('#in') === returns);
 
-    /// What the house drew at each step: the same balance as the figure above, done per reading rather
-    /// than once. A step missing any part of that balance is a gap — filling it with a zero would draw a
-    /// house that stopped using power.
     const homeValues = () => {
       const metered = ofRole('home');
       if (metered.length) return sumSeries(metered);
@@ -258,8 +229,6 @@ export function addOverviewSection(nav: any, sections: any) {
     const strip = ([kind, label, icon]: [string, string, string]) => {
       const values = kind === 'home' ? homeValues() : sumSeries(ofRole(kind));
       if (!values.length || !values.some(v => v != null)) return;
-      // The same shape as the tiles above: a figure, what it means, and the shape behind it. A strip on
-      // its own says "something happened" without saying what.
       const known = values.filter((v): v is number => typeof v === 'number');
       const nowV = [...values].reverse().find((v): v is number => typeof v === 'number') ?? null;
       const peak = known.length ? Math.max(...known) : null;
@@ -296,10 +265,8 @@ export function addOverviewSection(nav: any, sections: any) {
     const gridIn = sumKnown(gridIds.map(id => live[`${id}|realpower#in`]));
     const battOut = sumOfRole(nodes, 'battery');
     const battIn = sumKnown(battIds.map(id => live[`${id}|realpower#in`]));
-    // One signed figure per bidirectional node: out is positive, in is negative.
     const gridNet = gridOut == null && gridIn == null ? null : (gridOut || 0) - (gridIn || 0);
     const battNet = battOut == null && battIn == null ? null : (battOut || 0) - (battIn || 0);
-    // A metered load node wins over the balance of sources; without one the home is what is left over.
     const loadW = idsOfRole(nodes, 'home').length ? sumOfRole(nodes, 'home') : undefined;
     const homeW = homeEnergy({ solar: solarW, grid: gridNet, battery: battNet, ...(loadW === undefined ? {} : { load: loadW }) });
 
@@ -339,13 +306,11 @@ export function addOverviewSection(nav: any, sections: any) {
     });
 
     const socVals = battIds.map(id => live[`${id}|soc`]).filter((v): v is number => typeof v === 'number');
-    // Voltage is a condition at a point, never a sum: several packs in parallel share one bus voltage.
     const voltVals = battIds.map(id => live[`${id}|voltage`]).filter((v): v is number => typeof v === 'number');
     drawBattery(socVals.length ? Math.round(socVals.reduce((a, b) => a + b, 0) / socVals.length) : null,
       battNet, battIds.length ? 'no charge source bound' : 'no battery configured',
       voltVals.length ? voltVals.reduce((a, b) => a + b, 0) / voltVals.length : null);
 
-    // --- Today ------------------------------------------------------------------------------------
     todayRow.innerHTML = '';
     if (!eNodes.length) {
       todayRow.appendChild(el('div', { class: 'desc', text: 'No energy totals yet — history is off, or nothing has reported today.' }));
@@ -356,7 +321,6 @@ export function addOverviewSection(nav: any, sections: any) {
     if (note) todayRow.appendChild(note);
     if (solarIds.length) todayRow.appendChild(tile('solar', '☀', 'Solar produced', fmtKwh(eSolar), sinceLabel(), solarIds));
     if (gridIds.length) {
-      // Net only when both directions were measured.
       const eGridNet = eGridOut == null || eGridIn == null ? null : eGridOut - eGridIn;
       const cols = el('div', { class: 'ov-cols' },
         el('div', {}, el('div', { class: 'ov-col-label', text: 'Imported' }), el('div', { class: 'ov-value', text: fmtKwh(eGridOut) })),
@@ -368,7 +332,6 @@ export function addOverviewSection(nav: any, sections: any) {
     const pct = selfSufficiencyPct(eHome, eGridOut);
     todayRow.appendChild(tile('self', '◔', 'Self-sufficiency', pct == null ? '—' : `${Math.round(pct)}%`,
       pct == null ? 'needs both home use and grid import' : 'of what the house used came from you', []));
-    // Net: export counts against import.
     const netPct = netSelfProducedPct(eHome, eGridOut == null || eGridIn == null ? null : eGridOut - eGridIn);
     const netTile = tile('net', '☀', 'Self-produced (net)', netPct == null ? '—' : `${Math.round(netPct)}%`,
       netPct == null ? 'needs home use, grid import and export' : 'of what the house used, net of export', []);
@@ -407,7 +370,6 @@ export function addOverviewSection(nav: any, sections: any) {
       stamp.textContent = '';
       alerts.appendChild(alertCard('bad', 'Overview', 'could not load', err?.message || 'the request failed'));
     }
-    // The withheld list first: a card is drawn with its bindings already attached, not re-rendered later.
     try {
       const w = await api('/api/flow/withheld');
       withheld = (w.body && w.body.ok && w.body.sources) || [];
