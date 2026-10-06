@@ -11,6 +11,7 @@ title: Nodes
 ![Nodes page](../assets/screenshots/nodes.webp)
 
 - **Add node**: id, label, kind.
+- **Hide managed** (on by default): hides nodes an integration maintains, such as Tigo panels and strings.
 - **Import device template**: adds pre-wired nodes and the Modbus connection for a known device (EG4 FlexBoss 21). Check register addresses and scales against your device.
 - **Fed by** sets the feeder from the table.
 - **Edit** opens the node editor. **Rename** changes the id and keeps its links. **Copy** duplicates it.
@@ -30,6 +31,7 @@ title: Nodes
 | Gauge max | `Max`, in the metric's unit |
 | Live value bindings | `Sources[]`, one per metric |
 | Fed by / Feeds | `Links` |
+| Hidden | `Hidden`: left off the flow diagrams, with any feeders that only feed it |
 
 A `load` cannot feed anything.
 
@@ -116,7 +118,10 @@ EnergyFlow:
 
 - **Add group**: id, label, kind, then **+ add member**.
 - **Or turn an existing node into a group**: the node becomes the group's anchor (for example Solar PV over its MPPTs).
-- Click a group on the Flow diagram to expand it.
+- **Not nested / In …**: nest the group in another group. It shows only while that group is expanded.
+- **Expanded**: *Replace with members* (default), *Nest members as parents* (members feed the group node) or *Nest members as children* (the group node feeds the members).
+- **Expand all children**: expanding the group also expands every group nested in it.
+- Click a group on the Flow diagram to expand it. Click its dashed outline, tab or members to collapse it.
 
 ```yaml
 EnergyFlow:

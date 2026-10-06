@@ -846,7 +846,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
 
   // --- Filing: tags, where it is, and where its EmonCMS feeds go. Folded until something is set. ---
   const more = el('details', { class: 'ne-more' }) as HTMLDetailsElement;
-  const filed = [(node.Tags || []).length, node.Location, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag].filter(Boolean).length;
+  const filed = [(node.Tags || []).length, node.Location, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag, node.Hidden].filter(Boolean).length;
   more.open = filed > 0 || nodeEditorFilingOpen;
   more.addEventListener('toggle', () => { nodeEditorFilingOpen = more.open; });
   more.appendChild(el('summary', { class: 'ne-more-summary' },
@@ -869,6 +869,9 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   const circSel = choiceSelect(circuitChoices(), node.Circuit || '', '— not known —');
   circSel.onchange = () => { node.Circuit = circSel.value || undefined; };
   moreGrid.appendChild(field('Circuit', circSel, 'Breaker it is on. Counted among its metered devices.'));
+  const hiddenBox = el('input', { type: 'checkbox', checked: !!node.Hidden }) as HTMLInputElement;
+  hiddenBox.onchange = () => { node.Hidden = hiddenBox.checked || undefined; };
+  moreGrid.appendChild(field('Hidden', el('span', { class: 'ne-check' }, hiddenBox, el('span', { text: 'hide on the flow diagrams' }))));
 
   // Where this node's EmonCMS feeds are filed; blank uses the EmonCMS page's tags.
   const emonTag = el('input', { type: 'text', value: node.EmonCmsTag || '', placeholder: 'EmonCMS default' }) as HTMLInputElement;

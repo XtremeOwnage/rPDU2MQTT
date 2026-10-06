@@ -212,8 +212,9 @@ if (query(cardOf('pv_a'), '.sa-panels').style.getPropertyValue?.('--sa-cols') ==
 const hideBox = query(query(cardOf('pv_b'), '.sa-hide'), 'input');
 hideBox.checked = true;
 hideBox.onchange({});
-if (layout().pv_b?.Hidden !== true) fail('Hidden is not stored');
+if (flow().Nodes.find(n => n.Id === 'pv_b')?.Hidden !== true || layout().pv_b?.Hidden) fail('Hidden is not stored on the node');
 if (!cardOf('pv_b')) fail('a hidden string is not shown in Edit');
+if (cardOf('pv_b').classList.contains('is-hidden')) fail('a hidden string carries the host\'s display:none class in Edit');
 button('Done').onclick();
 if (cardOf('pv_b')) fail('a hidden string is shown outside Edit');
 button('Edit').onclick();

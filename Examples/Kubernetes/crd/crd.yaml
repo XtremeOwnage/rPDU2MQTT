@@ -960,6 +960,9 @@ spec:
                         Circuit:
                           type: string
                           description: "The circuit this node is plugged into, as the panel id and breaker number: 'main_panel/B06'. A circuit then shows it among its metered devices and reports what is left unmetered."
+                        Hidden:
+                          type: boolean
+                          description: Left off the flow diagrams. Still listed and editable.
                         EmonCmsTag:
                           type: string
                           description: "EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}."
@@ -1219,6 +1222,20 @@ spec:
                           items:
                             type: string
                           description: The ids of the member nodes this group aggregates.
+                        Parent:
+                          type: string
+                          description: Id of the group this group is nested in. It shows only while that group is expanded.
+                        Expand:
+                          type: string
+                          enum:
+                          - ""
+                          - replace
+                          - parents
+                          - children
+                          description: "How the group draws when expanded: 'replace' shows its members in place of the group node, 'parents' draws the members feeding the group node, 'children' draws the group node feeding its members."
+                        ExpandChildren:
+                          type: boolean
+                          description: Expanding this group also expands every group nested in it.
                     description: Named groups of nodes shown as one collapsible node on the flow graphs (e.g. three MPPTs as one 'Incoming PV'). Members keep their own links/exports; the group also exports its summed total.
                   Balance:
                     type: object

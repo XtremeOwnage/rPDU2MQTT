@@ -829,6 +829,10 @@ Otherwise:
   expand.
 - Value: sum of members that have data; "no data" when none do.
 - Members keep their own wiring and export individually.
+- `Parent`: the group it is nested in. A nested group shows only while its parent is expanded.
+- `Expand`: how the group draws when expanded. `replace` (default) shows the members in its place, `parents`
+  draws the members feeding the group node, `children` draws the group node feeding the members.
+- `ExpandChildren`: expanding the group also expands every group nested in it.
 - With `EnergyFlow.MqttExport`, the group publishes its total (`{id}` on the MQTT tier topic, its own Home
   Assistant sensor).
 
@@ -1209,16 +1213,18 @@ Plugins:
       MPPT_2: { MaxVoltage: 600, MinMpptVoltage: 120, MaxMpptVoltage: 500, MaxCurrent: 15, MaxShortCircuitCurrent: 19 }
 ```
 
-**Group panels by string** (Solar Array header) keeps one `EnergyFlow.Groups` entry per string, its panels as
-members, so Flow shows strings and expands one to its panels on click. Stored as `Plugins.tigo.GroupPanels: true`.
+**Flow group per string** (Edit) keeps one `EnergyFlow.Groups` entry per string, its panels as members, nested
+in the group holding its MPPT. Stored as `Plugins.tigo.GroupPanels: true`.
 
-Per-string layout, set in **Edit**: columns, and Hidden (shown only in Edit).
+**Hidden** (Edit, per string) sets the string node's `Hidden`: off this page outside Edit and off the flow diagrams.
+
+Per-string columns, set in **Edit**:
 
 ```yaml
 Plugins:
   tigo:
     Strings:
-      pv_a1: { Columns: 4, Hidden: true }
+      pv_a1: { Columns: 4 }
 ```
 
 Panels without optimizers are counted per string, set in **Edit** ("Without optimizers"), drawn as placeholders

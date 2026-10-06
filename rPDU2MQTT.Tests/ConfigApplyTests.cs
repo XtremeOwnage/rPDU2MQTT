@@ -100,4 +100,15 @@ public class ConfigApplyTests
 
         Assert.Equal(["Gui.Port"], ConfigApply.NeedingRestart(Fresh(), saved));
     }
+
+    [Fact]
+    public void PluginPageSettingsNeedNoRestart()
+    {
+        var running = Fresh();
+        running.Plugins["tigo"] = System.Text.Json.JsonSerializer.SerializeToElement(new { Enabled = true, Strings = new { pv_a1 = new { Hidden = false } } });
+        var saved = Fresh();
+        saved.Plugins["tigo"] = System.Text.Json.JsonSerializer.SerializeToElement(new { Enabled = false, Strings = new { pv_a1 = new { Hidden = true } } });
+
+        Assert.Equal(["Plugins.tigo.Enabled"], ConfigApply.NeedingRestart(running, saved, ["Plugins.tigo.Strings"]));
+    }
 }

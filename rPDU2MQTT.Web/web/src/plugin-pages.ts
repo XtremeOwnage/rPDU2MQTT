@@ -8,6 +8,7 @@ import { busyInSection } from './realtime.js';
 import { timelineStrip } from './sections/timeline.js';
 import { stepToFit } from './sections/trends-shared.js';
 import { tempUnit, toTemp, fromTemp, fmtTemp } from './temp-units.js';
+import { setManagedRules } from './managed-nodes.js';
 
 export type PluginPage = { integration: string; id: string; title: string; group: string; icon?: string; configSection?: string };
 
@@ -18,6 +19,7 @@ export async function loadPluginPages() {
     const r = await api('/api/integrations');
     pluginPages = (r.body?.integrations || []).flatMap((i: any) =>
       (i.pages || []).map((p: any) => ({ ...p, integration: i.id })));
+    setManagedRules((r.body?.integrations || []).flatMap((i: any) => (i.managedNodes || []).map((m: any) => ({ ...m, integration: i.id }))));
   } catch { pluginPages = []; }
 }
 

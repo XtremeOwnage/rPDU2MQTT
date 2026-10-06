@@ -1111,6 +1111,15 @@
 
   /* The flow as a treemap: boxes positioned in % of a frame whose shape is fixed by aspect-ratio. */
   .treemap-stage { display:block; }
+  .flow-tree-pair { display:grid; grid-template-columns:1fr; gap:var(--sp-3, 16px); width:100%; }
+  .flow-tree-pair.is-side { grid-template-columns:1fr 1fr; }
+  .flow-tree-pair.is-tight { gap:6px; }
+  .flow-tree-half { min-width:0; display:flex; flex-direction:column; align-items:center; }
+  .flow-tree-half > .treemap { align-self:stretch; }
+  .tree-zoom { position:relative; width:100%; max-height:calc(100vh - 160px); overflow:auto; display:flex; justify-content:safe center; align-items:flex-start; }
+  .tree-zoom > .sunburst-svg { max-width:none; width:auto; flex:none; }
+  .tree-zoom > .treemap { max-height:none; flex:none; }
+  .flow-tree-title { align-self:flex-start; font-size:12px; font-weight:650; color:var(--muted); margin:0 0 4px; }
   .treemap { position:relative; width:100%; max-height:calc(100vh - 170px); min-height:320px; border-radius:var(--r); overflow:hidden; background:var(--panel2); }
   .treemap-root, .treemap-cell { position:absolute; box-sizing:border-box; overflow:hidden; }
   .treemap-root { display:flex; align-items:flex-start; gap:8px; padding:2px 8px; height:20px; background:var(--panel); border:1px solid var(--line); border-radius:var(--r); cursor:pointer; }
@@ -1125,7 +1134,7 @@
   .treemap-name { font-size:11.5px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; line-height:15px; }
   .treemap-val { font-size:11px; font-weight:600; opacity:.8; white-space:nowrap; font-variant-numeric:tabular-nums; line-height:15px; }
   .treemap-cell:not(.is-nested) .treemap-val { font-size:12.5px; }
-  .sunburst-label { font-size:10.5px; font-weight:600; fill:#10141b; text-anchor:middle; dominant-baseline:central; pointer-events:none; }
+  .sunburst-label { font-size:11.5px; font-weight:600; fill:#0b0e13; text-rendering:geometricPrecision; text-anchor:middle; dominant-baseline:central; pointer-events:none; }
   .sunburst-hub { fill:var(--panel); stroke:var(--line); stroke-width:1.5; cursor:pointer; }
   .sunburst-hub-name { font-size:13px; font-weight:650; fill:var(--fg); text-anchor:middle; pointer-events:none; }
   .sunburst-hub-value { font-size:17px; font-weight:700; fill:var(--fg); text-anchor:middle; pointer-events:none; font-variant-numeric:tabular-nums; }

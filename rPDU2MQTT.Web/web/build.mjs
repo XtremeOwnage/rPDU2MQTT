@@ -25,6 +25,7 @@ const MODULES = [
   'cost.ts',
   'history-control.ts',
   'charts.ts',
+  'managed-nodes.ts',
   'context-menu.ts',
   'history-sheet.ts',
   'energy-diagram.ts',

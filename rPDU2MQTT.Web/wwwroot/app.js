@@ -245,11 +245,12 @@ function activate(link     , sec     ) {
 // any overflow does; only Ctrl/⌘+wheel zooms. The old version preventDefault-ed *every* wheel to zoom, which
 // left a diagram taller than the viewport with no way to scroll it — it felt frozen. With `pan`, dragging the
 // background moves the view like a map (kept off where the SVG has its own drag interactions, e.g. the editor).
-function attachZoom(scroll     , svg     , baseW        , baseH        , pan = false) {
+/// `onScale` replaces the default sizing (width/height attributes) for content that is not an SVG.
+function attachZoom(scroll     , svg     , baseW        , baseH        , pan = false, onScale                      ) {
   let z = 1; const min = 0.15, max = 6;
   // True once the reader has zoomed themselves: after that we never re-fit under them on a resize.
   let chosen = false;
-  const apply = () => { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); };
+  const apply = () => { if (onScale) onScale(z); else { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); } };
   apply();
 
   const width = () => scroll.clientWidth || scroll.getBoundingClientRect?.().width || 0;
@@ -787,9 +788,14 @@ function discardChanges() {
   return state.data;
 }
 
-// Count of pending edits inside one top-level config section (drives the nav badges).
-function changeCountFor(sectionKey        ) {
-  return dirtyChanges.filter(c => c.path[0] === sectionKey).length;
+// Pending edits under a nav entry's paths ("EnergyFlow.Groups,EnergyFlow.Nodes"). "X.*" takes what no other entry claims under X.
+function changeCountFor(spec        , claimed           = []) {
+  const under = (path          , p        ) => p.split('.').every((k, i) => path[i] === k);
+  const prefixes = spec.split(',').map(s => s.trim()).filter(Boolean);
+  const owners = claimed.filter(q => !q.endsWith('.*'));
+  return dirtyChanges.filter(c => prefixes.some(p => p.endsWith('.*')
+    ? under(c.path, p.slice(0, -2)) && !owners.some(q => under(c.path, q))
+    : under(c.path, p))).length;
 }
 
 // --- Diff ------------------------------------------------------------------------------------------
@@ -1664,11 +1670,15 @@ function historyControl(onChange                             )
 // ── charts.ts ───────────────────────────────────────────────────
 // Day-by-day bar charts: axis, empty days, signed values, hover card.
 
+// Fixed source colours, the same in every view. Grid is import; export has its own.
+const SOURCE_HUE = { solar: 46, grid: 2, gridExport: 140, battery: 212 };
+const SOURCE_COLOR = { solar: '#f2c230', grid: '#e5534b', gridExport: '#3fb950', battery: '#4f8cff' };
+
 // The kinds worth a colour of their own; anything else shares the neutral run.
 const KIND_COLOR                         = {
-  solar: 'var(--warn, #d08700)',
-  battery: 'var(--good, #46c46a)',
-  grid: 'var(--accent, #4f8cff)',
+  solar: SOURCE_COLOR.solar,
+  battery: SOURCE_COLOR.battery,
+  grid: SOURCE_COLOR.grid,
   load: '#b06fd0',
   outlet: '#7f8ea3',
   pdu: '#5c7fa3',
@@ -1676,6 +1686,13 @@ const KIND_COLOR                         = {
   breaker: '#d9a55c',
   inverter: '#3fb0a8',
 };
+/// The fixed colour for a solar, grid or battery node; a grid node that feeds nothing is export.
+const sourceColor = (kind                    , sink = false)                =>
+  kind === 'solar' ? SOURCE_COLOR.solar : kind === 'battery' ? SOURCE_COLOR.battery
+  : kind === 'grid' ? (sink ? SOURCE_COLOR.gridExport : SOURCE_COLOR.grid) : null;
+const sourceHue = (kind                    , sink = false)                =>
+  kind === 'solar' ? SOURCE_HUE.solar : kind === 'battery' ? SOURCE_HUE.battery
+  : kind === 'grid' ? (sink ? SOURCE_HUE.gridExport : SOURCE_HUE.grid) : null;
 const colorFor = (kind        , i        ) =>
   KIND_COLOR[kind] || ['#4f8cff', '#46c46a', '#d08700', '#b06fd0', '#3fb0a8', '#c05c5c'][i % 6];
 
@@ -2149,6 +2166,22 @@ function rankChart(opts
     svg.appendChild(value);
   });
   return { svg, gaps: 0 };
+}
+
+// ── managed-nodes.ts ────────────────────────────────────────────
+// Nodes an integration manages, from its ManagedNodes rules.
+
+let managedRules                = [];
+function setManagedRules(rules               ) { managedRules = rules; }
+
+const sameText = (a     , b     ) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
+
+/// The integration that manages this node, or null.
+function managedBy(n     )                {
+  const r = managedRules.find(r =>
+    (r.sourceType && (n?.Sources || []).some((s     ) => sameText(s.Type, r.sourceType))) ||
+    (r.tag && (n?.Tags || []).some((t     ) => sameText(t, r.tag))));
+  return r ? r.integration : null;
 }
 
 // ── context-menu.ts ─────────────────────────────────────────────
@@ -2721,38 +2754,138 @@ function wireWidth(h        )         {
 }
 
 // ── flow-view.ts ────────────────────────────────────────────────
-// How much of the flow chart to draw: the unmetered-remainder and animation switches (browser-local).
+// Flow diagram view switches and node groups.
 
-// --- Node groups (#groups): several nodes shown as one collapsible node on both flow graphs.
 const collapsedGroups = new Set        ();
-const seenGroups = new Set        ();   // groups we've applied the default (collapsed) to at least once
+const seenGroups = new Set        ();
 
 function flowGroups()        {
   return (state.data?.EnergyFlow?.Groups || []).filter((g     ) => g && g.Id);
 }
 
-// Collapse each group the first time we see it; after that, respect the viewer's choice.
+// Drop hidden nodes, and feeders that only feed hidden nodes.
+function hideHiddenNodes(nodes       , links       )                                 {
+  const hidden = new Set        ((state.data?.EnergyFlow?.Nodes || []).filter((n     ) => n?.Hidden).map((n     ) => n.Id));
+  if (!hidden.size) return { nodes, links };
+  for (let grew = true; grew;) {
+    grew = false;
+    nodes.forEach((n     ) => {
+      if (hidden.has(n.id)) return;
+      const out = links.filter((l     ) => l.source === n.id);
+      if (out.length && out.every((l     ) => hidden.has(l.target))) { hidden.add(n.id); grew = true; }
+    });
+  }
+  return { nodes: nodes.filter((n     ) => !hidden.has(n.id)), links: links.filter((l     ) => !hidden.has(l.source) && !hidden.has(l.target)) };
+}
+
+const expandMode = (g     )         => g?.Expand || 'replace';
+
+function descendantGroups(g     )        {
+  const all = flowGroups(), out        = [], seen = new Set        ([g.Id]);
+  for (let i = -1; i < out.length; i++) {
+    const id = i < 0 ? g.Id : out[i].Id;
+    all.forEach((x     ) => { if (x.Parent === id && !seen.has(x.Id)) { seen.add(x.Id); out.push(x); } });
+  }
+  return out;
+}
+
+function toggleGroup(g     ) {
+  const expand = collapsedGroups.has(g.Id);
+  const ids = [g.Id, ...(g.ExpandChildren ? descendantGroups(g).map((d     ) => d.Id) : [])];
+  ids.forEach(id => expand ? collapsedGroups.delete(id) : collapsedGroups.add(id));
+}
+
+// Drawn node ids an expanded group stands for: its members and its nested groups' members.
+function drawnMembers(g     , present             )           {
+  const ids = new Set        ();
+  [g, ...descendantGroups(g)].forEach((x     ) => {
+    if (x !== g && present.has(x.Id)) ids.add(x.Id);
+    (x.Members || []).forEach((m        ) => { if (present.has(m)) ids.add(m); });
+  });
+  ids.delete(g.Id);
+  return [...ids];
+}
+
+// An expanded group in 'parents' or 'children' mode keeps a group node beside its members.
+function nestExpandedGroups(nodes       , links       )                                 {
+  const depth = (g     ) => { let d = 0; for (let p = g, seen = new Set        (); p?.Parent && !seen.has(p.Id); d++) { seen.add(p.Id); p = flowGroups().find((x     ) => x.Id === p.Parent); } return d; };
+  const groups = flowGroups().filter((g     ) => expandMode(g) !== 'replace' && !collapsedGroups.has(g.Id) && !foldedInto(g))
+    .sort((a     , b     ) => depth(b) - depth(a));
+  let outNodes = nodes, outLinks = links;
+  groups.forEach((g     ) => {
+    const present = new Set        (outNodes.map((n     ) => n.id));
+    if (present.has(g.Id)) return;
+    const set = new Set(drawnMembers(g, present));
+    if (!set.size) return;
+    const merged                      = {};
+    const add = (source        , target        , value        , known         ) => {
+      const k = source + '\u0000' + target;
+      if (!merged[k]) merged[k] = { source, target, value: 0, known: true };
+      merged[k].value += value || 0;
+      if (!known) merged[k].known = false;
+    };
+    const parents = expandMode(g) === 'parents';
+    const kept        = [];
+    outLinks.forEach((l     ) => {
+      const crosses = parents ? set.has(l.source) && !set.has(l.target) : !set.has(l.source) && set.has(l.target);
+      if (!crosses) { kept.push(l); return; }
+      add(l.source, g.Id, l.value, l.known !== false); add(g.Id, l.target, l.value, l.known !== false);
+    });
+    if (!parents) set.forEach(m => {
+      if (outLinks.some((l     ) => l.target === m)) return;
+      const out = outLinks.filter((l     ) => l.source === m);
+      if (out.length) add(g.Id, m, out.reduce((a        , l     ) => a + (l.value || 0), 0), out.every((l     ) => l.known !== false));
+    });
+    const own = Object.values(merged).filter((l     ) => l.source === g.Id);
+    if (!own.length) return;
+    const value = own.reduce((a        , l     ) => a + l.value, 0);
+    const kinds = new Set([...set].map(id => outNodes.find((n     ) => n.id === id)?.kind).filter(Boolean));
+    const kind = g.Kind || (kinds.size === 1 ? [...kinds][0] : 'node');
+    outNodes = outNodes.concat([{ id: g.Id, label: g.Label || g.Id, kind, value, group: true, expanded: true }]);
+    outLinks = kept.concat(Object.values(merged));
+  });
+  return { nodes: outNodes, links: outLinks };
+}
+
+// Groups start collapsed.
 function ensureGroupState() {
   flowGroups().forEach((g     ) => { if (!seenGroups.has(g.Id)) { seenGroups.add(g.Id); collapsedGroups.add(g.Id); } });
 }
 
-// A member's owning group id, only when that group is currently collapsed.
+// The outermost collapsed group this group is nested in.
+function foldedInto(g     )             {
+  const byId                      = {};
+  flowGroups().forEach((x     ) => { byId[x.Id] = x; });
+  const seen = new Set        ([g.Id]);
+  let host      = null;
+  for (let p = byId[g.Parent]; p && !seen.has(p.Id); p = byId[p.Parent]) {
+    seen.add(p.Id);
+    if (collapsedGroups.has(p.Id)) host = p;
+  }
+  return host;
+}
+
+// Node id -> the collapsed group it folds into.
 function collapsedMemberMap()                      {
   const map                      = {};
-  flowGroups().forEach((g     ) => { if (collapsedGroups.has(g.Id)) (g.Members || []).forEach((m        ) => { map[m] = g; }); });
+  flowGroups().forEach((g     ) => {
+    const host = foldedInto(g) || (collapsedGroups.has(g.Id) ? g : null);
+    if (!host) return;
+    (g.Members || []).forEach((m        ) => { map[m] = host; });
+    if (host !== g) map[g.Id] = host;
+  });
   return map;
 }
 
-// An expanded group shows its members instead of its anchor: they take over its outgoing links and it drops
-// out. Skipped when the anchor feeds more than one target, where splitting members across them is invented.
+// An expanded anchor group is replaced by its members, when the anchor feeds a single target.
 function explodeExpandedGroups(nodes       , links       )                                 {
-  const groups = flowGroups().filter((g     ) => g && g.Id && !collapsedGroups.has(g.Id));
+  const groups = flowGroups().filter((g     ) => g && g.Id && !collapsedGroups.has(g.Id) && expandMode(g) === 'replace');
   if (!groups.length) return { nodes, links };
 
   let outNodes = nodes, outLinks = links;
   groups.forEach((g     ) => {
     const byId      = {}; outNodes.forEach((n     ) => { byId[n.id] = n; });
-    if (!byId[g.Id]) return;                                    // synthetic group: nothing to substitute
+    if (!byId[g.Id]) return;
     const members = (g.Members || []).filter((m        ) => byId[m]);
     if (!members.length) return;
 
@@ -2778,40 +2911,34 @@ function collapseGraph(nodes       , links       )                              
   const byId      = {}; nodes.forEach(n => { byId[n.id] = n; });
   const groupNode                      = {};
   flowGroups().forEach((g     ) => {
-    if (!collapsedGroups.has(g.Id)) return;
-    const anchor = byId[g.Id];   // id matches a real node -> an "anchor" group (e.g. Solar PV over its MPPTs)
+    if (!collapsedGroups.has(g.Id) || foldedInto(g)) return;
+    if (!Object.keys(memberOf).some(id => memberOf[id] === g && byId[id])) return;
+    const anchor = byId[g.Id];
     let sum = 0, known = false;
     (g.Members || []).forEach((m        ) => { const n = byId[m]; if (n && n.value != null) { sum += n.value; known = true; } });
-    // A group given no kind is what its members are, when they agree: a group of MPPTs is solar.
     const kinds = new Set((g.Members || []).map((m        ) => byId[m]?.kind).filter(Boolean));
     const kind = g.Kind || (kinds.size === 1 ? [...kinds][0] : 'node');
     groupNode[g.Id] = anchor
-      // The anchor keeps its own identity and value; only if it has none does it fall back to the members' sum.
       ? { ...anchor, value: anchor.value != null ? anchor.value : (known ? sum : null), group: true }
       : { id: g.Id, label: g.Label || g.Id, kind, value: known ? sum : null, group: true };
   });
 
   const remap = (id        ) => (memberOf[id] ? memberOf[id].Id : id);
-  // Drop the collapsed members, keep everyone else.
   const present = new Set        ();
-  // Drop collapsed members and any anchor node (it's re-added as its group node, so it isn't duplicated).
   const outNodes = nodes.filter(n => !memberOf[n.id] && !groupNode[n.id]);
   const merged                      = {};
   links.forEach(l => {
     const s = remap(l.source), t = remap(l.target);
-    if (s === t) return;                       // a link fully inside one collapsed group
+    if (s === t) return;
     present.add(s); present.add(t);
     const k = s + '\u0000' + t;
     if (!merged[k]) merged[k] = { source: s, target: t, value: 0, known: true };
     merged[k].value += (l.value || 0);
     if (l.known === false) merged[k].known = false;
   });
-  // An anchor group always appears (its node was already in the graph); a synthetic group only if a member was.
   Object.values(groupNode).forEach((gn     ) => { if (present.has(gn.id) || byId[gn.id]) outNodes.push(gn); });
   return { nodes: outNodes, links: Object.values(merged) };
 }
-
-// The toggle strip above the diagram: one chip per group, click to collapse/expand on both graphs.
 
 let showUnmeasured = (() => { try { return localStorage.getItem('rpdu-flow-unmeasured') !== '0'; } catch { return true; } })();
 
@@ -2831,8 +2958,7 @@ function applyUnmeasuredPref(nodes       , links       )                        
   };
 }
 
-/// Hide the branches that are carrying nothing. On by default: a rack of switched-off outlets is most of
-/// the diagram and none of the information.
+/// "Hide empty" preference.
 let hideEmpty = (() => { try { return localStorage.getItem('rpdu-flow-hide-empty') !== '0'; } catch { return true; } })();
 
 function setHideEmpty(on         ) {
@@ -2840,15 +2966,7 @@ function setHideEmpty(on         ) {
   try { localStorage.setItem('rpdu-flow-hide-empty', on ? '1' : '0'); } catch { /* private mode: this session only */ }
 }
 
-/// Drop nodes reading zero when nothing downstream of them is carrying anything either.
-///
-/// A node with NO value is left alone. "0 A" and "no data" are different statements: the first is a
-/// measurement, the second is a gap in the model — nothing measures that node — and hiding it by default
-/// would bury exactly the sort of thing this diagram exists to surface.
-///
-/// The test is downstream only. A zero node still on a live supply path stays, so the solar chain after
-/// dark — MPPTs at 0 feeding an aggregate at 0 feeding a live inverter — is drawn as the connected thing
-/// it is. A zero node with nothing live below it is a switched-off outlet, and that is what goes.
+/// Drop zero nodes with nothing live downstream. Nodes with no value stay.
 function applyHideEmptyPref(nodes       , links       )                                 {
   if (!hideEmpty) return { nodes, links };
 
@@ -2857,8 +2975,6 @@ function applyHideEmptyPref(nodes       , links       )                         
   const out = new Map                  ();
   links.forEach((l     ) => out.set(l.source, [...(out.get(l.source) || []), l.target]));
 
-  // Memoised so a wide fan-out is walked once, and cycle-safe because a node in progress answers false
-  // rather than recursing back into itself.
   const feedsSomethingLive = new Map                 ();
   const walking = new Set        ();
   const live = (id        )          => {
@@ -2886,9 +3002,7 @@ function applyHideEmptyPref(nodes       , links       )                         
   };
 }
 
-/// Hide the branches carrying next to nothing (#497): a share of the diagram's total, below which a branch is
-/// hidden. Off (0) by default, and per-viewer like the other switches. A share rather than watts, so it
-/// means the same on a power, current or energy view and on a small house or a rack.
+/// "Hide small" threshold, as a share of the total.
 const HIDE_SMALL_CHOICES                     = [[0, 'Off'], [0.5, 'under 0.5%'], [1, 'under 1%'], [2, 'under 2%'], [5, 'under 5%']];
 let hideSmallPercent = (() => {
   try {
@@ -2902,13 +3016,7 @@ function setHideSmall(percent        ) {
   try { localStorage.setItem('rpdu-flow-hide-small', String(percent)); } catch { /* private mode: this session only */ }
 }
 
-/// Drop nodes reading under the chosen share of the total when nothing downstream of them reaches it
-/// either, and say how many went.
-///
-/// The total is what enters the diagram: the sum of the nodes nothing feeds. The rules are the ones "Hide
-/// empty" keeps. A node with no data is left alone: it is a gap in the model, not a small reading. A small
-/// node above a large one stays, so what it feeds is never cut off from its supply. Signs are ignored:
-/// 40 W exported is as large as 40 W drawn.
+/// Drop nodes under the share of the total with nothing larger downstream; returns how many went.
 function applyHideSmallPref(nodes       , links       , percent = hideSmallPercent)                                                 {
   if (!(percent > 0)) return { nodes, links, hidden: 0 };
 
@@ -2925,7 +3033,6 @@ function applyHideSmallPref(nodes       , links       , percent = hideSmallPerce
   const floor = total * percent / 100;
   const large = (n     ) => size(n) == null || size(n)  >= floor;
 
-  // Memoised, and cycle-safe: a node in progress answers false rather than recursing into itself.
   const feedsLarge = new Map                 ();
   const walking = new Set        ();
   const reaches = (id        )          => {
@@ -2967,8 +3074,7 @@ function hideSmallSelect(onChange            )              {
   return lbl;
 }
 
-/// Hide the nodes nothing measures. Off by default: a node with no data is a gap in the model, and surfacing
-/// those is what this diagram is for — but once the gaps are known, a column of them is only clutter.
+/// "Hide no data" preference.
 let hideNoData = (() => { try { return localStorage.getItem('rpdu-flow-hide-no-data') === '1'; } catch { return false; } })();
 
 function setHideNoData(on         ) {
@@ -2976,10 +3082,7 @@ function setHideNoData(on         ) {
   try { localStorage.setItem('rpdu-flow-hide-no-data', on ? '1' : '0'); } catch { /* private mode: this session only */ }
 }
 
-/// Drop nodes with no data when nothing downstream of them has data either, and say how many went.
-///
-/// The test is downstream, as it is for empty branches: a panel nothing meters, above circuits that are
-/// metered, stays — removing it would cut the measured circuits off from everything that feeds them.
+/// Drop no-data nodes with no data downstream; returns how many went.
 function applyHideNoDataPref(nodes       , links       )                                                 {
   if (!hideNoData) return { nodes, links, hidden: 0 };
 
@@ -2987,7 +3090,6 @@ function applyHideNoDataPref(nodes       , links       )                        
   const out = new Map                  ();
   links.forEach((l     ) => out.set(l.source, [...(out.get(l.source) || []), l.target]));
 
-  // Memoised, and cycle-safe: a node in progress answers false rather than recursing into itself.
   const reachesData = new Map                 ();
   const walking = new Set        ();
   const feedsData = (id        )          => {
@@ -3024,12 +3126,7 @@ function unmeasuredToggle(onToggle            )              {
   return lbl;
 }
 
-/// How the ribbons are routed between bars.
-///
-/// The default is the curved band this diagram has always drawn. The other two route on a grid instead:
-/// out horizontally, one vertical run, back in horizontally — at most two bends, never a staircase. On a
-/// dense hierarchy that reads more like a wiring diagram than a river, which is easier to follow when what
-/// you want to know is which circuit goes where rather than how much is moving.
+/// Ribbon routing.
 
 const RIBBON_KEY = 'rpdu-flow-ribbon';
 const RIBBON_STYLES                                  = [
@@ -3050,7 +3147,7 @@ function setRibbonStyle(v             ) {
   try { localStorage.setItem(RIBBON_KEY, v); } catch { /* private mode: this session only */ }
 }
 
-/// The routing picker, beside the other switches that change how the diagram is drawn.
+/// Ribbon routing picker.
 function ribbonStyleSelect(onChange            )              {
   const lbl = el('label', {
     class: 'desc',
@@ -3069,7 +3166,7 @@ function ribbonStyleSelect(onChange            )              {
   return lbl;
 }
 
-/// The "Animate flow" view switch. Purely local: a per-viewer preference.
+/// "Animate flow" switch.
 function animateToggle(onToggle            )              {
   const lbl = el('label', {
     class: 'desc',
@@ -3085,10 +3182,7 @@ function animateToggle(onToggle            )              {
   return lbl;
 }
 
-// The "show a past moment" control, and the wording for what comes back, live in history-control.ts.
-
-/// The switches that change what the diagram draws — hide empty/small/no data, the unmeasured remainder,
-/// animation and ribbon routing.
+/// The diagram view switches.
 function viewSwitches(onToggle            )              {
   const row = el('div', { class: 'flow-view-switches' });
   row.append(hideEmptyToggle(onToggle), hideSmallSelect(onToggle), hideNoDataToggle(onToggle),
@@ -3096,28 +3190,28 @@ function viewSwitches(onToggle            )              {
   return row;
 }
 
-/// One chip per group: collapse it into one node, or expand it into its members. Null with no groups.
+/// One collapse/expand chip per visible group.
 function groupChips(onToggle            )                     {
   const groups = flowGroups();
   if (!groups.length) return null;
   const row = el('div', { class: 'flow-view-chips' });
   groups.forEach((g     ) => {
-    const on = collapsedGroups.has(g.Id);
     const count = (g.Members || []).length;
+    if (foldedInto(g) || (g.Parent && !count)) return;
+    const on = collapsedGroups.has(g.Id);
     const chip = btn(`${on ? '▸' : '▾'} ${g.Label || g.Id} (${count})`);
-    // A group with no members has nothing to fold — collapsing/expanding it is a no-op.
     chip.title = count === 0 ? 'No members. Add them on the Groups page.'
       : on ? `Collapsed. Click to expand its ${count} member(s).` : 'Expanded. Click to collapse into one node.';
     chip.onclick = () => {
       if (count === 0) { toast(`“${g.Label || g.Id}” has no members. Add them on the Groups page.`, false); return; }
-      on ? collapsedGroups.delete(g.Id) : collapsedGroups.add(g.Id); onToggle();
+      toggleGroup(g); onToggle();
     };
     row.appendChild(chip);
   });
   return row;
 }
 
-/// The switches and the group chips in one strip — for the Roll-up page, which has no View panel.
+/// View switches and group chips in one strip.
 function groupToggles(onToggle            , drawn = true)                     {
   const chips = groupChips(onToggle);
   if (!drawn && !chips) return null;
@@ -3129,7 +3223,7 @@ function groupToggles(onToggle            , drawn = true)                     {
 
 // The candidate node universe for wiring: the built graph's nodes (pdu/outlet/…) plus the custom defs.
 
-/// The "Hide no data" view switch. Per-viewer, like the others here.
+/// "Hide no data" switch.
 function hideNoDataToggle(onToggle            )              {
   const lbl = el('label', {
     class: 'desc',
@@ -3145,7 +3239,7 @@ function hideNoDataToggle(onToggle            )              {
   return lbl;
 }
 
-/// The "Hide empty" view switch. Per-viewer, like the others here.
+/// "Hide empty" switch.
 function hideEmptyToggle(onToggle            )              {
   const lbl = el('label', {
     class: 'desc',
@@ -5257,32 +5351,42 @@ function addLiveDataSection(nav     , sections     ) {
 // ── flow-tree.ts ────────────────────────────────────────────────
 // The flow as a tree, for the views that draw it as one: the sunburst and the treemap.
 //
-// The root is the hub the supply converges on — an inverter, a main panel — or, with none, every root side
-// by side. Each node's children are what it feeds. A node fed from two parents is a child of each, carrying
-// that parent's share of it, so every level still adds up.
+// The root is the hub the supply converges on, or with none every root side by side. Each node's children are
+// what it feeds ('out') or what feeds it ('in'). A node with two parents carries each one's share.
 
-/// Where the supply converges: follow the roots while everything they feed is one node. What was followed
-/// is the supply; the node it all meets at is the hub. With no such node the hub is null.
+/// Where the supply converges: the first node reached by the roots carrying nearly all the supply, followed on
+/// while it feeds only one node. Its direct feeders are the supply. With no such node the hub is null.
 function findHub(nodes       , links       )                                           {
   const ids = new Set(nodes.map(n => n.id));
+  const out = new Map                  ();
+  links.forEach(l => { if (ids.has(l.source) && ids.has(l.target)) (out.get(l.source) ?? out.set(l.source, []).get(l.source) ).push(l.target); });
   const fed = new Set(links.map(l => l.target));
-  let frontier = nodes.filter(n => !fed.has(n.id)).map(n => n.id);
-  let supply           = [];
-  const seen = new Set        ();
-  while (frontier.length) {
-    const out = links.filter(l => frontier.includes(l.source));
-    const targets = [...new Set(out.map(l => l.target))].filter(t => ids.has(t));
-    if (frontier.length === 1 && targets.length !== 1) return { hub: frontier[0], supply };
-    if (targets.length !== 1 || seen.has(targets[0])) return { hub: null, supply: [] };
-    seen.add(targets[0]);
-    supply = frontier;
-    frontier = targets;
-  }
-  return { hub: null, supply: [] };
+  const roots = nodes.filter(n => !fed.has(n.id)).map(n => n.id);
+  if (!roots.length) return { hub: null, supply: [] };
+  const sent = (id        ) => links.filter(l => l.source === id).reduce((s, l) => s + Math.max(0, l.value ?? 0), 0);
+  let weight = new Map(roots.map(r => [r, sent(r)]));
+  if (![...weight.values()].some(w => w > 0)) weight = new Map(roots.map(r => [r, 1]));
+  const all = [...weight.values()].reduce((s, w) => s + w, 0);
+  const reached = new Map                ();
+  roots.forEach(r => {
+    const seen = new Set        ([r]);
+    for (let todo = [r]; todo.length;) (out.get(todo.pop() ) || []).forEach(t => { if (!seen.has(t)) { seen.add(t); todo.push(t); } });
+    seen.forEach(id => reached.set(id, (reached.get(id) || 0) + weight.get(r) ));
+  });
+  const common = new Set([...reached].filter(([, w]) => w >= all * 0.95).map(([id]) => id));
+  const firsts = [...common].filter(id => !links.some(l => l.target === id && common.has(l.source)));
+  if (firsts.length !== 1) return { hub: null, supply: [] };
+  let hub = firsts[0];
+  const seen = new Set        ([hub]);
+  for (let next = out.get(hub) || []; next.length === 1 && !seen.has(next[0]); next = out.get(hub) || []) { hub = next[0]; seen.add(hub); }
+  if ((out.get(hub) || []).length === 0) return { hub: null, supply: [] };
+  const supply = [...new Set(links.filter(l => l.target === hub && ids.has(l.source)).map(l => l.source))];
+  return { hub, supply };
 }
 
 /// The top-level branches, largest first, each with its subtree; and the total they add up to.
-function flowTree(nodes       , links       , hub               )                                                    {
+function flowTree(nodes       , links       , hub               , dir               = 'out')                                                    {
+  if (dir === 'in') links = links.map(l => ({ ...l, source: l.target, target: l.source }));
   const byId = new Map(nodes.map(n => [n.id, n]));
   const out = new Map               ();
   links.forEach(l => { if ((l.value ?? 0) > 0) (out.get(l.source) ?? out.set(l.source, []).get(l.source) ).push(l); });
@@ -5297,11 +5401,10 @@ function flowTree(nodes       , links       , hub               )               
   const build = (id        , value        , d        , branch        , parent                 , path             )                  => {
     const n = byId.get(id);
     if (!n || path.has(id) || !(value > 0)) return null;
-    const t           = { id, label: n.label || id, value, scale: value, depth: d, branch, parent, children: [],
+    const hue = sourceHue(n.kind, dir === 'out') ?? parent?.hue ?? null;
+    const t           = { id, label: n.label || id, value, scale: value, depth: d, branch, hue, parent, children: [],
                           key: (parent ? parent.key + '>' : '') + id };
     depth = Math.max(depth, d);
-    // This piece may be only part of the node — one parent's share of something fed from two — so its
-    // children are that same share of the node's own links.
     const share = (n.value ?? 0) > 0 ? Math.min(1, value / n.value) : 1;
     const next = new Set(path).add(id);
     (out.get(id) || [])
@@ -5329,7 +5432,7 @@ function treePath(t          , rootLabel               )           {
 
 /// A colour per top-level branch, lighter with each level down, the same in both views.
 const branchHue = (branch        ) => (branch * 57 + 205) % 360;
-const treeFill = (t          ) => `hsl(${branchHue(t.branch)} 62% ${Math.min(76, 44 + t.depth * 7)}%)`;
+const treeFill = (t          ) => `hsl(${t.hue ?? branchHue(t.branch)} ${t.hue != null ? 78 : 62}% ${Math.min(76, 44 + t.depth * 7)}%)`;
 
 // ── flow-card.ts ────────────────────────────────────────────────
 // The details card for one node in the sunburst and the treemap: the Sankey's hover card, plus where the
@@ -5434,13 +5537,12 @@ function readingRows(id        , drawn        )        {
 
 const SIZE = 720, C = SIZE / 2;
 const HUB_R = 62, SUPPLY_R0 = 68, SUPPLY_R1 = 80, RING0 = 88;
-/// The supply ring by what feeds it, in the colours the Energy page uses.
-const SUPPLY_FILL                         = { solar: '#f2b01e', grid: '#8b95a7', battery: '#3fb950', generator: '#d9730d' };
+const SUPPLY_FILL                         = { solar: SOURCE_COLOR.solar, grid: SOURCE_COLOR.grid, battery: SOURCE_COLOR.battery, generator: '#d9730d' };
 
 /// Every arc, laid out: a child's angle is its share of what its parent passes on, measured against the
 /// parent's scale, so a node that keeps some for itself leaves a gap at the end of its ring.
-function layoutSunburst(nodes       , links       , hub               , _supply           )                                                {
-  const { top, total, depth } = flowTree(nodes, links, hub);
+function layoutSunburst(nodes       , links       , hub               , dir               = 'out')                                                {
+  const { top, total, depth } = flowTree(nodes, links, hub, dir);
   const arcs        = [];
   if (!(total > 0)) return { arcs, depth, total };
   const place = (t          , a0        , a1        ) => {
@@ -5466,14 +5568,91 @@ function arcPath(r0        , r1        , a0        , a1        )         {
        + `A${r0},${r0} 0 ${large} 0 ${f2(x3)},${f2(y3)} Z`;
 }
 
+const BASE_SIZE = 11.5;
+const MIN_SIZE = 8;
+
+/// Light text on dark fills, dark text on light ones.
+function labelInk(fill        )         {
+  const m = /hsl\((-?[\d.]+)\s+([\d.]+)%\s+([\d.]+)%\)/.exec(fill);
+  let r = 0.5, g = 0.5, b = 0.5;
+  if (m) {
+    const h = +m[1], sat = +m[2] / 100, l = +m[3] / 100, k = (n        ) => (n + h / 30) % 12;
+    const a = sat * Math.min(l, 1 - l), ch = (n        ) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+    [r, g, b] = [ch(0), ch(8), ch(4)];
+  } else if (/^#[\da-f]{6}$/i.test(fill)) {
+    [r, g, b] = [1, 3, 5].map(i => parseInt(fill.slice(i, i + 2), 16) / 255);
+  }
+  const lin = (c        ) => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  const lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return lum < 0.18 ? '#ffffff' : '#0b0e13';
+}
+const clipTo = (text        , n        ) => text.length > n ? text.slice(0, Math.max(3, n - 1)) + '…' : text;
+
+function layoutLabel(label        , span        , mid        , rm        , depth        , size        )           {
+  const charW = 0.59 * size, lineH = 1.19 * size;
+  const across = Math.floor((depth - 8) / charW);
+  const fits = (r        ) => Math.floor((span * r - 8) / charW);
+  const along = fits(rm);
+  let deg = (mid * 180 / Math.PI) - 90;
+  if (deg > 90) deg -= 180;
+  const midDeg = mid * 180 / Math.PI;
+  const flip = midDeg > 90 && midDeg < 270;
+  const out = (a         , lines          ) => ({ along: a, flip, deg, lines, size, lineH, room: a || span * innerR(rm, depth) >= lines.length * lineH + 1 });
+  if (label.length <= across || along <= across || depth < lineH + 2) {
+    if (label.length > across && span * innerR(rm, depth) >= 2 * lineH + 1) {
+      const [a, b] = wrapWords(label, across);
+      if (a) return out(false, b ? [a, clipTo(b, across)] : [a]);
+    }
+    return out(false, [clipTo(label, across)]);
+  }
+  if (label.length <= along || depth < 2 * lineH + 4) return out(true, [clipTo(label, along)]);
+  const inner = fits(rm - lineH / 2);
+  const [first, rest] = wrapWords(label, inner);
+  if (!first) return out(true, [clipTo(label, along)]);
+  return out(true, rest ? [first, clipTo(rest, inner)] : [first]);
+}
+
+const innerR = (rm        , depth        ) => rm - depth / 2;
+
+/// The words that fit in `n` characters, and the rest.
+function wrapWords(label        , n        )                   {
+  const words = label.split(/\s+/);
+  let first = '';
+  while (words.length && (first ? first + ' ' + words[0] : words[0]).length <= n) first = first ? first + ' ' + words.shift() : words.shift() ;
+  return [first, words.join(' ')];
+}
+
+/// An arc's label: across the ring, or curved along it (two lines when the ring is deep enough), whichever shows more.
+/// The largest size down to the base that shows the whole label (one line, then two), then the same below the base
+/// down to MIN_SIZE; else the smallest size that fits the slice, clipped. No lines when the slice is too thin for any size.
+/// `flip` marks the lower half, where text along the arc runs the other way to stay upright.
+function arcLabel(label        , span        , mid        , rm        , depth        , maxSize = BASE_SIZE)           {
+  const whole = label.split(/\s+/).join(' ');
+  const tries                             = [[1, maxSize, BASE_SIZE], [2, maxSize, BASE_SIZE], [1, BASE_SIZE - 0.5, MIN_SIZE], [2, BASE_SIZE - 0.5, MIN_SIZE]];
+  for (const [lines, hi, lo] of tries) for (let size = hi; size >= lo; size -= 0.5) {
+    const l = layoutLabel(label, span, mid, rm, depth, size);
+    if (l.room && l.lines.length <= lines && l.lines.join(' ') === whole) return l;
+  }
+  for (let size = MIN_SIZE; size <= Math.min(maxSize, BASE_SIZE); size += 0.5) {
+    const l = layoutLabel(label, span, mid, rm, depth, size);
+    if (l.room) return l;
+  }
+  return { ...layoutLabel(label, span, mid, rm, depth, MIN_SIZE), lines: [] };
+}
+
+let labelPaths = 0;
+
 /// A node opens only when there is something beneath it; opening a leaf would draw an empty diagram.
 const opens = (links       , id        ) => links.some((l     ) => l.source === id && (l.value ?? 0) > 0);
 
 function drawSunburst(nodes       , links       , opts              )             {
   const { hub, supply } = findHub(nodes, links);
-  const { arcs, depth, total } = layoutSunburst(nodes, links, hub);
+  const dir = hub ? opts.dir || 'out' : 'out';
+  const { arcs, depth, total } = layoutSunburst(nodes, links, hub, dir);
   const byId = new Map(nodes.map(n => [n.id, n]));
   const svg = svgEl('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'sunburst-svg', role: 'img' })       ;
+  const defs = svgEl('defs', {});
+  svg.appendChild(defs);
   const ringW = Math.max(26, Math.min(70, (C - 8 - RING0) / Math.max(1, depth)));
   const fmt = (v        ) => formatMeasure(v, opts.units);
   const hubNode = hub ? byId.get(hub) : null;
@@ -5511,7 +5690,7 @@ function drawSunburst(nodes       , links       , opts              )           
 
   // The supply mix: a thin ring just outside the hub.
   const supplyTotal = supply.reduce((s, id) => s + Math.max(0, byId.get(id)?.value ?? 0), 0);
-  if (hub && supplyTotal > 0) {
+  if (hub && dir === 'out' && supplyTotal > 0) {
     let a = 0;
     supply.forEach((id, i) => {
       const v = Math.max(0, byId.get(id)?.value ?? 0);
@@ -5531,9 +5710,10 @@ function drawSunburst(nodes       , links       , opts              )           
     // Too thin to draw once the gap between arcs comes off: its parent's card lists it.
     const r0 = RING0 + (arc.depth - 1) * ringW, r1 = r0 + ringW - 2;
     if ((arc.a1 - arc.a0 - 0.004) * r0 < 3) return;
-    const p = svgEl('path', { d: arcPath(r0, r1, arc.a0 + 0.002, arc.a1 - 0.002), fill: treeFill(arc.node), class: 'sunburst-arc' });
+    const fill = treeFill(arc.node);
+    const p = svgEl('path', { d: arcPath(r0, r1, arc.a0 + 0.002, arc.a1 - 0.002), fill, class: 'sunburst-arc' });
     p.dataset.node = arc.id;
-    const leaf = !opens(links, arc.id);
+    const leaf = dir === 'in' ? true : !opens(links, arc.id);
     if (leaf) p.classList.add('is-leaf');
     p.addEventListener('click', (e     ) => { e.stopPropagation?.(); if (!leaf) opts.onOpen(arc.id); });
     hover(p, arc.id, arc.key, {
@@ -5543,17 +5723,38 @@ function drawSunburst(nodes       , links       , opts              )           
     svg.appendChild(p);
     drawn.push({ p, key: arc.key });
 
-    // A label where it fits: along the ring's middle, turned to read outward, on the arcs big enough to hold it.
     const mid = (arc.a0 + arc.a1) / 2, rm = (r0 + r1) / 2;
-    if ((arc.a1 - arc.a0) * rm < 16) return;
     const [x, y] = pt(rm, mid);
-    let deg = (mid * 180 / Math.PI) - 90;
-    if (deg > 90) deg -= 180;
-    const t = svgEl('text', { x: f2(x), y: f2(y), class: 'sunburst-label', transform: `rotate(${f2(deg)} ${f2(x)} ${f2(y)})` });
-    // Radial text: the ring's width is the line's length.
-    const maxChars = Math.floor((ringW - 8) / 6.2);
-    t.textContent = arc.label.length > maxChars ? arc.label.slice(0, Math.max(3, maxChars - 1)) + '…' : arc.label;
-    svg.appendChild(t);
+    const label = arcLabel(arc.label, arc.a1 - arc.a0, mid, rm, r1 - r0, arc.depth === 1 ? 16 : arc.depth === 2 ? 13.5 : BASE_SIZE);
+    if (!label.lines.length || label.lines[0].length < 2) return;
+    const style = `font-size:${label.size}px;fill:${labelInk(fill)}`;
+    if (!label.along) {
+      const t = svgEl('text', { x: f2(x), y: f2(y), class: 'sunburst-label', transform: `rotate(${f2(label.deg)} ${f2(x)} ${f2(y)})`, style });
+      if (label.lines.length === 1) t.textContent = label.lines[0];
+      else label.lines.forEach((line, i) => {
+        const ts = svgEl('tspan', { x: f2(x), dy: f2(i ? label.lineH : -label.lineH / 2) });
+        ts.textContent = line;
+        t.appendChild(ts);
+      });
+      svg.appendChild(t);
+      return;
+    }
+    // Upper line outward on the top half, inward on the bottom half, where the text runs the other way.
+    const n = label.lines.length;
+    label.lines.forEach((line, i) => {
+      const off = (n - 1) / 2 - i;
+      const r = rm + (label.flip ? -off : off) * label.lineH;
+      const id = `sb-label-${++labelPaths}`;
+      const a1 = arc.a0 + Math.min(arc.a1 - arc.a0, 2 * Math.PI - 0.02);
+      const [sx, sy] = pt(r, label.flip ? a1 : arc.a0), [ex, ey] = pt(r, label.flip ? arc.a0 : a1);
+      const large = a1 - arc.a0 > Math.PI ? 1 : 0;
+      defs.appendChild(svgEl('path', { id, d: `M${f2(sx)},${f2(sy)} A${f2(r)},${f2(r)} 0 ${large} ${label.flip ? 0 : 1} ${f2(ex)},${f2(ey)}`, fill: 'none' }));
+      const t = svgEl('text', { class: 'sunburst-label', style });
+      const tp = svgEl('textPath', { href: `#${id}`, startOffset: '50%' });
+      tp.textContent = line;
+      t.appendChild(tp);
+      svg.appendChild(t);
+    });
   });
 
   // The hub on top, so the arcs cannot cover it.
@@ -5605,10 +5806,10 @@ function squarify   (items                             , r        )             
 const TM_HEAD = 20, TM_PAD = 3;
 
 /// Every box, laid out in a W×H frame: the root, then each node inside its parent's box under its header.
-function layoutTreemap(nodes       , links       , W        , H        )
+function layoutTreemap(nodes       , links       , W        , H        , dir               = 'out')
                                                                                                                                                    {
   const { hub } = findHub(nodes, links);
-  const { top, total } = flowTree(nodes, links, hub);
+  const { top, total } = flowTree(nodes, links, hub, hub ? dir : 'out');
   const cells                                                = [];
   /// What a node keeps rather than passes on: the empty part of its box.
   const rests                                 = [];
@@ -5634,11 +5835,12 @@ function layoutTreemap(nodes       , links       , W        , H        )
   return { root, hub, total, cells, rests };
 }
 
-function drawTreemap(nodes       , links       , opts                                  )              {
+function drawTreemap(nodes       , links       , opts                                                   )              {
   const W = Math.max(320, opts.width || 1000);
   // A phone is taller than wide; a desktop pane is wide, and never taller than the screen can show.
-  const H = W < 640 ? Math.round(W * 1.35) : Math.round(Math.min(W * 0.58, 700));
-  const { root, hub, total, cells, rests } = layoutTreemap(nodes, links, W, H);
+  const H = opts.height ?? (W < 640 ? Math.round(W * 1.35) : Math.round(Math.min(W * 0.58, 700)));
+  const { root, hub, total, cells, rests } = layoutTreemap(nodes, links, W, H, opts.dir);
+  const inward = !!hub && opts.dir === 'in';
   const byId = new Map(nodes.map(n => [n.id, n]));
   const fmt = (v        ) => formatMeasure(v, opts.units);
   const hubNode = hub ? byId.get(hub) : null;
@@ -5660,7 +5862,7 @@ function drawTreemap(nodes       , links       , opts                           
   box.appendChild(head);
 
   cells.forEach(({ t, r, nested }) => {
-    const leaf = !opens(links, t.id);
+    const leaf = inward || !opens(links, t.id);
     const c = el('div', { class: 'treemap-cell' + (nested ? ' is-nested' : '') + (leaf ? ' is-leaf' : '') });
     c.dataset.node = t.id;
     c.style.background = treeFill(t);
@@ -5681,9 +5883,9 @@ function drawTreemap(nodes       , links       , opts                           
   rests.forEach(({ r, value }) => {
     const c = el('div', { class: 'treemap-rest' });
     at(c, r);
-    if (r.h >= 15 && r.w >= 60) c.appendChild(el('span', { class: 'treemap-name', text: 'not passed on' }));
+    if (r.h >= 15 && r.w >= 60) c.appendChild(el('span', { class: 'treemap-name', text: inward ? 'unaccounted' : 'not passed on' }));
     if (r.h >= 30 && r.w >= 40) c.appendChild(el('span', { class: 'treemap-val', text: fmt(value) }));
-    c.title = `${fmt(value)} not passed on to anything drawn here: the node's own use, or loads nothing measures`;
+    c.title = inward ? `${fmt(value)} not accounted for by its feeders` : `${fmt(value)} not passed on to anything drawn here`;
     box.appendChild(c);
   });
   return box;
@@ -5724,8 +5926,6 @@ const CONTRADICTION_SHARE = 0.25;
 
 function addFlowSection(nav     , sections     ) {
   const link = navLink(nav, "Flow", "⇄");
-  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
-  link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   // One line over the diagram: title, what is drawn, and two buttons for everything else. The paragraph, the
   // period row, the date row and two rows of view switches put the diagram half way down the screen.
@@ -5848,11 +6048,10 @@ function addFlowSection(nav     , sections     ) {
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
   // Each job below the diagram gets its own page under Energy Flow, so the Flow page is the diagram.
-  const subPage = (label        , icon        , desc        ) => {
+  const subPage = (label        , icon        , desc        , paths         ) => {
     const l = navLink(nav, label, icon);
     l.classList.add('nav-child');
-    // These edit the same EnergyFlow document as the Flow and Nodes pages, so they carry its edit count.
-    l.dataset.section = 'EnergyFlow';
+    if (paths) l.dataset.section = paths;
     const s = document.createElement('div'); s.className = 'section'; sections.appendChild(s);
     s.appendChild(el('h2', { text: label }));
     s.appendChild(el('div', { class: 'desc', text: desc }));
@@ -5864,10 +6063,10 @@ function addFlowSection(nav     , sections     ) {
     'What each node rolls up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
   const treePanel = treePage.body;
   const edPage = subPage('Hierarchy', '⑃',
-    'How the nodes are wired together. Energy flows left → right.');
+    'How the nodes are wired together. Energy flows left → right.', 'EnergyFlow.Links,EnergyFlow.Parents');
   const ed      = edPage.body;
   const settingsPage = subPage('Settings', '⚙',
-    'Everything that governs the energy roll-up and its export. These were scattered across the pages they affected.');
+    'Energy roll-up and export settings.', 'EnergyFlow.*');
   let lastGraph      = null;
   // Bindings the server is dropping on purpose.
   let withheldSources        = [];
@@ -5944,6 +6143,8 @@ function addFlowSection(nav     , sections     ) {
   // The zoom and where the pane is scrolled to belong to the reader, not to the drawing: a live reading
   // arriving must not throw away the view they are reading from (#492).
   let zoom      = null;
+  // The sunburst/treemap panes' zooms, one per chart, kept across live repaints the same way.
+  let treeZooms        = [];
   // Drawing one node and what is beneath it, and nothing else (#493). Held across redraws, like the view.
   let drillTo                = null;
   let refit = false;
@@ -6017,6 +6218,10 @@ function addFlowSection(nav     , sections     ) {
     if (held) wrap.style.minHeight = held + 'px';
     // Read off the pane that is about to be replaced: once it is detached it measures nothing.
     const keptView = zoom?.view?.();
+    const keptTreeViews = treeZooms.map(z => z.view?.());
+    // The old panes' listeners (some are on window) go with them.
+    [zoom, ...treeZooms].forEach(z => { try { if (typeof z === 'function') z(); } catch { /* already gone */ } });
+    treeZooms = [];
     // Measured before the clear, off a container that is not emptied, so the reading is of a laid-out page.
     const paneW = Math.round(Number((sec       ).clientWidth) || Number((wrap       ).clientWidth) || 0);
     wrap.innerHTML = '';
@@ -6026,9 +6231,11 @@ function addFlowSection(nav     , sections     ) {
     if (drillTo && !(graph.nodes || []).some((n     ) => n.id === drillTo)) drillTo = null;
     graph = drilled(graph, drillTo);
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
-    const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
+    const visible = hideHiddenNodes((graph.nodes || []).slice(), (graph.links || []).slice());
+    const collapsed = collapseGraph(visible.nodes, visible.links);
     // ...then substitute the members for the anchor on any group left expanded.
-    const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
+    const exploded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
+    const expanded = nestExpandedGroups(exploded.nodes, exploded.links);
     // ...then honour the unmetered-remainder view switch...
     const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
     // ...and finally drop the branches carrying nothing, if that switch is on.
@@ -6074,13 +6281,48 @@ function addFlowSection(nav     , sections     ) {
         host: sec,
       };
       const sunburst = modeSel.value === 'sunburst';
-      const view = sunburst ? drawSunburst(nodes, links, viewOpts)
-        : drawTreemap(nodes, links, { ...viewOpts, width: wrap.clientWidth || sec.clientWidth || 1000 });
+      const paneWidth = wrap.clientWidth || sec.clientWidth || 1000;
+      const pair = !!findHub(nodes, links).hub;
+      const side = pair && paneWidth >= 900;
+      const half = side ? Math.floor((paneWidth - 6) / 2) : paneWidth;
+      // Each chart sits in its own pane that pans and zooms like the Sankey.
+      const zooms        = [];
+      const one = (dir              ) => {
+        const pane = el('div', { class: 'tree-zoom' });
+        if (sunburst) {
+          const svg = drawSunburst(nodes, links, { ...viewOpts, dir });
+          const base = Math.min(half - 4, 760);
+          pane.appendChild(svg);
+          zooms.push(attachZoom(pane, svg, base, base, true));
+        } else {
+          const map = drawTreemap(nodes, links, { ...viewOpts, dir, width: half, height: side ? Math.round(Math.min(half * 1.1, 700)) : undefined });
+          pane.appendChild(map);
+          const base = half - 4;
+          zooms.push(attachZoom(pane, map, base, base, true, (z) => { map.style.width = `${Math.round(base * z)}px`; }));
+        }
+        return pane;
+      };
+      const view = pair
+        ? el('div', { class: 'flow-tree-pair' + (side ? ' is-side' : '') + (sunburst ? '' : ' is-tight') },
+            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Sources' }), one('in')),
+            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Destinations' }), one('out')))
+        : one('out');
       stage = el('div', { class: 'flow-stage ' + (sunburst ? 'sunburst-stage' : 'treemap-stage') }, view, menu.el);
       wrap.appendChild(stage);
-      wrap.appendChild(el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px' },
-        text: sunburst ? 'Hover for details · click an arc to centre on it · click the middle to go back out.'
-          : 'Hover for details · click a box to open it · click the top bar to go back out.' }));
+      treeZooms = zooms;
+      if (!refit) zooms.forEach((z, i) => { if (keptTreeViews[i]) z.setView(keptTreeViews[i]); });
+      const zoomAll = (act                  ) => () => zooms.forEach(act);
+      const zb = (label        , title        , act            ) => { const b = btn(label); b.title = title; b.onclick = act; return b; };
+      stage.appendChild(el('div', { class: 'flow-zoom' },
+        zb('+', 'Zoom in', zoomAll(z => z.zoomBy(1.2))),
+        zb('−', 'Zoom out', zoomAll(z => z.zoomBy(1 / 1.2))),
+        zb('⤢', 'Fit to the page', zoomAll(z => z.fit()))));
+      const hints = el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } });
+      hints.appendChild(el('span', { text: sunburst ? 'Hover for details · click an arc to centre on it · click the middle to go back out.'
+        : 'Hover for details · click a box to open it · click the top bar to go back out.' }));
+      hints.appendChild(el('span', { class: 'on-touch', text: 'Swipe to pan · pinch to zoom.' }));
+      hints.appendChild(el('span', { class: 'on-mouse', text: 'Drag to pan · Ctrl/⌘ + scroll to zoom.' }));
+      wrap.appendChild(hints);
       zoom = null;
       refit = false;
       count.textContent = `${nodes.length} node(s)`;
@@ -6138,7 +6380,14 @@ function addFlowSection(nav     , sections     ) {
     // text where it is. Where the width cannot be measured (the DOM stub the checks run against) it falls
     // back to 960, so the geometry those checks pin is unchanged.
     const W = Math.max(960, Math.min(paneW ? paneW - 8 : 960, 2400));
-    const padTop = 22, nodeW = 12, usableH = 520;
+    const shownIds = new Set        (nodes.map((n     ) => n.id));
+    const outlined = (d     ) => !collapsedGroups.has(d.Id) && !foldedInto(d) && expandMode(d) === 'replace' && !shownIds.has(d.Id) && drawnMembers(d, shownIds).length > 0;
+    const levels = (x     , seen             )         => Math.max(0, ...flowGroups()
+      .filter((d     ) => d.Parent === x.Id && !seen.has(d.Id) && outlined(d))
+      .map((d     ) => 1 + levels(d, new Set([...seen, d.Id]))));
+    const outlines = flowGroups().filter(outlined);
+    const outlineTop = outlines.length ? 14 + 13 * Math.max(...outlines.map((g     ) => levels(g, new Set([g.Id])))) : 0;
+    const padTop = 22 + outlineTop, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
     const leftPad = 16, rightGutter = 232;
     // What the node has to be tall enough to carry: its own reading.
@@ -6376,7 +6625,10 @@ function addFlowSection(nav     , sections     ) {
     const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, class: 'sankey-svg', style: 'display:block' });
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
-    const tintOf = (id        ) => colors[colMemo[id] % colors.length];
+    const kindOf                         = {};
+    nodes.forEach((n     ) => { kindOf[n.id] = n.kind; });
+    const feedsOut = new Set(links.map((l     ) => l.source));
+    const tintOf = (id        ) => sourceColor(kindOf[id], !feedsOut.has(id)) || colors[colMemo[id] % colors.length];
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
     svg.addEventListener('click', () => { menu.close(); clearFocus(svg); });
     // …and on bare canvas, back out to the whole diagram.
@@ -6563,6 +6815,33 @@ function addFlowSection(nav     , sections     ) {
     const groupById                      = {};
     flowGroups().forEach((g     ) => { groupById[g.Id] = g; (g.Members || []).forEach((m        ) => { memberGroup[m] = g; }); });
 
+    // Outline around the members of each expanded 'replace' group, with a collapse tab.
+    outlines.forEach((g     ) => {
+      const ids = drawnMembers(g, shownIds).filter(id => pos[id]);
+      if (!ids.length) return;
+      const lvl = levels(g, new Set([g.Id])), padX = 3 + 3 * lvl, padY = 3 + 13 * lvl;
+      const cols                                                             = {};
+      ids.forEach(id => {
+        const p = pos[id], c = cols[p.x] || (cols[p.x] = { top: p.y, bottom: p.y + p.h, x: p.x });
+        c.top = Math.min(c.top, p.y); c.bottom = Math.max(c.bottom, p.y + p.h);
+      });
+      const collapse = () => { toggleGroup(g); redrawBoth(); };
+      Object.values(cols).forEach((c, i) => {
+        const box = svgEl('rect', { x: c.x - padX, y: c.top - padY, width: nodeW + 2 * padX, height: c.bottom - c.top + 2 * padY, rx: 4,
+          fill: 'none', stroke: 'var(--muted)', 'stroke-dasharray': '4 3', 'stroke-width': '1', 'pointer-events': 'stroke', class: 'flow-group-outline' });
+        const t = svgEl('title'); t.textContent = `${g.Label || g.Id}. Click to collapse.`; box.appendChild(t);
+        box.style.cursor = 'pointer'; box.addEventListener('click', collapse);
+        svg.appendChild(box);
+        if (i) return;
+        const tab = svgEl('text', { x: c.x - padX, y: c.top - padY - 3, fill: 'var(--fg)', 'font-size': '10', 'font-weight': '600',
+          'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round', class: 'flow-group-tab' });
+        tab.textContent = `▾ ${g.Label || g.Id}`;
+        const tt = svgEl('title'); tt.textContent = 'Click to collapse'; tab.appendChild(tt);
+        tab.style.cursor = 'pointer'; tab.addEventListener('click', collapse);
+        svg.appendChild(tab);
+      });
+    });
+
     // Nodes + labels, to the right of each node and vertically centered, with a bg halo over ribbons.
     const contradicted                                                 = [];
     nodes.forEach((n     ) => {
@@ -6690,17 +6969,17 @@ function addFlowSection(nav     , sections     ) {
       }
 
     // Group node (collapsed), an anchor node (expanded), or a member: make the node the expand/collapse control.
-      const grp = n.group ? n : (memberGroup[n.id] || groupById[n.id]);
+      const anchorOf = groupById[n.id] && (groupById[n.id].Members || []).length ? groupById[n.id] : null;
+      const grp = n.group ? groupById[n.id] : (memberGroup[n.id] || anchorOf);
       if (grp) {
-        const gid = n.group ? n.id : grp.Id;
-        const toggle = () => { collapsedGroups.has(gid) ? collapsedGroups.delete(gid) : collapsedGroups.add(gid); redrawBoth(); };
+        const toggle = () => { toggleGroup(grp); redrawBoth(); };
         [rect, lab].forEach(elm => { elm.style.cursor = 'pointer'; elm.addEventListener('click', toggle); });
         const hint = svgEl('title');
-        hint.textContent = n.group ? `“${n.label}” groups ${(grp.Members || []).length} node(s) — click to expand`
-          : grp.Id === n.id ? `Group of ${(grp.Members || []).length} node(s) — click to collapse`
-          : `In group “${grp.Label || grp.Id}” — click to collapse`;
+        hint.textContent = n.group && !n.expanded ? `${n.label}: ${(grp.Members || []).length} node(s). Click to expand.`
+          : grp.Id === n.id ? `${grp.Label || grp.Id}. Click to collapse.`
+          : `In ${grp.Label || grp.Id}. Click to collapse.`;
         rect.appendChild(hint);
-        if (n.group) lab.textContent = '▸ ' + lab.textContent;   // an affordance that this node opens up
+        if (n.group || anchorOf) lab.textContent = (n.group && !n.expanded ? '▸ ' : '▾ ') + lab.textContent;
       }
     });
 
@@ -8035,7 +8314,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
 
   // --- Filing: tags, where it is, and where its EmonCMS feeds go. Folded until something is set. ---
   const more = el('details', { class: 'ne-more' })                      ;
-  const filed = [(node.Tags || []).length, node.Location, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag].filter(Boolean).length;
+  const filed = [(node.Tags || []).length, node.Location, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag, node.Hidden].filter(Boolean).length;
   more.open = filed > 0 || nodeEditorFilingOpen;
   more.addEventListener('toggle', () => { nodeEditorFilingOpen = more.open; });
   more.appendChild(el('summary', { class: 'ne-more-summary' },
@@ -8058,6 +8337,9 @@ function renderNodeEditor(node     , links       , cand                  , reren
   const circSel = choiceSelect(circuitChoices(), node.Circuit || '', '— not known —');
   circSel.onchange = () => { node.Circuit = circSel.value || undefined; };
   moreGrid.appendChild(field('Circuit', circSel, 'Breaker it is on. Counted among its metered devices.'));
+  const hiddenBox = el('input', { type: 'checkbox', checked: !!node.Hidden })                    ;
+  hiddenBox.onchange = () => { node.Hidden = hiddenBox.checked || undefined; };
+  moreGrid.appendChild(field('Hidden', el('span', { class: 'ne-check' }, hiddenBox, el('span', { text: 'hide on the flow diagrams' }))));
 
   // Where this node's EmonCMS feeds are filed; blank uses the EmonCMS page's tags.
   const emonTag = el('input', { type: 'text', value: node.EmonCmsTag || '', placeholder: 'EmonCMS default' })                    ;
@@ -8084,7 +8366,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
 let nodeEditorFilingOpen = false;
 
 // ── sections/nodes.ts ───────────────────────────────────────────
-// The Nodes page: the virtual-node table, node groups, and the tag rules for PDUs and outlets.
+// Nodes page and the group manager.
 
 function flowCandidates(lastGraph     , customNodes       ) {
   const cand = new Map             ();
@@ -8095,7 +8377,7 @@ function flowCandidates(lastGraph     , customNodes       ) {
   return cand;
 }
 
-// Tags for the nodes nobody typed out (#342).
+// Auto-tag rules.
 function renderAutoTagRules(flow     , cand                  , rerender            ) {
   const rules = ensure(flow, 'AutoTags', []);
   const box = el('div', { style: { margin: '18px 0' } });
@@ -8119,7 +8401,6 @@ function renderAutoTagRules(flow     , cand                  , rerender         
     const tags = ensure(r, 'Tags', []);
     tr.appendChild(el('td', {}, tagInput(tags, { placeholder: 'rack-1, critical', onChange: rerender })));
 
-    // What the pattern covers right now, from the nodes actually on the graph.
     const hits = ids.filter(id => globMatches(r.Match || '', id));
     tr.appendChild(el('td', {}, el('span', {
       class: 'desc', style: { margin: '0', color: hits.length ? '' : 'var(--warn)' },
@@ -8142,19 +8423,19 @@ function renderAutoTagRules(flow     , cand                  , rerender         
   return box;
 }
 
-/// The same match the server applies (AutoTags.Matches): '*' is the only wildcard.
+/// Matches AutoTags.Matches: '*' is the only wildcard.
 function globMatches(pattern        , id        )          {
   if (!pattern) return false;
   const rx = '^' + pattern.split('*').map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$';
   return new RegExp(rx, 'i').test(id);
 }
 
-// Group manager (#groups): named groups of nodes that collapse into one node on the flow graphs.
+// Group manager.
 function renderGroupManager(flow     , cand                  , rerender            ) {
   const groups = ensure(flow, 'Groups', []);
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Groups', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'Show several nodes as one collapsible node on the flow graphs. Either make a new group (its value is the members’ sum), or turn an existing node into a group — e.g. make “Solar PV” a group over its three MPPTs: collapsed, the flow chart shows only Solar PV reporting its own value; click it to expand the strings. Collapse/expand from the toggles above either graph, or by clicking the node.' }));
+  box.appendChild(el('div', { class: 'desc', text: 'Nodes shown as one collapsible node on the flow graphs.' }));
 
   const nm = (id        ) => (cand.get(id) || {}).label || id;
 
@@ -8176,7 +8457,6 @@ function renderGroupManager(flow     , cand                  , rerender         
   addBar.append(idIn, labIn, kindSel, addBtn);
   box.appendChild(addBar);
 
-  // Anchor a group on an existing node: that node becomes the group (keeping its own value).
   const anchorRow = el('div', { class: 'ld-toolbar' });
   anchorRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Or turn an existing node into a group:' }));
   const anchorSel = el('select', { style: { width: 'auto' } })                     ;
@@ -8204,11 +8484,28 @@ function renderGroupManager(flow     , cand                  , rerender         
     kindEdit.value = g.Kind || 'node';
     kindEdit.onchange = () => { g.Kind = kindEdit.value === 'node' ? undefined : kindEdit.value; };
     const del = btn('Delete', 'danger');
-    del.onclick = () => { groups.splice(groups.indexOf(g), 1); toast(`Group ${g.Label || g.Id} deleted.`, true); rerender(); };
-    head.append(el('code', { text: g.Id, style: { color: 'var(--muted)' } }), labEdit, kindEdit, del);
+    del.onclick = () => { groups.splice(groups.indexOf(g), 1); groups.forEach((x     ) => { if (x.Parent === g.Id) delete x.Parent; }); toast(`Group ${g.Label || g.Id} deleted.`, true); rerender(); };
+    const within = (x     ) => { for (let p      = x, n = 0; p && n < groups.length; p = groups.find((q     ) => q.Id === p.Parent), n++) if (p === g) return true; return false; };
+    const parentSel = el('select', { style: { width: 'auto' }, title: 'Group this group is nested in' })                     ;
+    parentSel.appendChild(el('option', { value: '', text: 'Not nested' }));
+    groups.filter((x     ) => !within(x)).forEach((x     ) => parentSel.appendChild(el('option', { value: x.Id, text: `In ${x.Label || x.Id}` })));
+    parentSel.value = g.Parent || '';
+    parentSel.onchange = () => { if (parentSel.value) g.Parent = parentSel.value; else delete g.Parent; };
+    head.append(el('code', { text: g.Id, style: { color: 'var(--muted)' } }), labEdit, kindEdit, parentSel, del);
     card.appendChild(head);
 
-    // Members as removable chips, plus a picker of candidates not already in the group.
+    const expRow = el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', margin: '8px 0 0' } });
+    const expSel = el('select', { style: { width: 'auto' }, title: 'How the group draws when expanded' })                     ;
+    [['replace', 'Replace with members'], ['parents', 'Nest members as parents'], ['children', 'Nest members as children']]
+      .forEach(([v, t]) => expSel.appendChild(el('option', { value: v, text: t })));
+    expSel.value = g.Expand || 'replace';
+    expSel.onchange = () => { if (expSel.value === 'replace') delete g.Expand; else g.Expand = expSel.value; };
+    const allBox = el('input', { type: 'checkbox', checked: !!g.ExpandChildren })                    ;
+    allBox.onchange = () => { if (allBox.checked) g.ExpandChildren = true; else delete g.ExpandChildren; };
+    expRow.append(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: 'Expanded' }), expSel,
+      el('label', { style: { display: 'inline-flex', gap: '5px', alignItems: 'center' } }, allBox, 'Expand all children'));
+    card.appendChild(expRow);
+
     const memRow = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap', margin: '8px 0 0' } });
     memRow.appendChild(el('span', { class: 'desc', style: { margin: '0', minWidth: '64px' }, text: 'Members' }));
     (g.Members || []).forEach((m        ) => {
@@ -8230,14 +8527,12 @@ function renderGroupManager(flow     , cand                  , rerender         
   return box;
 }
 
-// The open node editor, as a modal over the table (#292).
 let nodeModal                                                      = null;
 
-// A node another page created, opened in the editor the next time the Nodes page loads.
 let editOnOpen                = null;
 function editNodeOnNextOpen(id        ) { editOnOpen = id; }
 
-/// Close the editor. `andDeselect` is a person closing it (Done), which also clears the row they were on.
+/// `andDeselect` also clears the selected row.
 function closeNodeModal(andDeselect = false) {
   const m = nodeModal;
   nodeModal = null;
@@ -8249,10 +8544,8 @@ let nodeModalDone                      = null;
 function syncNodeModal(node     , links       , cand                  , editing                       , rerender            ) {
   if (!node) { closeNodeModal(); return; }
   nodeModalDone = () => { editing.id = null; rerender(); };
-  if (nodeModal && nodeModal.id !== node.Id) closeNodeModal();   // switched rows: a fresh panel, fresh title
+  if (nodeModal && nodeModal.id !== node.Id) closeNodeModal();
   if (!nodeModal) {
-    // The page's save bar is under the backdrop, so the dialog carries its own: what is unsaved, and Save.
-    // Closing first to reach the bar was the only way to save, and nothing said so.
     const status = el('span', { class: 'sheet-dirty' });
     const save = el('button', { class: 'primary', type: 'button', text: 'Save' })                     ;
     const done = el('button', { type: 'button', text: 'Done' })                     ;
@@ -8287,21 +8580,21 @@ function wouldLoop(links       , from        , to        ) {
   return false;
 }
 
-// Virtual-node manager (#129): the dedicated node-configuration surface (its own Nodes tab).
-function renderNodeManager(flow     , customNodes       , links       , cand                  , editing                       , rerender                           , query = '') {
+// Virtual-node manager.
+function renderNodeManager(flow     , customNodes       , links       , cand                  , editing                       , rerender                           , query = '', hideManaged = false) {
   const box = el('div', { style: { margin: '18px 0' } });
   box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
   box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
 
-  // What the filter leaves. The node being edited stays whatever is typed, so narrowing the table never
-  // closes the editor out from under whoever is using it.
+  // The node being edited always stays.
   const q = query.trim().toLowerCase();
   const all = customNodes;
-  if (q) {
-    const hit = (n     ) => [n.Id, n.Label, n.Kind || 'node', kindMeta(n.Kind)[1], ...(n.Tags || [])]
-      .some((v     ) => String(v || '').toLowerCase().includes(q));
-    customNodes = all.filter((n     ) => hit(n) || n.Id === editing.id);
-    box.appendChild(el('div', { class: 'desc nd-shown', text: `${customNodes.length} of ${all.length} nodes shown` }));
+  const hit = (n     ) => !q || [n.Id, n.Label, n.Kind || 'node', kindMeta(n.Kind)[1], ...(n.Tags || [])]
+    .some((v     ) => String(v || '').toLowerCase().includes(q));
+  const managed = hideManaged ? all.filter((n     ) => managedBy(n) && n.Id !== editing.id).length : 0;
+  if (q || managed) {
+    customNodes = all.filter((n     ) => n.Id === editing.id || (hit(n) && !(hideManaged && managedBy(n))));
+    box.appendChild(el('div', { class: 'desc nd-shown', text: `${customNodes.length} of ${all.length} nodes shown` + (managed ? ` · ${managed} managed hidden` : '') }));
   }
 
   if (!customNodes.length) {
@@ -8334,30 +8627,25 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     tr.appendChild(el('td', { class: 'num', text: n.Max ?? '—' }));
     tr.appendChild(el('td', { text: (n.Tags || []).join(', ') || '—' }));
 
-    // Wiring without dragging, in the direction the hierarchy is built in: what supplies this node.
     const incoming = links.filter((l     ) => l.To === n.Id).map((l     ) => l.From);
     const fedByCell = el('td');
     if (incoming.length > 1) {
-      // Several feeders is legitimate — a transfer switch fed by grid, generator and inverter.
       fedByCell.appendChild(el('span', { text: incoming.map((f        ) => (cand.get(f) || {}).label || f).join(', ') }));
     } else {
       const sel = el('select', { style: { width: 'auto' } })                     ;
       sel.appendChild(el('option', { value: '', text: '— none —' }));
       [...cand.keys()]
-        // A load uses power rather than passing it on; the feeder already wired stays listed so it still shows.
         .filter(id => id !== n.Id && !String(id).includes('#') && (!feedsNothing((cand.get(id) || {}).kind) || id === incoming[0]))
         .sort((a, b) => ((cand.get(a) || {}).label || a).localeCompare((cand.get(b) || {}).label || b))
         .forEach(id => sel.appendChild(el('option', { value: id, text: (cand.get(id) || {}).label || id })));
       sel.value = incoming[0] || '';
       sel.onchange = () => {
         const feeder = sel.value;
-        // Energy would have to arrive from something this node already supplies.
         if (feeder && wouldLoop(links.filter((l     ) => l.To !== n.Id), feeder, n.Id)) {
           toast('That would create a feeder loop.', false);
           sel.value = incoming[0] || '';
           return;
         }
-        // One incoming link is what this control manages: drop the old one, add the new.
         for (let i = links.length - 1; i >= 0; i--) if (links[i].To === n.Id) links.splice(i, 1);
         if (feeder) links.push({ From: feeder, To: n.Id });
         rerender();
@@ -8365,7 +8653,7 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
       fedByCell.appendChild(sel);
     }
     tr.appendChild(fedByCell);
-    // Flag a node that's measured but has no energy (kWh) source — it can't feed HA's Energy Dashboard (#262).
+    // Measured but no kWh source.
     const srcs = [...(n.Sources || []), ...(n.Mqtt || [])];
     const nb = srcs.length;
     const hasEnergy = srcs.some((s     ) => String(s.Metric || 'realpower').toLowerCase() === 'energy');
@@ -8389,7 +8677,6 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
       openRenameDialog(n, flow, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
     };
 
-    // Copy: the same node under a free id, opened for renaming.
     const copy = btn('Copy');
     copy.title = 'Duplicate this node (kind, mode, value and bindings) under a new id — rename it, then wire it up.';
     copy.onclick = () => {
@@ -8408,7 +8695,6 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     rm.onclick = () => {
       customNodes.splice(customNodes.indexOf(n), 1);
       for (let j = links.length - 1; j >= 0; j--) if (links[j].From === n.Id || links[j].To === n.Id) links.splice(j, 1);
-      // A deleted node is no longer part of any total.
       renameInBalance(flow, n.Id, null);
       if (editing.id === n.Id) editing.id = null;
       toast(`${n.Label || n.Id} deleted.`, true);
@@ -8419,19 +8705,15 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     body.appendChild(tr);
   });
   tbl.appendChild(body);
-  // Scrolls within itself: a table wider than a phone widened the whole page, so the page scrolled sideways
-  // and a dialog opened over it landed off to one side.
   box.appendChild(el('div', { class: 'nodes-scroll' }, tbl));
 
-  // A deleted or renamed-away node leaves editing.id dangling; find() returning nothing closes the panel.
   syncNodeModal(editing.id ? customNodes.find((n     ) => n.Id === editing.id) : null, links, cand, editing, rerender);
   return box;
 }
 
 function addNodesSection(nav     , sections     ) {
   const link = navLink(nav, "Nodes", "⬡");
-  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
-  link.dataset.section = "EnergyFlow";
+  link.dataset.section = 'EnergyFlow.Nodes,EnergyFlow.Links,EnergyFlow.AutoTags';
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -8440,11 +8722,18 @@ function addNodesSection(nav     , sections     ) {
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
   const instSel = instanceSelector(() => load());
-  // A hierarchy of any size is a long table: type to narrow it by id, name, kind or tag.
   const hunt = el('input', { type: 'search', class: 'nd-hunt', placeholder: 'filter by id, name, kind or tag…' })                    ;
   hunt.oninput = () => render();
   const count = document.createElement('span'); count.className = 'ld-count';
-  bar.appendChild(instSel.wrap); bar.appendChild(hunt); bar.appendChild(count); sec.appendChild(bar);
+  let hideManaged = (() => { try { return localStorage.getItem('rpdu-nodes-hide-managed') !== '0'; } catch { return true; } })();
+  const managedBox = el('input', { type: 'checkbox', checked: hideManaged })                    ;
+  managedBox.onchange = () => {
+    hideManaged = managedBox.checked;
+    try { localStorage.setItem('rpdu-nodes-hide-managed', hideManaged ? '1' : '0'); } catch { /* this session only */ }
+    render();
+  };
+  const managedLabel = el('label', { class: 'nd-managed', title: 'Nodes an integration creates and maintains, such as solar panels and strings' }, managedBox, ' Hide managed');
+  bar.appendChild(instSel.wrap); bar.appendChild(hunt); bar.appendChild(managedLabel); bar.appendChild(count); sec.appendChild(bar);
   const ed      = document.createElement('div'); ed.style.marginTop = '8px'; sec.appendChild(ed);
   let lastGraph      = null;
   const editing                        = { id: null };
@@ -8469,24 +8758,21 @@ function addNodesSection(nav     , sections     ) {
     addBtn.onclick = () => {
       const id = (idIn.value || '').trim(); if (!id) { toast('Node id is required.', false); return; }
       if (customNodes.some((n     ) => n.Id === id) || (lastGraph?.nodes || []).some((n     ) => n.id === id)) { toast('That id already exists.', false); return; }
-      // Mode 'none' by default: a brand-new node has nothing measuring it.
       const node      = { Id: id, Label: (labIn.value || '').trim() || id, Mode: 'none' };
       if (kindSel.value !== 'node') node.Kind = kindSel.value;
-      customNodes.push(node); editing.id = id; render();  // open the new node's editor straight away
+      customNodes.push(node); editing.id = id; render();
     };
     save.onclick = () => saveConfig(load);
     addBar.append(idIn, labIn, kindSel, addBtn, importBtn, save); ed.appendChild(addBar);
 
-    // Import-device-template panel, toggled by the button (existing ids guard against prefix clashes).
     const existingIds = new Set        ([...customNodes.map((n     ) => n.Id), ...((lastGraph?.nodes || []).map((n     ) => n.id))]);
     const impWrap = el('div'); ed.appendChild(impWrap);
     importBtn.onclick = () => {
-      if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }   // toggle closed
+      if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }
       impWrap.appendChild(renderImportPanel(flow, existingIds, render));
     };
 
     const cand = flowCandidates(lastGraph, customNodes);
-    // Groups and the PDU/outlet tag rules have pages of their own: this one is for the nodes.
     const goTo = (label        ) => (document.querySelector(`nav a[data-label="${label}"]`)       )?.click();
     ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 0 0' } },
       el('span', { text: 'Groups are managed on the ' }),
@@ -8494,33 +8780,28 @@ function addNodesSection(nav     , sections     ) {
       el('span', { text: ', and tags — including the rules that tag PDUs and outlets — on the ' }),
       el('a', { text: 'Tags page', onclick: () => goTo('Tags') }),
       el('span', { text: '.' })));
-    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }, hunt.value));
+    managedLabel.hidden = !customNodes.some((n     ) => managedBy(n));
+    ed.appendChild(renderNodeManager(flow, customNodes, links, cand, editing, (close          ) => { if (close) editing.id = null; render(); }, hunt.value, hideManaged));
   };
 
   const load = async () => {
-    // The flow graph gives the auto (pdu/outlet) node ids for the feeder/children pickers.
     const r = await api(withInstance('/api/flow', instSel));
     lastGraph = r.body?.ok ? r.body : null;
     render();
   };
   link.onclick = () => { activate(link, sec); load(); };
-  // The editor panel is mounted on <body>.
   nav.addEventListener('click', (e     ) => { if (nodeModal && !link.contains(e.target)) { editing.id = null; closeNodeModal(); } });
 }
 
 // ── sections/groups.ts ──────────────────────────────────────────
-// Groups of nodes shown as one on the flow diagrams (#342). Its own page: it is a different job from listing
-// the nodes themselves, and sharing the Nodes page meant scrolling past it to reach them.
+// Node groups page.
 
 function addGroupsSection(nav     , sections     ) {
   const link = navLink(nav, 'Groups', '⧉');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Groups';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Node groups' }));
-  sec.appendChild(el('div', { class: 'desc' },
-    'Nodes shown as a single collapsible node on the flow diagrams — three MPPTs as one “Incoming PV”, say. '
-    + 'Members keep their own links and their own exports; the group carries their summed total.'));
 
   const instSel = instanceSelector(() => load());
   const save = btn('Save', 'primary');
@@ -8539,7 +8820,6 @@ function addGroupsSection(nav     , sections     ) {
   };
 
   const load = async () => {
-    // The flow graph names the nodes a group can hold, derived ones included.
     let r     ;
     try { r = await api(withInstance('/api/flow', instSel)); } catch { r = null; }
     lastGraph = r?.body?.ok ? r.body : null;
@@ -8603,7 +8883,7 @@ function renameInBalance(flow     , from        , to               ) {
 
 function addBalanceSection(nav     , sections     ) {
   const link = navLink(nav, 'Balance', '⚖');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Balance';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Energy balance' }));
@@ -9139,6 +9419,7 @@ function openRegisterExplorer() {
 
 function addTagsSection(nav     , sections     ) {
   const link = navLink(nav, 'Tags', '#');
+  link.dataset.section = 'EnergyFlow.Tags';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   // The ids the tag rules can match: PDUs and outlets the bridge derives from what it polls.
@@ -9709,9 +9990,9 @@ function addEnergyOverviewSection(nav     , sections     ) {
 
     // Animated flow diagram — the arms present in this system, each with its live figure and flow direction.
     const arms        = [];
-    if (solar.present) arms.push({ key: 'solar', icon: '☀️', label: 'Solar', text: fmt(solar.value), color: 'var(--warn)', flow: solar.value, ids: solarIds });
-    if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmt(battNet == null ? null : Math.abs(battNet)), color: 'var(--good)', flow: battNet, ids: battIds });
-    if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmt(gridNet == null ? null : Math.abs(gridNet)), color: 'var(--accent)', flow: gridNet, ids: gridIds });
+    if (solar.present) arms.push({ key: 'solar', icon: '☀️', label: 'Solar', text: fmt(solar.value), color: KIND_COLOR.solar, flow: solar.value, ids: solarIds });
+    if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmt(battNet == null ? null : Math.abs(battNet)), color: KIND_COLOR.battery, flow: battNet, ids: battIds });
+    if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmt(gridNet == null ? null : Math.abs(gridNet)), color: KIND_COLOR.grid, flow: gridNet, ids: gridIds });
     if (home != null || load_.present) arms.push({ key: 'home', icon: '🏠', label: 'Home', text: fmt(home), color: 'var(--muted)', flow: home, ids: loadIds });
     // Updated in place, so the dots keep moving across a refresh.
     if (arms.length) drawFlow(arms); else flowWrap.innerHTML = '';
@@ -10546,8 +10827,7 @@ function renderDiscoverPanel(flow     , rerender            )              {
 
 function addMqttImportSection(nav     , sections     ) {
   const link = navLink(nav, 'MQTT Import', '⇤');
-  // Adding nodes edits the shared EnergyFlow document, so this page carries its unsaved-edit count.
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'MQTT.ImportProfiles,EnergyFlow.Nodes,EnergyFlow.Links';
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'MQTT Import' }));
   sec.appendChild(el('div', {
@@ -10618,7 +10898,6 @@ const ago = (s        ) => s < 1 ? 'just now'
 
 function addNodeDataSection(nav     , sections     ) {
   const link = navLink(nav, 'Node Data', '⊞');
-  link.dataset.section = 'EnergyFlow';
   const sec = el('div', { class: 'section' }); sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Node Data' }));
   sec.appendChild(el('div', { class: 'desc', text: 'Every reading the energy flow is collecting — one row per node and bound metric, whatever the chart happens to be showing. “Updated” is the one to watch: a source that has stopped reporting still lists its last value, marked stale, so a dead publisher can be told apart from a binding that was never right.' }));
@@ -11370,7 +11649,6 @@ const signed = (s     )                    =>
 
 function trendsPage(nav     , sections     , spec            ) {
   const link = navLink(nav, spec.label, spec.icon);
-  link.dataset.section = 'EnergyFlow';
   const sec = el('div', { class: 'section trends-page' }); sections.appendChild(sec);
   sec.appendChild(el('h2', { text: spec.label }));
   // Written when the answer arrives, so it describes what was actually charted.
@@ -12443,7 +12721,6 @@ const clock = (ms        ) => {
 
 function addCircuitFinderSection(nav     , sections     ) {
   const link = navLink(nav, 'Circuit Finder', '🔌');
-  link.dataset.section = 'EnergyFlow';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Circuit Finder' }));
@@ -12614,7 +12891,7 @@ const PANEL_CIRCUIT_KINDS = ['breaker', 'outlet', 'load', 'node', 'panel'];
 
 function addPanelScheduleSection(nav     , sections     ) {
   const link = navLink(nav, 'Panel Schedule', '🗂');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Panels,EnergyFlow.Clamps,EnergyFlow.Links';
   const sec = el('div', { class: 'section ps' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Panel Schedule' }));
@@ -13532,7 +13809,7 @@ function fpToolIcon(tool        )      {
 
 function addFloorPlanSection(nav     , sections     ) {
   const link = navLink(nav, 'Floor Plans', '⌗');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Sites,EnergyFlow.Placements,EnergyFlow.Runs,EnergyFlow.AutoLocations,EnergyFlow.Panels';
   const sec = el('div', { class: 'section fp' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Floor Plans' }));
@@ -17042,6 +17319,7 @@ async function loadPluginPages() {
     const r = await api('/api/integrations');
     pluginPages = (r.body?.integrations || []).flatMap((i     ) =>
       (i.pages || []).map((p     ) => ({ ...p, integration: i.id })));
+    setManagedRules((r.body?.integrations || []).flatMap((i     ) => (i.managedNodes || []).map((m     ) => ({ ...m, integration: i.id }))));
   } catch { pluginPages = []; }
 }
 
@@ -17744,8 +18022,9 @@ let navBadgesOff      = null;
 function wireNavBadges(nav     ) {
   navBadgesOff?.();
   const links = ([...nav.querySelectorAll('a')]         ).filter(a => a.dataset?.section);
+  const claimed = links.flatMap(a => String(a.dataset.section).split(',').map((s        ) => s.trim()));
   navBadgesOff = onDirty(() => links.forEach(a => {
-    const n = changeCountFor(a.dataset.section);
+    const n = changeCountFor(a.dataset.section, claimed);
     const existing = a.querySelector('.nav-badge');
     if (!n) { existing?.remove(); return; }
     if (existing) existing.textContent = String(n);

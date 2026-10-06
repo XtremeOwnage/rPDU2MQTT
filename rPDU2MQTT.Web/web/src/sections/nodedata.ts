@@ -46,7 +46,6 @@ const ago = (s: number) => s < 1 ? 'just now'
 
 export function addNodeDataSection(nav: any, sections: any) {
   const link = navLink(nav, 'Node Data', '⊞');
-  link.dataset.section = 'EnergyFlow';
   const sec = el('div', { class: 'section' }); sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Node Data' }));
   sec.appendChild(el('div', { class: 'desc', text: 'Every reading the energy flow is collecting — one row per node and bound metric, whatever the chart happens to be showing. “Updated” is the one to watch: a source that has stopped reporting still lists its last value, marked stale, so a dead publisher can be told apart from a binding that was never right.' }));

@@ -106,4 +106,31 @@ if (drillSel?.value !== 'sub') fail(`clicking the sub panel's arc drilled to "${
 const hubName = query(sec, '.sunburst-hub-name', false);
 if (!String(hubName?._text ?? hubName?.textContent).includes('sub')) fail('the hub does not name the sub panel after opening it');
 
+const lab = (label, span, mid, rm, depth) => vm.runInContext(`arcLabel(${JSON.stringify(label)}, ${span}, ${mid}, ${rm}, ${depth})`, sandbox);
+let lb = lab('B2-1', 0.05, 0.1, 300, 60);
+if (lb.lines.join() !== 'B2-1' || lb.along || Math.abs(lb.deg - (0.1 * 180 / Math.PI - 90)) > 1e-6) fail(`a short label is not radial: ${JSON.stringify(lb)}`);
+lb = lab('Solar (PV)', 2.5, 2.0, 150, 60);
+if (lb.lines.join() !== 'Solar (PV)') fail(`a wide arc clips its label: ${JSON.stringify(lb)}`);
+if (!lb.along || !lb.flip) fail(`a wide arc at the bottom is not drawn along it, upright: ${JSON.stringify(lb)}`);
+lb = lab('Livingroom Outlets TV', 0.6, 1.0, 220, 60);
+if (lb.lines.length !== 2 || lb.lines.join(' ') !== 'Livingroom Outlets TV') fail(`a deep ring does not wrap: ${JSON.stringify(lb)}`);
+const sized = (label, span, depth, max) => vm.runInContext(`arcLabel(${JSON.stringify(label)}, ${span}, 1.0, 150, ${depth}, ${max})`, sandbox);
+lb = sized('Solar (PV)', 3.0, 60, 15);
+if (lb.size !== 15 || lb.lines.join() !== 'Solar (PV)') fail(`a wide root arc is not drawn larger: ${JSON.stringify(lb)}`);
+lb = sized('Main Panel', 0.6, 60, 15);
+if (!(lb.size > 11.5 && lb.size < 15) || lb.lines.join() !== 'Main Panel') fail(`a mid-sized root arc does not shrink to fit: ${JSON.stringify(lb)}`);
+lb = sized('Fridge / Kitchen', 0.11, 90, 15);
+if (!(lb.size < 11.5 && lb.size >= 8) || lb.lines.join(' ') !== 'Fridge / Kitchen') fail(`a label that fits smaller is clipped instead: ${JSON.stringify(lb)}`);
+lb = sized('Livingroom Outlets, TV', 0.12, 60, 15);
+if (lb.size !== 8 || !/…$/.test(lb.lines.join(' '))) fail(`a label too long for any size is not clipped at the smallest size: ${JSON.stringify(lb)}`);
+lb = sized('Main Panel: Untracked', 0.2, 60, 11.5);
+if (lb.along || lb.lines.length !== 2 || lb.lines.join(' ') !== 'Main Panel: Untracked') fail(`a radial label does not wrap in a wide enough slice: ${JSON.stringify(lb)}`);
+lb = sized('Synology', 0.02, 60, 11.5);
+if (lb.lines.length) fail(`a slice too thin for any size is labelled: ${JSON.stringify(lb)}`);
+// Zoom: each chart sits in a pane; + enlarges it.
+const svgs = query(sec, 'svg', true).filter(x => String(x.attrs.class || '').includes('sunburst-svg'));
+if (!svgs.length || !svgs.every(x => query(sec, '.tree-zoom', true).some(p => p.children.includes(x)))) fail('a sunburst is not in a zoom pane');
+const w0 = Number(svgs[0].attrs.width);
+query(query(sec, '.flow-zoom'), 'button', true).find(b => b.textContent === '+').onclick();
+if (!(Number(svgs[0].attrs.width) > w0)) fail(`zooming in does not enlarge the sunburst: ${w0} -> ${svgs[0].attrs.width}`);
 console.log(`sunburst check passed (${arcs.length} arcs; the hub, the supply ring and opening an arc).`);

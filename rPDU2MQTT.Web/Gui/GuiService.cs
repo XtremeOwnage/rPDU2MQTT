@@ -728,7 +728,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 // Config this process is running, before replacement.
-                var stranded = ConfigApply.NeedingRestart(config, parsed);
+                var pageSettings = (integrations?.All ?? []).OfType<Core.Integrations.IGuiPageProvider>()
+                    .SelectMany(p => p.PageSettings.Select(k => $"Plugins.{((Core.Integrations.IIntegration)p).Id}.{k}"));
+                var stranded = ConfigApply.NeedingRestart(config, parsed, pageSettings);
 
                 await configSource.SaveAsync(parsed, ctx.RequestAborted);
                 Log.Information($"Configuration saved via GUI to {configSource.Describe}.");
@@ -1839,6 +1841,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 }),
                 pages = i is Core.Integrations.IGuiPageProvider p && i.Enabled(config)
                     ? p.Pages.Select(g => new { id = g.Id, title = g.Title, group = g.Group, icon = g.Icon, configSection = g.ConfigSection })
+                    : null,
+                managedNodes = i is Core.Integrations.INodeManager m && i.Enabled(config)
+                    ? m.ManagedNodes.Select(r => new { sourceType = r.SourceType, tag = r.Tag })
                     : null,
             });
             return Results.Json(new { ok = true, integrations = list }, ConfigSchema.Json);

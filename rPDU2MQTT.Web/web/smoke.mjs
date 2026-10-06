@@ -173,10 +173,10 @@ if (!query(activeSec(), 'rect', true).some(r => r.attrs['data-node']))
 
 // The roll-up table, the wiring editor and the roll-up settings are three pages of their own under Energy
 // Flow, reachable without going through the diagram first.
-for (const [label, marker] of [['Roll-up', 'Rolled-up values'], ['Hierarchy', 'Drag from a node'], ['Settings', 'Track daily totals']]) {
+for (const [label, marker, paths] of [['Roll-up', 'Rolled-up values', undefined], ['Hierarchy', 'Drag from a node', 'EnergyFlow.Links,EnergyFlow.Parents'], ['Settings', 'Track daily totals', 'EnergyFlow.*']]) {
   const l = navLinksNow().find(a => a.dataset.label === label);
   if (!l) fail(`no ${label} page under Energy Flow`);
-  if (l.dataset.section !== 'EnergyFlow') fail(`the ${label} page does not carry EnergyFlow's unsaved-edit count`);
+  if (l.dataset.section !== paths) fail(`the ${label} page counts ${l.dataset.section}, not ${paths}`);
   l.click();
   await new Promise(r => setTimeout(r, 50));
   if (!activeSec().textContent.includes(marker)) fail(`the ${label} page rendered nothing ("${marker}" missing)`);

@@ -146,14 +146,16 @@ public string? PageAsset(string file) => GuiPageAssets.Read(typeof(MyPlugin).Ass
 | `Title` | Nav entry text. |
 | `Group` | `Sources`, `Energy Flow`, `Integrations`, `Destinations` or `System`. |
 | `Icon` | Nav glyph. Optional. |
-| `ConfigSection` | Config section the page edits. Its unsaved edits count on the nav entry. Optional. |
+| `ConfigSection` | Comma-separated config paths the page edits (e.g. `Plugins.tigo.Strings`). Their unsaved edits count on the nav entry. Optional. |
 
 - Embed `{Id}.js` and, optionally, `{Id}.css` in the plugin assembly.
 - Served from `GET /api/integrations/{id}/pages/{file}`. File names match `^[a-z0-9][a-z0-9-]*\.(js|css)$`.
 - The script is a function body that returns `mount(section, host)`. It runs on the page's first open.
 - `mount` may return `{ show }`. `show` runs each time the page opens.
+- `PageSettings`: keys under `Plugins.{id}` that only the pages read. Saving them needs no restart.
 - `host`: `api`, `btn`, `el`, `ensure`, `toast`, `state`, `refreshDirty`, `saveConfig`, `openHistorySheet`, `busyInSection`, `timelineStrip`, `stepToFit`, `temp` (`unit`, `to`, `from`, `fmt`: °C to the chosen unit and back).
 - Example: the Tigo plugin's Solar Array page, `plugins/rPDU2MQTT.Plugin.Tigo/web/`.
+- `INodeManager.ManagedNodes`: rules (`SourceType` or `Tag`) for the nodes the plugin maintains. **Hide managed** on the Nodes page hides them.
 
 ## Supplying values, or being a device
 

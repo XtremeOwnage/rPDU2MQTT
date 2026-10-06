@@ -19,7 +19,6 @@ const clock = (ms: number) => {
 
 export function addCircuitFinderSection(nav: any, sections: any) {
   const link = navLink(nav, 'Circuit Finder', '🔌');
-  link.dataset.section = 'EnergyFlow';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Circuit Finder' }));

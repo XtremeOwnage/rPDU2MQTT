@@ -104,7 +104,6 @@ export type TrendsSpec = {
 
 export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   const link = navLink(nav, spec.label, spec.icon);
-  link.dataset.section = 'EnergyFlow';
   const sec = el('div', { class: 'section trends-page' }); sections.appendChild(sec);
   sec.appendChild(el('h2', { text: spec.label }));
   // Written when the answer arrives, so it describes what was actually charted.

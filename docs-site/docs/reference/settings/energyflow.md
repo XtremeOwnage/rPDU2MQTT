@@ -27,6 +27,7 @@ Virtual upstream nodes (breakers, transfer switches, a “Total”) and their fe
 | `EnergyFlow.Nodes[].Tags` | list |  | Free-form tags for filtering the diagram and the energy views — e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows. |
 | `EnergyFlow.Nodes[].Location` | string |  | The id of the room, area, floor or site this node is in. Its own consumption counts toward that place. |
 | `EnergyFlow.Nodes[].Circuit` | string |  | The circuit this node is plugged into, as the panel id and breaker number: 'main_panel/B06'. A circuit then shows it among its metered devices and reports what is left unmetered. |
+| `EnergyFlow.Nodes[].Hidden` | bool | `false` | Left off the flow diagrams. Still listed and editable. |
 | `EnergyFlow.Nodes[].EmonCmsTag` | string |  | EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}. |
 | `EnergyFlow.Nodes[].EmonCmsVirtualTag` | string |  | EmonCMS tag this node's virtual feeds are filed under. Blank uses EmonCMS.Feeds.Virtual.Tag. Placeholders: {node}, {label}, {kind}. |
 | `EnergyFlow.Nodes[].StorageKwh` | double |  | For a battery node: usable storage capacity in kWh (display metadata; optional). |
@@ -79,6 +80,9 @@ Virtual upstream nodes (breakers, transfer switches, a “Total”) and their fe
 | `EnergyFlow.Groups[].Label` | string |  | Human-readable label shown on the flow diagram when the group is collapsed. |
 | `EnergyFlow.Groups[].Kind` | one of `node`, `panel`, `breaker`, `inverter`, `battery`, `solar`, `grid`, `load` | `node` | What the group represents, for diagram styling: 'node', 'panel', 'breaker', 'inverter', 'battery', 'solar', 'grid', or 'load'. |
 | `EnergyFlow.Groups[].Members` | list |  | The ids of the member nodes this group aggregates. |
+| `EnergyFlow.Groups[].Parent` | string |  | Id of the group this group is nested in. It shows only while that group is expanded. |
+| `EnergyFlow.Groups[].Expand` | one of `replace`, `parents`, `children` | `replace` | How the group draws when expanded: 'replace' shows its members in place of the group node, 'parents' draws the members feeding the group node, 'children' draws the group node feeding its members. |
+| `EnergyFlow.Groups[].ExpandChildren` | bool | `false` | Expanding this group also expands every group nested in it. |
 | `EnergyFlow.Balance` | object |  | Which nodes make up the site's Solar, Grid, Battery and Home totals on the energy pages, Trends and the Home Assistant Energy Dashboard. Each list is summed. Leave every list empty to total nodes by their kind instead. |
 | `EnergyFlow.Balance.Solar` | list |  | Nodes whose output is solar production — a PV total, never the strings it is made of. |
 | `EnergyFlow.Balance.Grid` | list |  | Nodes metering the grid connection: import out, export in. |
