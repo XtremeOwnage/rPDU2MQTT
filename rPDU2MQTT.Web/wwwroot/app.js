@@ -245,11 +245,12 @@ function activate(link     , sec     ) {
 // any overflow does; only Ctrl/⌘+wheel zooms. The old version preventDefault-ed *every* wheel to zoom, which
 // left a diagram taller than the viewport with no way to scroll it — it felt frozen. With `pan`, dragging the
 // background moves the view like a map (kept off where the SVG has its own drag interactions, e.g. the editor).
-function attachZoom(scroll     , svg     , baseW        , baseH        , pan = false) {
+/// `onScale` replaces the default sizing (width/height attributes) for content that is not an SVG.
+function attachZoom(scroll     , svg     , baseW        , baseH        , pan = false, onScale                      ) {
   let z = 1; const min = 0.15, max = 6;
   // True once the reader has zoomed themselves: after that we never re-fit under them on a resize.
   let chosen = false;
-  const apply = () => { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); };
+  const apply = () => { if (onScale) onScale(z); else { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); } };
   apply();
 
   const width = () => scroll.clientWidth || scroll.getBoundingClientRect?.().width || 0;
@@ -6142,6 +6143,8 @@ function addFlowSection(nav     , sections     ) {
   // The zoom and where the pane is scrolled to belong to the reader, not to the drawing: a live reading
   // arriving must not throw away the view they are reading from (#492).
   let zoom      = null;
+  // The sunburst/treemap panes' zooms, one per chart, kept across live repaints the same way.
+  let treeZooms        = [];
   // Drawing one node and what is beneath it, and nothing else (#493). Held across redraws, like the view.
   let drillTo                = null;
   let refit = false;
@@ -6215,6 +6218,10 @@ function addFlowSection(nav     , sections     ) {
     if (held) wrap.style.minHeight = held + 'px';
     // Read off the pane that is about to be replaced: once it is detached it measures nothing.
     const keptView = zoom?.view?.();
+    const keptTreeViews = treeZooms.map(z => z.view?.());
+    // The old panes' listeners (some are on window) go with them.
+    [zoom, ...treeZooms].forEach(z => { try { if (typeof z === 'function') z(); } catch { /* already gone */ } });
+    treeZooms = [];
     // Measured before the clear, off a container that is not emptied, so the reading is of a laid-out page.
     const paneW = Math.round(Number((sec       ).clientWidth) || Number((wrap       ).clientWidth) || 0);
     wrap.innerHTML = '';
@@ -6278,8 +6285,23 @@ function addFlowSection(nav     , sections     ) {
       const pair = !!findHub(nodes, links).hub;
       const side = pair && paneWidth >= 900;
       const half = side ? Math.floor((paneWidth - 6) / 2) : paneWidth;
-      const one = (dir              ) => sunburst ? drawSunburst(nodes, links, { ...viewOpts, dir })
-        : drawTreemap(nodes, links, { ...viewOpts, dir, width: half, height: side ? Math.round(Math.min(half * 1.1, 700)) : undefined });
+      // Each chart sits in its own pane that pans and zooms like the Sankey.
+      const zooms        = [];
+      const one = (dir              ) => {
+        const pane = el('div', { class: 'tree-zoom' });
+        if (sunburst) {
+          const svg = drawSunburst(nodes, links, { ...viewOpts, dir });
+          const base = Math.min(half - 4, 760);
+          pane.appendChild(svg);
+          zooms.push(attachZoom(pane, svg, base, base, true));
+        } else {
+          const map = drawTreemap(nodes, links, { ...viewOpts, dir, width: half, height: side ? Math.round(Math.min(half * 1.1, 700)) : undefined });
+          pane.appendChild(map);
+          const base = half - 4;
+          zooms.push(attachZoom(pane, map, base, base, true, (z) => { map.style.width = `${Math.round(base * z)}px`; }));
+        }
+        return pane;
+      };
       const view = pair
         ? el('div', { class: 'flow-tree-pair' + (side ? ' is-side' : '') + (sunburst ? '' : ' is-tight') },
             el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Sources' }), one('in')),
@@ -6287,9 +6309,20 @@ function addFlowSection(nav     , sections     ) {
         : one('out');
       stage = el('div', { class: 'flow-stage ' + (sunburst ? 'sunburst-stage' : 'treemap-stage') }, view, menu.el);
       wrap.appendChild(stage);
-      wrap.appendChild(el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px' },
-        text: sunburst ? 'Hover for details · click an arc to centre on it · click the middle to go back out.'
-          : 'Hover for details · click a box to open it · click the top bar to go back out.' }));
+      treeZooms = zooms;
+      if (!refit) zooms.forEach((z, i) => { if (keptTreeViews[i]) z.setView(keptTreeViews[i]); });
+      const zoomAll = (act                  ) => () => zooms.forEach(act);
+      const zb = (label        , title        , act            ) => { const b = btn(label); b.title = title; b.onclick = act; return b; };
+      stage.appendChild(el('div', { class: 'flow-zoom' },
+        zb('+', 'Zoom in', zoomAll(z => z.zoomBy(1.2))),
+        zb('−', 'Zoom out', zoomAll(z => z.zoomBy(1 / 1.2))),
+        zb('⤢', 'Fit to the page', zoomAll(z => z.fit()))));
+      const hints = el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } });
+      hints.appendChild(el('span', { text: sunburst ? 'Hover for details · click an arc to centre on it · click the middle to go back out.'
+        : 'Hover for details · click a box to open it · click the top bar to go back out.' }));
+      hints.appendChild(el('span', { class: 'on-touch', text: 'Swipe to pan · pinch to zoom.' }));
+      hints.appendChild(el('span', { class: 'on-mouse', text: 'Drag to pan · Ctrl/⌘ + scroll to zoom.' }));
+      wrap.appendChild(hints);
       zoom = null;
       refit = false;
       count.textContent = `${nodes.length} node(s)`;

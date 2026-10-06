@@ -127,4 +127,10 @@ lb = sized('Main Panel: Untracked', 0.2, 60, 11.5);
 if (lb.along || lb.lines.length !== 2 || lb.lines.join(' ') !== 'Main Panel: Untracked') fail(`a radial label does not wrap in a wide enough slice: ${JSON.stringify(lb)}`);
 lb = sized('Synology', 0.02, 60, 11.5);
 if (lb.lines.length) fail(`a slice too thin for any size is labelled: ${JSON.stringify(lb)}`);
+// Zoom: each chart sits in a pane; + enlarges it.
+const svgs = query(sec, 'svg', true).filter(x => String(x.attrs.class || '').includes('sunburst-svg'));
+if (!svgs.length || !svgs.every(x => query(sec, '.tree-zoom', true).some(p => p.children.includes(x)))) fail('a sunburst is not in a zoom pane');
+const w0 = Number(svgs[0].attrs.width);
+query(query(sec, '.flow-zoom'), 'button', true).find(b => b.textContent === '+').onclick();
+if (!(Number(svgs[0].attrs.width) > w0)) fail(`zooming in does not enlarge the sunburst: ${w0} -> ${svgs[0].attrs.width}`);
 console.log(`sunburst check passed (${arcs.length} arcs; the hub, the supply ring and opening an arc).`);

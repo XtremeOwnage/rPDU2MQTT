@@ -270,6 +270,8 @@ export function addFlowSection(nav: any, sections: any) {
   // The zoom and where the pane is scrolled to belong to the reader, not to the drawing: a live reading
   // arriving must not throw away the view they are reading from (#492).
   let zoom: any = null;
+  // The sunburst/treemap panes' zooms, one per chart, kept across live repaints the same way.
+  let treeZooms: any[] = [];
   // Drawing one node and what is beneath it, and nothing else (#493). Held across redraws, like the view.
   let drillTo: string | null = null;
   let refit = false;
@@ -343,6 +345,10 @@ export function addFlowSection(nav: any, sections: any) {
     if (held) wrap.style.minHeight = held + 'px';
     // Read off the pane that is about to be replaced: once it is detached it measures nothing.
     const keptView = zoom?.view?.();
+    const keptTreeViews = treeZooms.map(z => z.view?.());
+    // The old panes' listeners (some are on window) go with them.
+    [zoom, ...treeZooms].forEach(z => { try { if (typeof z === 'function') z(); } catch { /* already gone */ } });
+    treeZooms = [];
     // Measured before the clear, off a container that is not emptied, so the reading is of a laid-out page.
     const paneW = Math.round(Number((sec as any).clientWidth) || Number((wrap as any).clientWidth) || 0);
     wrap.innerHTML = '';
@@ -406,8 +412,23 @@ export function addFlowSection(nav: any, sections: any) {
       const pair = !!findHub(nodes, links).hub;
       const side = pair && paneWidth >= 900;
       const half = side ? Math.floor((paneWidth - 6) / 2) : paneWidth;
-      const one = (dir: 'in' | 'out') => sunburst ? drawSunburst(nodes, links, { ...viewOpts, dir })
-        : drawTreemap(nodes, links, { ...viewOpts, dir, width: half, height: side ? Math.round(Math.min(half * 1.1, 700)) : undefined });
+      // Each chart sits in its own pane that pans and zooms like the Sankey.
+      const zooms: any[] = [];
+      const one = (dir: 'in' | 'out') => {
+        const pane = el('div', { class: 'tree-zoom' });
+        if (sunburst) {
+          const svg = drawSunburst(nodes, links, { ...viewOpts, dir });
+          const base = Math.min(half - 4, 760);
+          pane.appendChild(svg);
+          zooms.push(attachZoom(pane, svg, base, base, true));
+        } else {
+          const map = drawTreemap(nodes, links, { ...viewOpts, dir, width: half, height: side ? Math.round(Math.min(half * 1.1, 700)) : undefined });
+          pane.appendChild(map);
+          const base = half - 4;
+          zooms.push(attachZoom(pane, map, base, base, true, (z) => { map.style.width = `${Math.round(base * z)}px`; }));
+        }
+        return pane;
+      };
       const view = pair
         ? el('div', { class: 'flow-tree-pair' + (side ? ' is-side' : '') + (sunburst ? '' : ' is-tight') },
             el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Sources' }), one('in')),
@@ -415,9 +436,20 @@ export function addFlowSection(nav: any, sections: any) {
         : one('out');
       stage = el('div', { class: 'flow-stage ' + (sunburst ? 'sunburst-stage' : 'treemap-stage') }, view, menu.el);
       wrap.appendChild(stage);
-      wrap.appendChild(el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px' },
-        text: sunburst ? 'Hover for details · click an arc to centre on it · click the middle to go back out.'
-          : 'Hover for details · click a box to open it · click the top bar to go back out.' }));
+      treeZooms = zooms;
+      if (!refit) zooms.forEach((z, i) => { if (keptTreeViews[i]) z.setView(keptTreeViews[i]); });
+      const zoomAll = (act: (z: any) => void) => () => zooms.forEach(act);
+      const zb = (label: string, title: string, act: () => void) => { const b = btn(label); b.title = title; b.onclick = act; return b; };
+      stage.appendChild(el('div', { class: 'flow-zoom' },
+        zb('+', 'Zoom in', zoomAll(z => z.zoomBy(1.2))),
+        zb('−', 'Zoom out', zoomAll(z => z.zoomBy(1 / 1.2))),
+        zb('⤢', 'Fit to the page', zoomAll(z => z.fit()))));
+      const hints = el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } });
+      hints.appendChild(el('span', { text: sunburst ? 'Hover for details · click an arc to centre on it · click the middle to go back out.'
+        : 'Hover for details · click a box to open it · click the top bar to go back out.' }));
+      hints.appendChild(el('span', { class: 'on-touch', text: 'Swipe to pan · pinch to zoom.' }));
+      hints.appendChild(el('span', { class: 'on-mouse', text: 'Drag to pan · Ctrl/⌘ + scroll to zoom.' }));
+      wrap.appendChild(hints);
       zoom = null;
       refit = false;
       count.textContent = `${nodes.length} node(s)`;

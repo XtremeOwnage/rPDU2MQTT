@@ -1116,6 +1116,9 @@
   .flow-tree-pair.is-tight { gap:6px; }
   .flow-tree-half { min-width:0; display:flex; flex-direction:column; align-items:center; }
   .flow-tree-half > .treemap { align-self:stretch; }
+  .tree-zoom { position:relative; width:100%; max-height:calc(100vh - 160px); overflow:auto; display:flex; justify-content:safe center; align-items:flex-start; }
+  .tree-zoom > .sunburst-svg { max-width:none; width:auto; flex:none; }
+  .tree-zoom > .treemap { max-height:none; flex:none; }
   .flow-tree-title { align-self:flex-start; font-size:12px; font-weight:650; color:var(--muted); margin:0 0 4px; }
   .treemap { position:relative; width:100%; max-height:calc(100vh - 170px); min-height:320px; border-radius:var(--r); overflow:hidden; background:var(--panel2); }
   .treemap-root, .treemap-cell { position:absolute; box-sizing:border-box; overflow:hidden; }

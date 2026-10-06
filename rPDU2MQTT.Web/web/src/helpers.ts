@@ -214,11 +214,12 @@ export function activate(link: any, sec: any) {
 // any overflow does; only Ctrl/⌘+wheel zooms. The old version preventDefault-ed *every* wheel to zoom, which
 // left a diagram taller than the viewport with no way to scroll it — it felt frozen. With `pan`, dragging the
 // background moves the view like a map (kept off where the SVG has its own drag interactions, e.g. the editor).
-export function attachZoom(scroll: any, svg: any, baseW: number, baseH: number, pan = false) {
+/// `onScale` replaces the default sizing (width/height attributes) for content that is not an SVG.
+export function attachZoom(scroll: any, svg: any, baseW: number, baseH: number, pan = false, onScale?: (z: number) => void) {
   let z = 1; const min = 0.15, max = 6;
   // True once the reader has zoomed themselves: after that we never re-fit under them on a resize.
   let chosen = false;
-  const apply = () => { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); };
+  const apply = () => { if (onScale) onScale(z); else { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); } };
   apply();
 
   const width = () => scroll.clientWidth || scroll.getBoundingClientRect?.().width || 0;
