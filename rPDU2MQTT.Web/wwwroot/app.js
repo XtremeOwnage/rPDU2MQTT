@@ -1387,11 +1387,7 @@ function genericSourceEditor(src     , onChange            )             {
 }
 
 // ── energy.ts ───────────────────────────────────────────────────
-// The energy arithmetic shared by the Energy Overview and Trends: what the home took.
 
-                                                    
-
-/// What the home actually took over the window.
 function homeEnergy(parts             )                {
   if (parts.load !== undefined) return parts.load;
 
@@ -1402,37 +1398,31 @@ function homeEnergy(parts             )                {
   return present.reduce((a, b) => a  + b , 0);
 }
 
-/// The share of the home's energy that did not come from the grid, 0–100, or null when it cannot be said.
 function selfSufficiencyPct(home               , gridImport               )                {
   if (home == null || gridImport == null || home <= 0) return null;
   const covered = home - Math.max(0, gridImport);
   return Math.max(0, Math.min(100, (covered / home) * 100));
 }
 
-/// How much of the home's energy solar and battery covered, in the same units.
 function coveredEnergy(home               , gridImport               )                {
   if (home == null || gridImport == null) return null;
   return Math.max(0, home - Math.max(0, gridImport));
 }
 
-/// The share of the home's energy made up by solar and battery once export is netted against import, 0–100.
 function netSelfProducedPct(home               , gridNet               )                {
   if (home == null || gridNet == null || home <= 0) return null;
-  return Math.max(0, Math.min(100, ((home - gridNet) / home) * 100));
+  return Math.max(0, ((home - gridNet) / home) * 100);
 }
 
-/// Solar produced as a share of the home's energy, uncapped: above 100 when solar out-produced the home.
 function netSolarPct(home               , solar               )                {
   if (home == null || solar == null || home <= 0) return null;
   return Math.max(0, (solar / home) * 100);
 }
 
-/// Colour band for a share: 1 above 90, 2 above 75, 3 above 50, 4 above 25, else 5.
 function shareBand(pct        )         {
   return pct > 90 ? 1 : pct > 75 ? 2 : pct > 50 ? 3 : pct > 25 ? 4 : 5;
 }
 
-/// Add up a set of readings, treating "no reading" as absent rather than zero.
 function sumKnown(values                               )                {
   const known = values.filter(v => v != null)            ;
   return known.length ? known.reduce((a, b) => a + b, 0) : null;
@@ -9568,34 +9558,25 @@ function addTagsSection(nav     , sections     ) {
 }
 
 // ── sections/energy-board.ts ────────────────────────────────────
-// The Energy Overview: solar / battery / grid / home as tiles and an animated diagram.
-// The energy rules every view shares — see energy.ts for why they are not written twice.
 
-// The Energy overview (#energy-rollup C): an at-a-glance board of where power is flowing right now —
 function addEnergyOverviewSection(nav     , sections     ) {
   const link = navLink(nav, "Energy", "⚡");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  // One line of controls over the data: the page is opened for the figures, and a paragraph, a period row
-  // and a date picker above them pushed the tiles below the fold.
   const head = el('div', { class: 'energy-head-row' });
   head.appendChild(el('h2', { text: 'Energy' }));
   sec.appendChild(head);
 
   const bar = el('div', { class: 'sec-actions' });
   const refresh = btn('Refresh');
-  // Power now, or energy for the day so far (#371).
   const showSel = el('select', { style: { width: 'auto' } })                     ;
   showSel.appendChild(el('option', { value: 'realpower', text: 'Power (W)' }));
   showSel.appendChild(el('option', { value: 'energy_d', text: 'Energy (kWh)' }));
-  // The day's energy by default; a viewer who picks power keeps power.
   try { showSel.value = localStorage.getItem('rpdu-energy-show') === 'realpower' ? 'realpower' : 'energy_d'; } catch { showSel.value = 'energy_d'; }
   const instSel = instanceSelector(() => load());
   const status = el('span', { class: 'ld-count' });
-  // The past — periods and a date — is one click away rather than two rows above every live view.
   const historyBtn = btn('History ▾');
   bar.append(showSel, instSel.wrap, historyBtn, refresh, status);
   head.appendChild(bar);
-  // As on the Flow page: a whole day is an energy question, a specific time is a power one.
   let hadDay = false;
   const hist = historyControl((what     ) => {
     periods.mark(null);
@@ -9605,8 +9586,6 @@ function addEnergyOverviewSection(nav     , sections     ) {
       showSel.value = 'energy_d';
     load();
   });
-  // One click for the periods people actually ask for. A period is a question about energy — "how much
-  // today" — so it answers in energy rather than leaving a power reading under a heading about a month.
   const periods = periodRow((key           ) => {
     const { day, days } = periodWindow(key);
     hist.set(day, days);
@@ -9619,19 +9598,16 @@ function addEnergyOverviewSection(nav     , sections     ) {
   sec.appendChild(historyPanel);
   let historyOpen = false;
   const syncHistory = () => {
-    // Open while a past view is showing, so what is being looked at is never hidden.
     const open = historyOpen || !!hist.day();
     historyPanel.hidden = !open;
     historyBtn.textContent = hist.day() ? `History: ${hist.day()} ▴` : open ? 'History ▴' : 'History ▾';
     historyBtn.classList[hist.day() ? 'add' : 'remove']('primary');
-    // No backend, no past to pick.
     historyBtn.hidden = hist.row.classList.contains('is-hidden') && !hist.day();
   };
   historyBtn.onclick = () => { historyOpen = !(historyOpen || !!hist.day()); syncHistory(); };
   syncHistory();
   showSel.onchange = () => { try { localStorage.setItem('rpdu-energy-show', showSel.value); } catch { /* this session only */ } load(); };
 
-  // One column for the whole board.
   const board = el('div', { class: 'energy-board' }); sec.appendChild(board);
   const flowWrap = el('div', { class: 'energy-flow' }); board.appendChild(flowWrap);
   const gridEl = el('div', { class: 'energy-grid' }); board.appendChild(gridEl);
@@ -9639,13 +9615,10 @@ function addEnergyOverviewSection(nav     , sections     ) {
 
   const fmtPower = (w               ) => w == null ? '—'
     : Math.abs(w) >= 1000 ? `${formatNum(w / 1000)} kW` : `${formatNum(Math.round(w))} W`;
-  // Energy is cumulative (kWh); one decimal is plenty and the units come from the energy graph itself.
   const fmtEnergy = (v               , units        ) => v == null ? '—' : `${formatNum(Math.round(v * 10) / 10)} ${units || 'kWh'}`;
 
-  // A tile: coloured accent, big power figure, a direction/idle sub-line.
   const gaugeArc = (fraction        , over         ) => {
     const R = 26, CX = 30, CY = 30;
-    // A 240° sweep opening at the bottom — the shape a dial is read as.
     const START = 150, SWEEP = 240;
     const pt = (deg        ) => {
       const r = (deg * Math.PI) / 180;
@@ -9682,19 +9655,11 @@ function addEnergyOverviewSection(nav     , sections     ) {
         : `${Math.round(gauge.fraction * 100)}% of the ${formatNum(gauge.max)} ${gauge.units} maximum set for this node.`;
       t.appendChild(wrap);
     }
-    // The shape behind the number. A tile without one looks exactly as it did before — no placeholder, and
-    // no flat line standing in for readings nobody has.
     if (trend) t.appendChild(sparkline({ values: trend.values, color: trend.color, units: trend.units, at: trend.at }));
     if (link && link.ids.length) openOnClick(t, link.ids, link.label);
     return t;
   };
 
-  /// Make something a way into this node's own day on the Trends page.
-  ///
-  /// The board answers "what is happening now"; the obvious next question is "and what has it been doing
-  /// today", which was three deliberate steps away — open Trends, change the range, then untick everything
-  /// that is not this. The click carries the node set the tile was summed from, so the answer is about the
-  /// same nodes the figure came from rather than whatever Trends happened to be showing.
   const openOnClick = (elm     , ids          , label        ) => {
     elm.classList?.add('is-linked');
     elm.style.cursor = 'pointer';
@@ -9711,11 +9676,6 @@ function addEnergyOverviewSection(nav     , sections     ) {
     elm.addEventListener('keydown', (e     ) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault?.(); go(); } });
   };
 
-  /// One trend per tile, summed across the nodes that tile is made of.
-  ///
-  /// Strict on gaps: a step counts only when EVERY node behind the tile reported at it. A partial sum drawn
-  /// as a total is the same lie as a fabricated reading — three MPPTs where one dropped out would show the
-  /// array's output falling, when what fell was the coverage.
   const trendFor = (ids          , color        , units        ) => {
     if (!ids.length || !trendSeries) return undefined;
     const rows = ids.map(id => trendSeries .byNode.get(id)).filter(Boolean)                       ;
@@ -9728,10 +9688,8 @@ function addEnergyOverviewSection(nav     , sections     ) {
     return values.some(v => v != null) ? { values, color, units, at: trendSeries .at } : undefined;
   };
 
-  /// The gauge for a node, or undefined when one would be a guess.
   const gaugeFor = (ids          , value               , units        ) => {
     const cfgNodes = (state.data?.EnergyFlow?.Nodes || [])         ;
-    // Several nodes in one total (two arrays, two inverters) sum into one tile, so their ceilings sum too.
     const maxes = ids.map(id => cfgNodes.find(n => n.Id === id)?.Max).filter((m     ) => typeof m === 'number' && m > 0);
     if (!maxes.length || value == null) return undefined;
     const max = maxes.reduce((a        , b        ) => a + b, 0);
@@ -9742,30 +9700,25 @@ function addEnergyOverviewSection(nav     , sections     ) {
   const drawFlow = (arms           ) =>
     drawEnergyFlow(flowWrap, arms, (a, g) => openOnClick(g, a.ids , a.label));
 
-  // Why is this tile empty?
   const whyNoReading = (ids          ) => {
     const nodes = (state.data?.EnergyFlow?.Nodes || []).filter((n     ) => ids.includes(n.Id));
     if (!nodes.length) return 'no reading yet';
     const bound = nodes.flatMap((n     ) => n.Sources || []);
     if (!bound.length)
       return nodes.some((n     ) => n.Value != null) ? 'static value only' : 'no source bound';
-    // Bound but silent: name what it is waiting on, so the topic/register can be checked against reality.
     const first = bound[0];
     const what = first.Type === 'modbus'
       ? `${first.Connection || 'modbus'} reg ${first.Register}`
       : (first.Topic || 'its source');
     return bound.length > 1 ? `waiting on ${bound.length} sources` : `waiting on ${what}`;
   };
-  // The hint under a tile: the direction when there's a value, the reason when there isn't.
   const subOrWhy = (value               , ids          , whenKnown        ) => value == null ? whyNoReading(ids) : whenKnown;
 
-  // Same question for the battery's state of charge.
   const whyNoSoc = (battIds          , liveInfo                     ) => {
     const cfg = (state.data?.EnergyFlow?.Nodes || []).filter((n     ) => battIds.includes(n.Id));
     if (!cfg.length) return 'no battery node';
     const socSrcs = cfg.flatMap((n     ) => (n.Sources || []).filter((s     ) => s.Metric === 'soc'));
     if (!socSrcs.length) return 'no charge source bound';
-    // Bound and expired: the endpoint still reports the last reading.
     const stale = battIds.map(id => liveInfo[`${id}|soc`]).find((i     ) => i && i.reported != null);
     if (stale) {
       const secs = Math.round(stale.ageSeconds || 0);
@@ -9777,8 +9730,6 @@ function addEnergyOverviewSection(nav     , sections     ) {
     return `no charge yet from ${what}`;
   };
 
-  // Sum the out-direction (graph) values of the nodes a total is made of. Which those are is the server's
-  // call (the Balance, else each node's kind, once) — a return lane is left to the live reads below.
   const sumRole = (nodes       , role        ) => {
     const ns = nodes.filter(n => n.balance === role && !String(n.id || '').includes('#'));
     let sum = 0, known = false;
@@ -9786,7 +9737,6 @@ function addEnergyOverviewSection(nav     , sections     ) {
     return { present: ns.length > 0, value: known ? sum : null };
   };
 
-  // The board needs several round-trips, and is triggered by pushes as well as by the timer.
   let loading = false;
   const load = async () => {
     if (loading) return;
@@ -9794,14 +9744,10 @@ function addEnergyOverviewSection(nav     , sections     ) {
     try { await loadBoard(); } finally { loading = false; }
   };
 
-  // The last few hours behind the tiles, keyed by node. Null until a load fills it, and left null when
-  // history is off or the backend has nothing — which is why a tile can simply have no trend.
   let trendSeries                                                                               = null;
 
-  /// Read the window every tile's trend is drawn from. One request for the whole board.
   const loadTrend = async (metric        ) => {
     trendSeries = null;
-    // A past instant is a moment, not a window: the trend would be the same line on every tile.
     if (hist.at() || hist.span() > 1) return;
     try {
       const minutes = 180, step = 300;
@@ -9815,7 +9761,6 @@ function addEnergyOverviewSection(nav     , sections     ) {
       const points = Math.max(...[...byNode.values()].map(v => v.length), 0);
       if (points < 2) return;
 
-      // Each point's clock time in the viewer's own zone, for the hover.
       const stepMs = step * 1000, endMs = Date.now();
       const at = (i        ) => new Date(endMs - (points - 1 - i) * stepMs)
         .toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
@@ -9825,16 +9770,12 @@ function addEnergyOverviewSection(nav     , sections     ) {
 
   const loadBoard = async () => {
     syncHistory();
-    // The board is emptied and refilled around several reads. While it is empty the page is shorter, and the
-    // browser clamps the scroll position to the shorter page: every live refresh threw the reader back up.
-    // Holding the height across the rebuild means the page never shrinks.
     const held = board.offsetHeight || 0;
     if (held) board.style.minHeight = held + 'px';
     try { await fillBoard(); } finally { board.style.minHeight = ''; }
   };
 
   const fillBoard = async () => {
-    // The whole board reads one metric (#371).
     const metric = showSel.value || 'realpower';
     const isEnergy = metric !== 'realpower';
     let r     ;
@@ -9845,21 +9786,15 @@ function addEnergyOverviewSection(nav     , sections     ) {
     try { r = await api(path); }
     catch (e     ) { r = { body: { ok: false, message: 'Could not reach the bridge: ' + (e?.message || 'the request failed') } }; }
     await loadTrend(metric);
-    // Built off the page and swapped in whole at the end: emptying the tiles first left them blank for the
-    // length of the reads below, so every refresh flashed.
     const grid = el('div'), summary = el('div');
     const move = (from     , to     ) => { to.innerHTML = ''; [...from.children].forEach((c     ) => to.appendChild(c)); };
     const swap = () => { move(grid, gridEl); move(summary, summaryEl); };
     if (!r.body || !r.body.ok) {
-      // A gateway answering for a bridge that is restarting (502/503/504), or no answer at all, is a gap,
-      // not a verdict: keep the figures already on screen and say so beside them. Clearing the board for
-      // it turned every rolling update into a page of red text.
       const transient = !r.status || r.status === 502 || r.status === 503 || r.status === 504;
       if (transient && gridEl.children.length) {
         status.textContent = `bridge not answering (${r.status || 'no response'}) — showing the last reading, retrying`;
         return;
       }
-      // Say what actually went wrong.
       const why = (r.body && r.body.message)
         || (transient ? `the bridge is not answering (${r.status || 'no response'}) — it may be restarting; retrying`
                       : `the server answered ${r.status ?? '?'} with no explanation`);
@@ -9868,23 +9803,17 @@ function addEnergyOverviewSection(nav     , sections     ) {
       swap();
       status.textContent = ''; return;
     }
-    // Derived lanes are for the diagram, not the totals.
     hist.setNote(historyNote(r.body));
     const nodes = (r.body.nodes || []).filter((n     ) => !String(n.id || '').includes('#'));
 
-    // A tile sums the nodes the server says make up its total: the Balance where one is configured, else
-    // every node of the kind that nothing else here already counts (#491).
     const ofRole = (role        ) => nodes.filter((n     ) => n.balance === role).map((n     ) => n.id);
-    // Live cache reads: the in-direction (charge/export) power for battery/grid nodes.
     const battIds = ofRole('battery');
     const gridIds = ofRole('grid');
     const solarIds = ofRole('solar');
     const loadIds = ofRole('home');
     const liveBy                         = {};
-    // The full record, not just the value: it carries the staleness fields (reported/ageSeconds/fresh).
     const liveInfo                      = {};
 
-    // A past view must not read the live cache.
     const historical = !!r.body.historical;
     const inFromGraph                         = {};
     if (historical)
@@ -9908,11 +9837,9 @@ function addEnergyOverviewSection(nav     , sections     ) {
     }
     const inBy = historical ? inFromGraph : liveBy;
     const sumIn = (ids          ) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|${metric}#in`; if (k in inBy) { s += inBy[k]; known = true; } }); return known ? s : null; };
-    // Battery SoC: average across battery nodes that report it (a bank reads as one figure). Only live —
     const socVals = historical ? [] : battIds.map(id => liveBy[`${id}|soc`]).filter((v)              => typeof v === 'number');
     const soc = socVals.length ? Math.round(socVals.reduce((a, b) => a + b, 0) / socVals.length) : null;
 
-    // Formatting and gauges follow the metric.
     const units = r.body.units || (isEnergy ? 'kWh' : 'W');
     const fmt = (v               ) => isEnergy ? fmtEnergy(v, units) : fmtPower(v);
     const dial = (ids          , v               ) => isEnergy ? undefined : gaugeFor(ids, v, 'W');
@@ -9924,17 +9851,14 @@ function addEnergyOverviewSection(nav     , sections     ) {
     const battIn = sumIn(battIds);            // charge
     const gridIn = sumIn(gridIds);            // export
 
-    // Net = out − in. Present-but-all-unknown stays null; a measured side alone still yields a net.
     const net = (out                                            , inV               ) =>
       out.value == null && inV == null ? null : (out.value || 0) - (inV || 0);
     const battNet = net(batt, battIn);
     const gridNet = net(gridK, gridIn);
 
-    // Home load: prefer explicitly-tagged load nodes; otherwise derive from the balance.
     let home                = null, homeSub = '';
     if (load_.present) { home = load_.value; homeSub = home == null ? 'no reading yet' : 'consuming'; }
     else {
-      // Same rule as the Trends page: a kind the system does not have is left out.
       home = homeEnergy({
         ...(solar.present ? { solar: solar.value } : {}),
         ...(batt.present ? { battery: battNet } : {}),
@@ -9943,29 +9867,23 @@ function addEnergyOverviewSection(nav     , sections     ) {
       if (home != null) homeSub = 'balance of measured sources';
     }
 
-    // Self-sufficiency is an ENERGY question — over some window.
     let eHome                = null, eFromGrid                = null, eGridNet                = null, eUnits = 'kWh';
     let eWindow = 'of lifetime energy';
     if (isEnergy) {
-      // The board is already an energy view, so the bar is a share of the very tiles above it.
       eHome = home;
       eUnits = units;
-      // Energy drawn from the grid is what it imported.
       eFromGrid = gridK.value == null ? null : Math.max(0, gridK.value);
       eGridNet = gridK.value == null || gridIn == null ? null : gridNet;
       const day = hist.day();
       eWindow = day ? `of energy on ${new Date(hist.at()).toLocaleDateString()}`
         : metric === 'energy_d' ? 'of today’s energy' : 'of lifetime energy';
     } else try {
-      // Today, not all time.
       const er = await api(withInstance('/api/flow?metric=energy_d', instSel));
       if (er.body?.ok) {
         const enodes = er.body.nodes || [];
         eUnits = er.body.units || 'kWh';
-        // From the answer, not from what was asked for.
         eWindow = er.body.metric === 'energy_d' ? 'of today’s energy' : 'of lifetime energy';
         const eSolar = sumRole(enodes, 'solar'), eBatt = sumRole(enodes, 'battery'), eGrid = sumRole(enodes, 'grid'), eLoad = sumRole(enodes, 'home');
-        // In-direction (charge/export) energy from the same live cache, keyed to the same metric.
         const eInBy                         = {};
         const eq = [...battIds, ...gridIds].map(id => ({ Node: id, Metric: 'energy_d#in' }));
         if (eq.length) {
@@ -9976,44 +9894,35 @@ function addEnergyOverviewSection(nav     , sections     ) {
         }
         const eSumIn = (ids          ) => { let s = 0, known = false; ids.forEach(id => { const k = `${id}|energy_d#in`; if (k in eInBy) { s += eInBy[k]; known = true; } }); return known ? s : null; };
         const eBattNet = net(eBatt, eSumIn(battIds)), eGridBal = net(eGrid, eSumIn(gridIds));
-        // Home energy: tagged load nodes if present, else the balance of measured sources (same rule as power).
         if (eLoad.present) eHome = eLoad.value;
         else {
           const unknownFeeder = (eSolar.present && eSolar.value == null) || (eBatt.present && eBatt.value == null) || (eGrid.present && eGrid.value == null);
           if (!unknownFeeder && (eSolar.present || eBatt.present || eGrid.present)) eHome = (eSolar.value || 0) + (eBattNet || 0) + (eGridBal || 0);
         }
-        // What the house drew, not what it drew net of what it sent back.
         if (eGrid.value != null) eFromGrid = Math.max(0, eGrid.value);
         if (eGrid.value != null && eSumIn(gridIds) != null) eGridNet = eGridBal;
       }
     } catch { /* energy graph unavailable — self-sufficiency just won't render */ }
 
-    // Animated flow diagram — the arms present in this system, each with its live figure and flow direction.
     const arms        = [];
     if (solar.present) arms.push({ key: 'solar', icon: '☀️', label: 'Solar', text: fmt(solar.value), color: KIND_COLOR.solar, flow: solar.value, ids: solarIds });
     if (batt.present || battIds.length) arms.push({ key: 'battery', icon: '🔋', label: 'Battery', text: soc != null ? `${soc}%` : fmt(battNet == null ? null : Math.abs(battNet)), color: KIND_COLOR.battery, flow: battNet, ids: battIds });
     if (gridK.present || gridIds.length) arms.push({ key: 'grid', icon: '⚡', label: 'Grid', text: fmt(gridNet == null ? null : Math.abs(gridNet)), color: KIND_COLOR.grid, flow: gridNet, ids: gridIds });
     if (home != null || load_.present) arms.push({ key: 'home', icon: '🏠', label: 'Home', text: fmt(home), color: 'var(--muted)', flow: home, ids: loadIds });
-    // Updated in place, so the dots keep moving across a refresh.
     if (arms.length) drawFlow(arms); else flowWrap.innerHTML = '';
 
-    // Solar
     if (solar.present)
       grid.appendChild(tile('solar', '☀️', 'Solar', fmt(solar.value),
         subOrWhy(solar.value, solarIds, solar.value  > 1 ? 'producing' : 'idle'), solar.value && solar.value > 1 ? 'supply' : '',
         dial(solarIds, solar.value), trendFor(solarIds, 'var(--warn)', units), { ids: solarIds, label: 'Solar' }));
 
-    // Battery — sign tells charge vs discharge; magnitude is what's shown. SoC (when bound) leads the sub-line.
     if (batt.present || battIds.length) {
       const dir = subOrWhy(battNet, battIds, battNet  > 1 ? 'discharging' : battNet  < -1 ? 'charging' : 'idle');
       const cls = battNet == null ? '' : battNet > 1 ? 'supply' : battNet < -1 ? 'draw' : '';
-      // SoC always leads the sub-line, so the state-of-charge slot is always shown.
       const socWhy = soc == null ? whyNoSoc(battIds, liveInfo) : null;
-      // The dial is the battery's power against its rating; the slim bar below is state of charge.
       const t = tile('battery', '🔋', 'Battery', fmt(battNet == null ? null : Math.abs(battNet)), `${soc == null ? socWhy : soc + '%'} · ${dir}`, cls,
         dial(battIds, battNet == null ? null : Math.abs(battNet)), trendFor(battIds, 'var(--good)', units), { ids: battIds, label: 'Battery' });
       if (socWhy) t.title = `No battery percentage: ${socWhy}. Bind or correct the state-of-charge source on the Nodes tab.`;
-      // A slim charge gauge under the tile when SoC is known — the "battery %" at a glance.
       if (soc != null) {
         const g = el('div', { class: 'energy-soc-bar', title: `${soc}% state of charge` }, el('span', { style: { width: soc + '%' } }));
         t.appendChild(g);
@@ -10021,23 +9930,19 @@ function addEnergyOverviewSection(nav     , sections     ) {
       grid.appendChild(t);
     }
 
-    // Grid — positive = importing (drawing from the utility), negative = exporting (selling back).
     if (gridK.present || gridIds.length) {
       const sub = subOrWhy(gridNet, gridIds, gridNet  > 1 ? 'importing' : gridNet  < -1 ? 'exporting' : 'idle');
       const cls = gridNet == null ? '' : gridNet > 1 ? 'draw' : gridNet < -1 ? 'supply' : '';
-      // On energy the figure is the day's NET — import minus export, signed (#371).
       const gridShown = gridNet == null ? null : isEnergy ? gridNet : Math.abs(gridNet);
       grid.appendChild(tile('grid', '⚡', 'Grid', fmt(gridShown),
         isEnergy ? `${sub} · net for the day` : sub, cls,
         dial(gridIds, gridNet == null ? null : Math.abs(gridNet)), trendFor(gridIds, 'var(--accent)', units), { ids: gridIds, label: 'Grid' }));
     }
 
-    // Home load (computed above with the flow arms).
     if (home != null || load_.present)
       grid.appendChild(tile('home', '🏠', 'Home', fmt(home), home == null ? whyNoReading(loadIds) : (homeSub || 'consuming'), '',
         dial(loadIds, home), trendFor(loadIds, 'var(--muted)', units), { ids: loadIds, label: 'Home' }));
 
-    // Self-sufficiency: the share of the home's energy (kWh) over the window above that was not drawn from the grid.
     const ssPct = selfSufficiencyPct(eHome, eFromGrid);
     const ssCovered = coveredEnergy(eHome, eFromGrid);
     if (ssPct != null && ssCovered != null) {
@@ -10057,7 +9962,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
       const exported = eFromGrid == null || eGridNet == null ? null : eFromGrid - eGridNet;
       summary.appendChild(el('div', { class: 'energy-selfsuff' },
         el('div', { class: 'energy-ss-label', text: `Self-produced (net) ${pct}%` }),
-        el('div', { class: 'energy-ss-bar ov-band-' + shareBand(netPct) }, el('span', { style: { width: pct + '%' } })),
+        el('div', { class: 'energy-ss-bar ov-band-' + shareBand(netPct) }, el('span', { style: { width: Math.min(100, pct) + '%' } })),
         el('div', { class: 'desc', text: `${fmtEnergy(eHome  - eGridNet , eUnits)} of ${fmtEnergy(eHome, eUnits)} ${eWindow}, counting ${fmtEnergy(exported, eUnits)} exported against import.` }),
       ));
     }
@@ -10070,19 +9975,13 @@ function addEnergyOverviewSection(nav     , sections     ) {
 
   refresh.onclick = () => load();
 
-  // The board is assembled from several reads, so the push is used as a trigger to rebuild it.
   const syncLive = liveWhileActive(sec, () => 'flow:realpower' + (instSel.get() ? '|' + instSel.get() : ''),
     () => { if (!hist.day()) load(); });
-  // Fallback for when the stream isn't up; it does nothing while it is.
   setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && !hist.day() && !busyInSection(sec)) load(); }, 8000);
   link.onclick = () => { activate(link, sec); syncLive(); load(); };
 }
 
 // ── sections/overview.ts ────────────────────────────────────────
-// The landing page: what the system is doing right now, in one screen.
-//
-// The Status board answered "is the bridge healthy", which is the question you ask second. The first one
-// is "what is my power doing" — and it was three clicks away behind a board of green dots (#395).
 
 function addOverviewSection(nav     , sections     ) {
   const link = navLink(nav, 'Overview', '⌂');
@@ -10103,12 +10002,10 @@ function addOverviewSection(nav     , sections     ) {
   const stamp = el('span', { class: 'ld-count' });
   bar.append(showSel, refresh, stamp); sec.appendChild(bar);
 
-  // Anything wrong goes at the top, at full size. When nothing is, it collapses to a single line.
   const alerts = el('div'); sec.appendChild(alerts);
 
   const now = el('div', { class: 'ov-now' }); sec.appendChild(now);
   const flowWrap = el('div', { class: 'energy-flow ov-flow' }); now.appendChild(flowWrap);
-  // Not `ov-battery`: a tile for the battery kind is built as `ov-` + kind, and the two collided.
   const battWrap = el('div', { class: 'ov-batt-side' }); now.appendChild(battWrap);
 
   sec.appendChild(el('h3', { text: 'Today so far', class: 'ov-h3' }));
@@ -10121,15 +10018,12 @@ function addOverviewSection(nav     , sections     ) {
     : Math.abs(w) >= 1000 ? `${formatNum(Math.round(w / 100) / 10)} kW` : `${formatNum(Math.round(w))} W`;
   const fmtKwh = (v               ) => v == null ? '—' : `${formatNum(Math.round(v * 10) / 10)} kWh`;
 
-  // The nodes a total is made of, as the server decided: the Balance where one is set, else each node's kind,
-  // counted once. Summing by kind here counted a PV total and its MPPT strings both.
   const idsOfRole = (nodes       , role        ) => nodes.filter(n => n.balance === role && !n.id.includes('#')).map(n => n.id);
   const sumOfRole = (nodes       , role        ) => {
     const vals = nodes.filter(n => n.balance === role && !n.id.includes('#') && typeof n.value === 'number').map(n => n.value);
     return vals.length ? vals.reduce((a        , b        ) => a + b, 0) : null;
   };
 
-  /// A figure with its name, and the sub-line that says what it means. Clicking opens that node's day.
   const tile = (kind        , icon        , label        , value               , sub        , ids          ) => {
     const t = el('div', { class: 'ov-tile ov-' + kind });
     t.append(
@@ -10147,7 +10041,6 @@ function addOverviewSection(nav     , sections     ) {
     return t;
   };
 
-  /// The battery, as the thing people actually look for: how full, which way, and how fast.
   const drawBattery = (soc               , watts               , why        , volts               ) => {
     battWrap.innerHTML = '';
     const charging = watts != null && watts < -1;
@@ -10157,7 +10050,6 @@ function addOverviewSection(nav     , sections     ) {
 
     const card = el('div', { class: 'ov-batt-card' });
     card.appendChild(el('div', { class: 'ov-batt-title', text: 'Battery' }));
-    // A battery drawn as a battery: the fill IS the charge, so the number is confirmation, not the message.
     const body = el('div', { class: 'ov-batt-body ov-batt-' + level });
     const shell = el('div', { class: 'ov-batt-shell' });
     const fill = el('div', { class: 'ov-batt-fill' });
@@ -10166,21 +10058,14 @@ function addOverviewSection(nav     , sections     ) {
     const state = pct == null ? why : idle ? 'idle' : charging ? `charging · ${fmtW(Math.abs(watts ))}` : `discharging · ${fmtW(watts )}`;
     body.append(shell, el('div', { class: 'ov-batt-read' },
       el('div', { class: 'ov-batt-pct', text: pct == null ? '—' : pct + '%' }),
-      // Volts are how you tell a healthy pack from a sagging one, and the percentage alone never says it.
       el('div', { class: 'ov-batt-volts', text: volts == null ? '' : `${formatNum(Math.round(volts * 10) / 10)} V` }),
       el('div', { class: 'ov-sub', text: state })));
     card.appendChild(body);
     battWrap.appendChild(card);
   };
 
-  /// Bindings the bridge is currently dropping, newest read from /api/flow/withheld.
   let withheld        = [];
 
-  /// One problem, said plainly and at a size that cannot be scrolled past.
-  ///
-  /// A count is not a diagnosis: "2 of 46 binding(s) withheld" says something is wrong and nothing about
-  /// what, and the reason was already known — it just lived on another page. Where the card is a source
-  /// holding readings back, it opens onto the bindings themselves, each with the reason it is being dropped.
   const alertCard = (level        , title        , state        , detail        , id         , onDismiss             ) => {
     const mine = withheld.filter((w     ) => !id || !w.integration || w.integration === id);
     const card = el('div', { class: 'ov-alert ' + level },
@@ -10214,7 +10099,6 @@ function addOverviewSection(nav     , sections     ) {
     return card;
   };
 
-  /// Alerts this viewer dismissed, kept in the browser: a per-viewer choice, not a setting.
   const DISMISS_KEY = 'rpdu-ov-dismissed';
   const dismissed = new Set        ();
   try { (JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]')            ).forEach(k => dismissed.add(k)); } catch { /* none */ }
@@ -10235,8 +10119,6 @@ function addOverviewSection(nav     , sections     ) {
     }
     wrong.sort((a     , b     ) => (a.level === 'bad' ? 0 : 1) - (b.level === 'bad' ? 0 : 1));
 
-    // A dismissal holds while the problem stays as it was. One that clears is forgotten, so it shows again
-    // if it comes back; one that changes state (warn -> bad, Stale -> Failing) is a new problem.
     const keyOf = (c     ) => `${c.id || c.title}|${c.level}|${c.state}`;
     const present = new Set(wrong.map(keyOf));
     dismissed.forEach(k => { if (!present.has(k)) dismissed.delete(k); });
@@ -10264,15 +10146,12 @@ function addOverviewSection(nav     , sections     ) {
   };
 
   let lastDay      = null;
-  /// What the daily figures actually cover. A restart with nothing in the store starts them again, and a
-  /// tile reading "0 kWh since the day rolled over" is then a claim about a day nobody measured.
   let origin                                                                                = null;
   const sinceLabel = () => {
     if (!origin || origin.carriedOver > 0 || !origin.accumulatingSinceUtc) return 'since the day rolled over';
     const from = new Date(origin.accumulatingSinceUtc);
     return `only since ${from.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} — totals did not carry over`;
   };
-  /// Said once, above the figures it applies to, rather than repeated on each of them.
   const originNote = () => {
     if (!origin || origin.carriedOver > 0 || !origin.accumulatingSinceUtc) return null;
     const where = origin.store === 'file' ? 'a file inside the container'
@@ -10295,8 +10174,6 @@ function addOverviewSection(nav     , sections     ) {
       return;
     }
     const steps = ((body.series || [])[0]?.values || []).length;
-    /// Sum a set of series step by step. Only a step EVERY one of them reported counts: a partial sum reads
-    /// as a dip that never happened.
     const sumSeries = (list       ) => !list.length ? [] : Array.from({ length: steps }, (_, i) => {
       let total = 0;
       for (const s of list) { const v = s.values[i]; if (typeof v !== 'number') return null; total += v; }
@@ -10305,9 +10182,6 @@ function addOverviewSection(nav     , sections     ) {
     const ofRole = (role        , returns = false) => (body.series || [])
       .filter((s     ) => s.balance === role && String(s.node).endsWith('#in') === returns);
 
-    /// What the house drew at each step: the same balance as the figure above, done per reading rather
-    /// than once. A step missing any part of that balance is a gap — filling it with a zero would draw a
-    /// house that stopped using power.
     const homeValues = () => {
       const metered = ofRole('home');
       if (metered.length) return sumSeries(metered);
@@ -10333,8 +10207,6 @@ function addOverviewSection(nav     , sections     ) {
     const strip = ([kind, label, icon]                          ) => {
       const values = kind === 'home' ? homeValues() : sumSeries(ofRole(kind));
       if (!values.length || !values.some(v => v != null)) return;
-      // The same shape as the tiles above: a figure, what it means, and the shape behind it. A strip on
-      // its own says "something happened" without saying what.
       const known = values.filter((v)              => typeof v === 'number');
       const nowV = [...values].reverse().find((v)              => typeof v === 'number') ?? null;
       const peak = known.length ? Math.max(...known) : null;
@@ -10371,10 +10243,8 @@ function addOverviewSection(nav     , sections     ) {
     const gridIn = sumKnown(gridIds.map(id => live[`${id}|realpower#in`]));
     const battOut = sumOfRole(nodes, 'battery');
     const battIn = sumKnown(battIds.map(id => live[`${id}|realpower#in`]));
-    // One signed figure per bidirectional node: out is positive, in is negative.
     const gridNet = gridOut == null && gridIn == null ? null : (gridOut || 0) - (gridIn || 0);
     const battNet = battOut == null && battIn == null ? null : (battOut || 0) - (battIn || 0);
-    // A metered load node wins over the balance of sources; without one the home is what is left over.
     const loadW = idsOfRole(nodes, 'home').length ? sumOfRole(nodes, 'home') : undefined;
     const homeW = homeEnergy({ solar: solarW, grid: gridNet, battery: battNet, ...(loadW === undefined ? {} : { load: loadW }) });
 
@@ -10414,13 +10284,11 @@ function addOverviewSection(nav     , sections     ) {
     });
 
     const socVals = battIds.map(id => live[`${id}|soc`]).filter((v)              => typeof v === 'number');
-    // Voltage is a condition at a point, never a sum: several packs in parallel share one bus voltage.
     const voltVals = battIds.map(id => live[`${id}|voltage`]).filter((v)              => typeof v === 'number');
     drawBattery(socVals.length ? Math.round(socVals.reduce((a, b) => a + b, 0) / socVals.length) : null,
       battNet, battIds.length ? 'no charge source bound' : 'no battery configured',
       voltVals.length ? voltVals.reduce((a, b) => a + b, 0) / voltVals.length : null);
 
-    // --- Today ------------------------------------------------------------------------------------
     todayRow.innerHTML = '';
     if (!eNodes.length) {
       todayRow.appendChild(el('div', { class: 'desc', text: 'No energy totals yet — history is off, or nothing has reported today.' }));
@@ -10431,7 +10299,6 @@ function addOverviewSection(nav     , sections     ) {
     if (note) todayRow.appendChild(note);
     if (solarIds.length) todayRow.appendChild(tile('solar', '☀', 'Solar produced', fmtKwh(eSolar), sinceLabel(), solarIds));
     if (gridIds.length) {
-      // Net only when both directions were measured.
       const eGridNet = eGridOut == null || eGridIn == null ? null : eGridOut - eGridIn;
       const cols = el('div', { class: 'ov-cols' },
         el('div', {}, el('div', { class: 'ov-col-label', text: 'Imported' }), el('div', { class: 'ov-value', text: fmtKwh(eGridOut) })),
@@ -10443,7 +10310,6 @@ function addOverviewSection(nav     , sections     ) {
     const pct = selfSufficiencyPct(eHome, eGridOut);
     todayRow.appendChild(tile('self', '◔', 'Self-sufficiency', pct == null ? '—' : `${Math.round(pct)}%`,
       pct == null ? 'needs both home use and grid import' : 'of what the house used came from you', []));
-    // Net: export counts against import.
     const netPct = netSelfProducedPct(eHome, eGridOut == null || eGridIn == null ? null : eGridOut - eGridIn);
     const netTile = tile('net', '☀', 'Self-produced (net)', netPct == null ? '—' : `${Math.round(netPct)}%`,
       netPct == null ? 'needs home use, grid import and export' : 'of what the house used, net of export', []);
@@ -10482,7 +10348,6 @@ function addOverviewSection(nav     , sections     ) {
       stamp.textContent = '';
       alerts.appendChild(alertCard('bad', 'Overview', 'could not load', err?.message || 'the request failed'));
     }
-    // The withheld list first: a card is drawn with its bindings already attached, not re-rendered later.
     try {
       const w = await api('/api/flow/withheld');
       withheld = (w.body && w.body.ok && w.body.sources) || [];
