@@ -61,6 +61,7 @@ function arcPath(r0: number, r1: number, a0: number, a1: number): string {
 }
 
 const BASE_SIZE = 11.5;
+const MIN_SIZE = 8;
 
 /// Light text on dark fills, dark text on light ones.
 export function labelInk(fill: string): string {
@@ -105,11 +106,16 @@ function layoutLabel(label: string, span: number, mid: number, rm: number, depth
 /// `flip` marks the lower half, where text along the arc runs the other way to stay upright.
 export function arcLabel(label: string, span: number, mid: number, rm: number, depth: number, maxSize = BASE_SIZE): ArcLabel {
   const whole = label.split(/\s+/).join(' ');
-  for (const lines of [1, 2]) for (let size = maxSize; size > BASE_SIZE; size -= 0.5) {
+  for (const lines of [1, 2]) for (let size = maxSize; size >= BASE_SIZE; size -= 0.5) {
     const l = layoutLabel(label, span, mid, rm, depth, size);
     if (l.lines.length <= lines && l.lines.join(' ') === whole) return l;
   }
-  return layoutLabel(label, span, mid, rm, depth, BASE_SIZE);
+  // Smaller than the base before clipping, down to MIN_SIZE.
+  for (let size = BASE_SIZE - 0.5; size >= MIN_SIZE; size -= 0.5) {
+    const l = layoutLabel(label, span, mid, rm, depth, size);
+    if (l.lines.join(' ') === whole) return l;
+  }
+  return layoutLabel(label, span, mid, rm, depth, MIN_SIZE);
 }
 
 let labelPaths = 0;
