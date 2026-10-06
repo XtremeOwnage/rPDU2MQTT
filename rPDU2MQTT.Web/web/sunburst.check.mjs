@@ -121,4 +121,8 @@ lb = sized('Main Panel', 0.6, 60, 15);
 if (!(lb.size > 11.5 && lb.size < 15) || lb.lines.join() !== 'Main Panel') fail(`a mid-sized root arc does not shrink to fit: ${JSON.stringify(lb)}`);
 lb = sized('Livingroom Outlets, TV', 0.12, 60, 15);
 if (lb.size !== 11.5) fail(`a thin root arc does not fall back to the base size: ${JSON.stringify(lb)}`);
+lb = sized('Fridge / Freezer', 0.12, 80, 11.5);
+if (!(lb.size < 11.5) || lb.lines.join(' ') !== 'Fridge / Freezer') fail(`a label that fits only below the base size is clipped: ${JSON.stringify(lb)}`);
+lb = sized('Synology', 0.02, 60, 11.5);
+if (lb.lines.length) fail(`a slice too thin for any size is labelled: ${JSON.stringify(lb)}`);
 console.log(`sunburst check passed (${arcs.length} arcs; the hub, the supply ring and opening an arc).`);

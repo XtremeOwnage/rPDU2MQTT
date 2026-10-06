@@ -78,7 +78,8 @@ export function labelInk(fill: string): string {
   return lum < 0.18 ? '#ffffff' : '#0b0e13';
 }
 const clipTo = (text: string, n: number) => text.length > n ? text.slice(0, Math.max(3, n - 1)) + '…' : text;
-type ArcLabel = { along: boolean; flip: boolean; deg: number; lines: string[]; size: number; lineH: number };
+type ArcLabel = { along: boolean; flip: boolean; deg: number; lines: string[]; size: number; lineH: number; room: boolean };
+const MIN_SIZE = 7;
 
 function layoutLabel(label: string, span: number, mid: number, rm: number, depth: number, size: number): ArcLabel {
   const charW = 0.59 * size, lineH = 1.19 * size;
@@ -89,7 +90,7 @@ function layoutLabel(label: string, span: number, mid: number, rm: number, depth
   if (deg > 90) deg -= 180;
   const midDeg = mid * 180 / Math.PI;
   const flip = midDeg > 90 && midDeg < 270;
-  const out = (a: boolean, lines: string[]) => ({ along: a, flip, deg, lines, size, lineH });
+  const out = (a: boolean, lines: string[]) => ({ along: a, flip, deg, lines, size, lineH, room: a || span * rm >= lineH + 1 });
   if (label.length <= across || along <= across || depth < lineH + 2) return out(false, [clipTo(label, across)]);
   if (label.length <= along || depth < 2 * lineH + 4) return out(true, [clipTo(label, along)]);
   const inner = fits(rm - lineH / 2);
@@ -101,15 +102,21 @@ function layoutLabel(label: string, span: number, mid: number, rm: number, depth
 }
 
 /// An arc's label: across the ring, or curved along it (two lines when the ring is deep enough), whichever shows more.
-/// The largest size up to `maxSize` that shows the whole label, on one line if any size allows; else the base size, clipped.
+/// The largest size down to the base that shows the whole label (one line, then two), then the same below the base
+/// down to MIN_SIZE; else the base size (or the largest that fits the slice), clipped. No lines when the slice is too thin for any size.
 /// `flip` marks the lower half, where text along the arc runs the other way to stay upright.
 export function arcLabel(label: string, span: number, mid: number, rm: number, depth: number, maxSize = BASE_SIZE): ArcLabel {
   const whole = label.split(/\s+/).join(' ');
-  for (const lines of [1, 2]) for (let size = maxSize; size > BASE_SIZE; size -= 0.5) {
+  const tries: [number, number, number][] = [[1, maxSize, BASE_SIZE], [2, maxSize, BASE_SIZE], [1, BASE_SIZE - 0.5, MIN_SIZE], [2, BASE_SIZE - 0.5, MIN_SIZE]];
+  for (const [lines, hi, lo] of tries) for (let size = hi; size >= lo; size -= 0.5) {
     const l = layoutLabel(label, span, mid, rm, depth, size);
-    if (l.lines.length <= lines && l.lines.join(' ') === whole) return l;
+    if (l.room && l.lines.length <= lines && l.lines.join(' ') === whole) return l;
   }
-  return layoutLabel(label, span, mid, rm, depth, BASE_SIZE);
+  for (let size = Math.min(maxSize, BASE_SIZE); size >= MIN_SIZE; size -= 0.5) {
+    const l = layoutLabel(label, span, mid, rm, depth, size);
+    if (l.room) return l;
+  }
+  return { ...layoutLabel(label, span, mid, rm, depth, MIN_SIZE), lines: [] };
 }
 
 let labelPaths = 0;
@@ -196,9 +203,9 @@ export function drawSunburst(nodes: any[], links: any[], opts: TreeViewOpts): SV
     drawn.push({ p, key: arc.key });
 
     const mid = (arc.a0 + arc.a1) / 2, rm = (r0 + r1) / 2;
-    if ((arc.a1 - arc.a0) * rm < 16) return;
     const [x, y] = pt(rm, mid);
     const label = arcLabel(arc.label, arc.a1 - arc.a0, mid, rm, r1 - r0, arc.depth === 1 ? 16 : arc.depth === 2 ? 13.5 : BASE_SIZE);
+    if (!label.lines.length || label.lines[0].length < 2) return;
     const style = `font-size:${label.size}px;fill:${labelInk(fill)}`;
     if (!label.along) {
       const t = svgEl('text', { x: f2(x), y: f2(y), class: 'sunburst-label', transform: `rotate(${f2(label.deg)} ${f2(x)} ${f2(y)})`, style });
