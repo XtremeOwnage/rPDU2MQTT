@@ -5568,6 +5568,7 @@ function arcPath(r0        , r1        , a0        , a1        )         {
 }
 
 const BASE_SIZE = 11.5;
+const MIN_SIZE = 8;
 
 /// Light text on dark fills, dark text on light ones.
 function labelInk(fill        )         {
@@ -5586,8 +5587,6 @@ function labelInk(fill        )         {
 }
 const clipTo = (text        , n        ) => text.length > n ? text.slice(0, Math.max(3, n - 1)) + '…' : text;
 
-const MIN_SIZE = 7;
-
 function layoutLabel(label        , span        , mid        , rm        , depth        , size        )           {
   const charW = 0.59 * size, lineH = 1.19 * size;
   const across = Math.floor((depth - 8) / charW);
@@ -5597,20 +5596,34 @@ function layoutLabel(label        , span        , mid        , rm        , depth
   if (deg > 90) deg -= 180;
   const midDeg = mid * 180 / Math.PI;
   const flip = midDeg > 90 && midDeg < 270;
-  const out = (a         , lines          ) => ({ along: a, flip, deg, lines, size, lineH, room: a || span * rm >= lineH + 1 });
-  if (label.length <= across || along <= across || depth < lineH + 2) return out(false, [clipTo(label, across)]);
+  const out = (a         , lines          ) => ({ along: a, flip, deg, lines, size, lineH, room: a || span * innerR(rm, depth) >= lines.length * lineH + 1 });
+  if (label.length <= across || along <= across || depth < lineH + 2) {
+    if (label.length > across && span * innerR(rm, depth) >= 2 * lineH + 1) {
+      const [a, b] = wrapWords(label, across);
+      if (a) return out(false, b ? [a, clipTo(b, across)] : [a]);
+    }
+    return out(false, [clipTo(label, across)]);
+  }
   if (label.length <= along || depth < 2 * lineH + 4) return out(true, [clipTo(label, along)]);
   const inner = fits(rm - lineH / 2);
+  const [first, rest] = wrapWords(label, inner);
+  if (!first) return out(true, [clipTo(label, along)]);
+  return out(true, rest ? [first, clipTo(rest, inner)] : [first]);
+}
+
+const innerR = (rm        , depth        ) => rm - depth / 2;
+
+/// The words that fit in `n` characters, and the rest.
+function wrapWords(label        , n        )                   {
   const words = label.split(/\s+/);
   let first = '';
-  while (words.length && (first ? first + ' ' + words[0] : words[0]).length <= inner) first = first ? first + ' ' + words.shift() : words.shift() ;
-  if (!first) return out(true, [clipTo(label, along)]);
-  return out(true, words.length ? [first, clipTo(words.join(' '), inner)] : [first]);
+  while (words.length && (first ? first + ' ' + words[0] : words[0]).length <= n) first = first ? first + ' ' + words.shift() : words.shift() ;
+  return [first, words.join(' ')];
 }
 
 /// An arc's label: across the ring, or curved along it (two lines when the ring is deep enough), whichever shows more.
 /// The largest size down to the base that shows the whole label (one line, then two), then the same below the base
-/// down to MIN_SIZE; else the base size (or the largest that fits the slice), clipped. No lines when the slice is too thin for any size.
+/// down to MIN_SIZE; else the smallest size that fits the slice, clipped. No lines when the slice is too thin for any size.
 /// `flip` marks the lower half, where text along the arc runs the other way to stay upright.
 function arcLabel(label        , span        , mid        , rm        , depth        , maxSize = BASE_SIZE)           {
   const whole = label.split(/\s+/).join(' ');
@@ -5619,7 +5632,7 @@ function arcLabel(label        , span        , mid        , rm        , depth   
     const l = layoutLabel(label, span, mid, rm, depth, size);
     if (l.room && l.lines.length <= lines && l.lines.join(' ') === whole) return l;
   }
-  for (let size = Math.min(maxSize, BASE_SIZE); size >= MIN_SIZE; size -= 0.5) {
+  for (let size = MIN_SIZE; size <= Math.min(maxSize, BASE_SIZE); size += 0.5) {
     const l = layoutLabel(label, span, mid, rm, depth, size);
     if (l.room) return l;
   }
@@ -5716,7 +5729,12 @@ function drawSunburst(nodes       , links       , opts              )           
     const style = `font-size:${label.size}px;fill:${labelInk(fill)}`;
     if (!label.along) {
       const t = svgEl('text', { x: f2(x), y: f2(y), class: 'sunburst-label', transform: `rotate(${f2(label.deg)} ${f2(x)} ${f2(y)})`, style });
-      t.textContent = label.lines[0];
+      if (label.lines.length === 1) t.textContent = label.lines[0];
+      else label.lines.forEach((line, i) => {
+        const ts = svgEl('tspan', { x: f2(x), dy: f2(i ? label.lineH : -label.lineH / 2) });
+        ts.textContent = line;
+        t.appendChild(ts);
+      });
       svg.appendChild(t);
       return;
     }
