@@ -85,13 +85,34 @@ public class MultiPduConfigTests
     }
 
     [Fact]
-    public void Registry_ThrowsWhenNoInstanceHasAHost()
+    public void Registry_IsEmptyWhenNoInstanceHasAHost()
     {
         var cfg = new Config();
         cfg.Pdus["a"] = new PduConfig(); // no Host
         cfg.Pdus["b"] = new PduConfig(); // no Host
 
-        Assert.Throws<Exception>(() => new PduInstanceRegistry(cfg, new PduInstanceFactory(cfg)));
+        var registry = new PduInstanceRegistry(cfg, new PduInstanceFactory(cfg));
+
+        Assert.Empty(registry.All);
+        Assert.Null(registry.PrimaryId);
+        Assert.Null(registry.Primary);
+        Assert.Null(registry.Get("a"));
+    }
+
+    [Fact]
+    public void Registry_FirstInstanceAddedLiveBecomesPrimary()
+    {
+        var cfg = new Config();
+        cfg.Pdus["default"] = new PduConfig(); // no Host
+        var registry = new PduInstanceRegistry(cfg, new PduInstanceFactory(cfg));
+
+        var pdu = new PduConfig();
+        pdu.Connection.Host = "pdu-new.example.com";
+        var added = registry.TryCreate("new", pdu);
+
+        Assert.NotNull(added);
+        Assert.Equal("new", registry.PrimaryId);
+        Assert.Same(added, registry.Primary);
     }
 
     [Fact]

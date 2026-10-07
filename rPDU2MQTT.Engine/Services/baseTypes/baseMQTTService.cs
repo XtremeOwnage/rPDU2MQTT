@@ -17,7 +17,8 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     private Task timerTask = Task.CompletedTask;
     private readonly CancellationTokenSource stoppingCts = new();
     protected Config cfg { get; }
-    protected PDU pdu { get; }
+    private readonly MQTTServiceDependencies dependencies;
+    protected PDU? pdu => dependencies.PDU;
     private readonly Core.ISnapshotCache snapshotCache;
     private readonly Core.LeaderState? leader;
 
@@ -42,9 +43,9 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     protected baseMQTTService(MQTTServiceDependencies dependencies) : this(dependencies, dependencies.Cfg.Primary.PollInterval) { }
     protected baseMQTTService(MQTTServiceDependencies dependencies, int Interval)
     {
+        this.dependencies = dependencies;
         mqtt = dependencies.Mqtt;
         cfg = dependencies.Cfg;
-        pdu = dependencies.PDU;
         snapshotCache = dependencies.SnapshotCache;
         leader = dependencies.Leader;
 

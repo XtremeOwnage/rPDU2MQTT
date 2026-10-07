@@ -21,7 +21,7 @@ public sealed class MqttPduPublisher
 {
     private readonly Config cfg;
     private readonly IMessagePublisher publisher;
-    private readonly PDU pdu;
+    private readonly PduInstanceRegistry pdus;
 
     // When the data being published was read. Set per snapshot, so a device is stamped with its OWN poll
     // time rather than the moment the pass happened to be assembled.
@@ -37,11 +37,11 @@ public sealed class MqttPduPublisher
         Converters = { new Models.Converters.TimeSpanToSecondsConverter(), new Models.Converters.EnumToPropertyNameConverter() },
     };
 
-    public MqttPduPublisher(Config cfg, IMessagePublisher publisher, PDU pdu)
+    public MqttPduPublisher(Config cfg, IMessagePublisher publisher, PduInstanceRegistry pdus)
     {
         this.cfg = cfg;
         this.publisher = publisher;
-        this.pdu = pdu;
+        this.pdus = pdus;
     }
 
     /// <summary>Publish everything in one snapshot, stamped with when that snapshot was read.</summary>
@@ -64,7 +64,7 @@ public sealed class MqttPduPublisher
             {
                 // While a control command is still pending, report the commanded state instead of the
                 // stale polled one so HA doesn't flap back during the PDU's apply delay.
-                var state = pdu.ResolveOutletState(device.Key, outlet.Key, outlet.State);
+                var state = pdus.Primary?.ResolveOutletState(device.Key, outlet.Key, outlet.State) ?? outlet.State;
 
                 await PublishName(outlet, cancellationToken);
                 await PublishUniqueIdentifier(outlet, cancellationToken);
@@ -140,7 +140,7 @@ public sealed class MqttPduPublisher
     {
         var basePath = outlet.GetTopicPath();
         var idx = outlet.Key;
-        string resolve(string field, string actual) => pdu.ResolveOutletConfig(deviceId, idx, field, actual);
+        string resolve(string field, string actual) => pdus.Primary?.ResolveOutletConfig(deviceId, idx, field, actual) ?? actual;
 
         await publisher.PublishAsync(MQTTHelper.JoinPaths(basePath, "onDelay"), resolve("onDelay", outlet.OnDelay.ToString()), false, cancellationToken, stamp);
         await publisher.PublishAsync(MQTTHelper.JoinPaths(basePath, "offDelay"), resolve("offDelay", outlet.OffDelay.ToString()), false, cancellationToken, stamp);

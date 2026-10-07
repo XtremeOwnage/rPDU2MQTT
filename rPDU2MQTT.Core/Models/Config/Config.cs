@@ -43,6 +43,12 @@ public class Config
     public PduConfig Primary =>
         Pdus.TryGetValue(DefaultInstanceKey, out var p) ? p! : (Pdus.Values.FirstOrDefault() ?? new PduConfig());
 
+    /// <summary>PDU instances with a host set; the rest are not polled.</summary>
+    [JsonIgnore]
+    [YamlIgnore]
+    public IEnumerable<KeyValuePair<string, PduConfig>> ConfiguredPdus =>
+        Pdus.Where(kv => !string.IsNullOrWhiteSpace(kv.Value.Connection?.Host));
+
     [YamlMember(Alias = "HomeAssistant", DefaultValuesHandling = DefaultValuesHandling.OmitDefaults, Description = "Home Assistant Configuration")]
     [JsonPropertyName("HomeAssistant")]
     [NavGroup("Destinations")]

@@ -71,8 +71,6 @@ public static class ServiceConfiguration
 
         services.AddSingleton<PduInstanceFactory>();
         services.AddSingleton<PduInstanceRegistry>();
-        // The primary instance backs GUI control, live view and discovery.
-        services.AddSingleton<PDU>(sp => sp.GetRequiredService<PduInstanceRegistry>().Primary);
 
         services.AddSingleton<MQTTServiceDependencies>();
 

@@ -76,7 +76,7 @@ public sealed class StatusReporter : BackgroundService
         // One card per PDU instance, judged against that instance's own poll cadence. Driven by config, not
         // just by what has arrived — a configured PDU that has never polled has to show up as waiting.
         var latest = snapshots.All.ToDictionary(s => s.InstanceId, StringComparer.OrdinalIgnoreCase);
-        foreach (var id in config.Pdus.Keys.Union(latest.Keys, StringComparer.OrdinalIgnoreCase))
+        foreach (var id in config.ConfiguredPdus.Select(kv => kv.Key).Union(latest.Keys, StringComparer.OrdinalIgnoreCase))
             board.Report($"pdu:{id}", Kind.Device, new ComponentReport
         {
                 Title = $"PDU · {id}",

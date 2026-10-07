@@ -27,11 +27,11 @@ public static class StartupSummary
             AppInfo.Version, roleNames.Length == 0 ? "all" : string.Join("+", roleNames), source.Describe);
 
         // Sources.
-        foreach (var (id, pdu) in cfg.Pdus)
+        foreach (var (id, pdu) in cfg.ConfiguredPdus)
             Serilog.Log.Information("  PDU '{Instance}' at {Host} every {Interval}s (writes {Writes}).",
-                id, pdu.Connection?.Host ?? "?", pdu.PollInterval, pdu.ActionsEnabled ? "enabled" : "disabled");
-        if (cfg.Pdus.Count == 0)
-            Serilog.Log.Warning("  No PDU instances configured.");
+                id, pdu.Connection!.Host, pdu.PollInterval, pdu.ActionsEnabled ? "enabled" : "disabled");
+        if (!cfg.ConfiguredPdus.Any())
+            Serilog.Log.Information("  No PDU instances configured.");
 
         var modbus = cfg.Modbus?.Connections?.Count ?? 0;
         if (modbus > 0) Serilog.Log.Information("  Modbus: {Count} connection(s).", modbus);

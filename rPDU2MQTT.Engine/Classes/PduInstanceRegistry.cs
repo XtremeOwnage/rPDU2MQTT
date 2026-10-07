@@ -2,26 +2,15 @@ using rPDU2MQTT.Models.Config;
 
 namespace rPDU2MQTT.Classes;
 
-/// <summary>
-/// Holds the live <see cref="PDU"/> per configured instance. Built from <see cref="Config.Pdus"/> at
-/// startup; <see cref="TryCreate"/>/<see cref="Remove"/> let the <see cref="Services.InstanceManager"/>
-/// add/remove instances at runtime (phase 5). The pipeline polls every instance; GUI control/live/
-/// discovery use <see cref="Primary"/>.
-/// </summary>
-/// <remarks>
-/// <see cref="Primary"/>'s PDU <i>object</i> is fixed for the process lifetime — it's the DI-resolved
-/// <see cref="PDU"/> shared with the GUI / control / discovery, so reconciliation never swaps it. A
-/// changed primary is applied by <see cref="RepointPrimary"/>, which mutates that object in place instead
-/// (#192). Reads/writes are guarded so reconciliation can run while the GUI reads.
-/// </remarks>
+/// <summary>The live <see cref="PDU"/> per configured instance with a host.</summary>
 public sealed class PduInstanceRegistry
 {
     private readonly PduInstanceFactory factory;
     private readonly object gate = new();
     private readonly Dictionary<string, PDU> instances = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The fixed primary instance id (the DefaultInstanceKey entry, else the first at startup).</summary>
-    public string PrimaryId { get; }
+    /// <summary>The DefaultInstanceKey entry, else the first built; null when none.</summary>
+    public string? PrimaryId { get; private set; }
 
     public PduInstanceRegistry(Config config, PduInstanceFactory factory)
     {
@@ -29,10 +18,8 @@ public sealed class PduInstanceRegistry
         foreach (var (id, pduCfg) in config.Pdus)
             TryCreateInternal(id, pduCfg);
 
-        if (instances.Count == 0)
-            throw new Exception("No usable PDU instances configured — every entry in 'Pdus' is missing Connection.Host. Set at least one PDU host.");
-
-        PrimaryId = instances.ContainsKey(Config.DefaultInstanceKey) ? Config.DefaultInstanceKey : instances.Keys.First();
+        if (instances.ContainsKey(Config.DefaultInstanceKey))
+            PrimaryId = Config.DefaultInstanceKey;
     }
 
     // Build + register an instance; skips (returns null) when it has no Host. Not locked — callers do.
@@ -45,6 +32,7 @@ public sealed class PduInstanceRegistry
         }
         var pdu = factory.Create(pduCfg);
         instances[id] = pdu;
+        PrimaryId ??= id;
         return pdu;
     }
 
@@ -54,12 +42,13 @@ public sealed class PduInstanceRegistry
         get { lock (gate) return new Dictionary<string, PDU>(instances, StringComparer.OrdinalIgnoreCase); }
     }
 
-    /// <summary>The primary instance's PDU (the same object for the process lifetime; see RepointPrimary).</summary>
-    public PDU Primary { get { lock (gate) return instances[PrimaryId]; } }
+    /// <summary>The primary instance's PDU, or null.</summary>
+    public PDU? Primary { get { lock (gate) return PrimaryId is null ? null : instances[PrimaryId]; } }
 
-    public PDU Get(string instanceId)
+    /// <summary>The instance, else the primary, else null.</summary>
+    public PDU? Get(string instanceId)
     {
-        lock (gate) return instances.TryGetValue(instanceId, out var p) ? p : instances[PrimaryId];
+        lock (gate) return instances.TryGetValue(instanceId, out var p) ? p : PrimaryId is null ? null : instances[PrimaryId];
     }
 
     /// <summary>Build + register an instance at runtime (skips when hostless). Returns the PDU, or null if skipped.</summary>
@@ -68,11 +57,7 @@ public sealed class PduInstanceRegistry
         lock (gate) return TryCreateInternal(id, pduCfg);
     }
 
-    /// <summary>
-    /// Re-point the primary at a new configuration (#192). The primary's PDU object can't be replaced —
-    /// it's the DI singleton — so it's mutated in place instead, which keeps every existing reference
-    /// valid. Returns false (leaving the instance untouched) when the new config has no Host to point at.
-    /// </summary>
+    /// <summary>Re-point the primary in place (#192). False when the new config has no host or there is no primary.</summary>
     public bool RepointPrimary(PduConfig pduCfg)
     {
         if (string.IsNullOrWhiteSpace(pduCfg.Connection?.Host))
@@ -83,6 +68,7 @@ public sealed class PduInstanceRegistry
 
         lock (gate)
         {
+            if (PrimaryId is null) return false;
             factory.Repoint(instances[PrimaryId], pduCfg);
             return true;
         }

@@ -3,16 +3,14 @@ using rPDU2MQTT.Core;
 
 namespace rPDU2MQTT.Classes;
 
-/// <summary>
-/// Just a helper class, to reduce the constructor size when passing these dependencies.
-/// </summary>
+/// <summary>Shared dependencies for MQTT services.</summary>
 public class MQTTServiceDependencies
 {
-    public MQTTServiceDependencies(IHiveMQClient mqtt, Config cfg, PDU pdu, ISnapshotCache snapshotCache, LeaderState? leader = null)
+    public MQTTServiceDependencies(IHiveMQClient mqtt, Config cfg, PduInstanceRegistry pdus, ISnapshotCache snapshotCache, LeaderState? leader = null)
     {
         Mqtt = mqtt;
         Cfg = cfg;
-        this.PDU = pdu;
+        this.pdus = pdus;
         SnapshotCache = snapshotCache;
         Leader = leader;
     }
@@ -20,7 +18,10 @@ public class MQTTServiceDependencies
     public IHiveMQClient Mqtt { get; }
     public Config Cfg { get; }
 
-    public PDU PDU { get; }
+    private readonly PduInstanceRegistry pdus;
+
+    /// <summary>The primary PDU, or null when none is configured.</summary>
+    public PDU? PDU => pdus.Primary;
 
     /// <summary>Latest pipeline snapshot per source (the PduPoller produces; consumers read).</summary>
     public ISnapshotCache SnapshotCache { get; }
