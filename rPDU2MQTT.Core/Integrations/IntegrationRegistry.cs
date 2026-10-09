@@ -45,7 +45,7 @@ public sealed class IntegrationRegistry
         if (integration is IConfigurationPublisher) names.Add("configures");
         if (integration is Flow.IMeasurementHistory) names.Add("history");
         if (integration is Flow.IFlowValueSource) names.Add("source");
-        if (integration is IDeviceSourcePlugin) names.Add("device");
+        if (integration is IDeviceSourcePlugin || integration is IPduInstanceProvider) names.Add("device");
         if (integration is IDeviceControlPlugin) names.Add("control");
         if (integration is IValueSourcePlugin) names.Add("values");
         if (integration is INodeProvider) names.Add("discovers");

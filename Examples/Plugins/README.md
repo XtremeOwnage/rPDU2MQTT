@@ -13,6 +13,9 @@ every reading and every energy-flow tier to a file. Copy it and change the middl
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
+    <!-- Name and one-line description on System › Plugins. -->
+    <AssemblyTitle>My Plugin</AssemblyTitle>
+    <Description>What it reads or sends, in one line.</Description>
   </PropertyGroup>
   <ItemGroup>
     <!-- Private/ExcludeAssets so you ship only your own DLL. The host already has Core loaded, and a

@@ -12,6 +12,8 @@ const config = { Pdus: {}, DisabledPlugins: ['vertiv'], EnergyFlow: { Nodes: [],
 const plugins = [
   { key: 'tigo', name: 'Tigo TAP', version: '1.0.0', bundled: true, disabled: false, integrations: ['tigo'] },
   { key: 'vertiv', name: 'Vertiv rPDU', version: '1.0.0', bundled: true, disabled: true, integrations: [] },
+  { key: 'emoncms', name: 'EmonCMS', description: 'Exports readings to EmonCMS.', version: '1.0.0', bundled: true, disabled: false, integrations: ['emoncms', 'emoncms-source'],
+    capabilities: ['destination', 'configures', 'history', 'actions', 'source', 'values'] },
 ];
 const { sandbox, getEl } = makeDom({
   bodies: (url) =>
@@ -48,4 +50,10 @@ sw('Tigo TAP').checked = false; sw('Tigo TAP').onchange();
 if (JSON.stringify(config.DisabledPlugins) !== '["tigo"]') fail(`DisabledPlugins is ${JSON.stringify(config.DisabledPlugins)}`);
 if (!query(link, '.nav-badge', true).length) fail('the Plugins page shows no unsaved change');
 
-console.log('plugins: each plugin has a switch that edits DisabledPlugins, the PDU pages leave the nav when Vertiv is not loaded, the EmonCMS page when EmonCMS is not, and Floor Plans when its plugin is not');
+const emon = row('EmonCMS');
+const descs = query(emon, '.desc', true).map(d => d.textContent);
+if (!descs.includes('Exports readings to EmonCMS.')) fail('the plugin description is not shown');
+if (!descs.includes('Provides: Node value source, Destination, History provider')) fail(`the plugin's capabilities are not listed: ${descs.join(' | ')}`);
+if (query(emon, 'input', true).length !== 1 || row('EmonCMS feeds')) fail('a plugin has more than its one switch');
+
+console.log('plugins: each plugin has a description, what it provides, and a switch that edits DisabledPlugins, the PDU pages leave the nav when Vertiv is not loaded, the EmonCMS page when EmonCMS is not, and Floor Plans when its plugin is not');

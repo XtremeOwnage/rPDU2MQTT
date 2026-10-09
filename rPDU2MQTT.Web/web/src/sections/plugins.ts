@@ -27,7 +27,11 @@ export function addPluginsSection(nav: any, sections: any) {
       input.onchange = () => { setOff(p.key, !input.checked); label.textContent = input.checked ? 'On' : 'Off'; };
       const meta = [p.version, p.bundled ? 'Bundled' : 'External', p.disabled ? 'Not loaded' : p.error ? 'Failed: ' + p.error : 'Loaded']
         .filter(Boolean).join(' · ');
-      const f = el('div', { class: 'field' }, el('label', { text: p.name }), el('div', { class: 'desc', text: meta }), el('label', { class: 'switch-wrap' }, input, label));
+      const f = el('div', { class: 'field' }, el('label', { text: p.name }));
+      if (p.description) f.appendChild(el('div', { class: 'desc', text: p.description }));
+      const provides = capabilityText(p.capabilities);
+      if (provides) f.appendChild(el('div', { class: 'desc', text: 'Provides: ' + provides }));
+      f.append(el('div', { class: 'desc', text: meta }), el('label', { class: 'switch-wrap' }, input, label));
       f.dataset.path = 'DisabledPlugins.' + p.key;
       list.appendChild(f);
     }
@@ -38,4 +42,14 @@ export function addPluginsSection(nav: any, sections: any) {
     try { const r = await api('/api/plugins'); render(Array.isArray(r.body) ? r.body : []); }
     catch { render([]); }
   };
+}
+
+// The capabilities worth naming, most important first; the rest (configuration publishing, actions, discovery) are left out.
+const CAPABILITIES: [string, string][] = [
+  ['device', 'PDU source'], ['values', 'Node value source'], ['destination', 'Destination'], ['history', 'History provider'],
+  ['control', 'Outlet control'], ['pages', 'GUI pages'],
+];
+
+function capabilityText(caps: string[] = []): string {
+  return CAPABILITIES.filter(([key]) => caps.includes(key)).map(([, text]) => text).join(', ');
 }

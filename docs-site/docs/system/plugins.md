@@ -6,7 +6,7 @@ title: Plugins
 
 ## In the GUI
 
-**System › Plugins**. One switch per plugin found, bundled or in `/app/plugins`. Changes apply on **Save** and a restart.
+**System › Plugins**. One switch per plugin found, bundled or in `/app/plugins`, with its description and what it provides: PDU source, node value source, destination, history provider, outlet control, GUI pages. Changes apply on **Save** and a restart.
 
 ![Plugins page](../assets/screenshots/plugins.webp)
 

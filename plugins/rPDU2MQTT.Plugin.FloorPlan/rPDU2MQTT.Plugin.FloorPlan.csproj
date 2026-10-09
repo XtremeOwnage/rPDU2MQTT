@@ -7,6 +7,7 @@
     <AssemblyName>rPDU2MQTT.Plugin.FloorPlan</AssemblyName>
     <RootNamespace>rPDU2MQTT.Plugin.FloorPlan</RootNamespace>
     <AssemblyTitle>Floor Plans</AssemblyTitle>
+    <Description>Floor Plans page: rooms, placed items and cable runs drawn to scale, shaded by live power.</Description>
   </PropertyGroup>
 
   <ItemGroup>

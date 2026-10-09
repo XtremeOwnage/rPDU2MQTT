@@ -7,6 +7,7 @@
     <AssemblyName>rPDU2MQTT.Plugin.Tigo</AssemblyName>
     <RootNamespace>rPDU2MQTT.Plugin.Tigo</RootNamespace>
     <AssemblyTitle>Tigo TAP</AssemblyTitle>
+    <Description>Reads Tigo TS4 optimizers from a TAP&apos;s RS485 bus. Solar Array and Panel Types pages.</Description>
   </PropertyGroup>
 
   <ItemGroup>

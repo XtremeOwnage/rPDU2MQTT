@@ -34,6 +34,21 @@ public class EmonCmsPluginTests
     }
 
     [Fact]
+    public void TheCatalog_DescribesThePlugin_AndWhatItsIntegrationsProvide()
+    {
+        var bridge = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "rPDU2MQTT", "bin"));
+        var built = Directory.EnumerateFiles(bridge, "rPDU2MQTT.Plugin.EmonCms.dll", SearchOption.AllDirectories).First(f => f.Contains(Path.Combine("bundled-plugins", "emoncms")));
+        var found = Plugins.PluginLoader.Load(Path.GetDirectoryName(built)).Select(p => p with { Key = "emoncms", Bundled = true }).ToList();
+
+        var listed = Assert.Single(new Plugins.PluginCatalog(found).Plugins);
+
+        Assert.Equal("EmonCMS", listed.Name);
+        Assert.False(string.IsNullOrWhiteSpace(listed.Description));
+        foreach (var capability in new[] { "destination", "history", "values" })
+            Assert.Contains(capability, listed.Capabilities!);
+    }
+
+    [Fact]
     public void UseHost_ReadsTheHostsConfig()
     {
         var cfg = new Config();
