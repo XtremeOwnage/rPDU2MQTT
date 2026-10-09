@@ -13,10 +13,13 @@ import { setManagedRules } from './managed-nodes.js';
 export type PluginPage = { integration: string; id: string; title: string; group: string; icon?: string; configSection?: string };
 
 export let pluginPages: PluginPage[] = [];
+/** Ids of the integrations running in this process. */
+export let integrationIds = new Set<string>();
 
 export async function loadPluginPages() {
   try {
     const r = await api('/api/integrations');
+    integrationIds = new Set((r.body?.integrations || []).map((i: any) => i.id));
     pluginPages = (r.body?.integrations || []).flatMap((i: any) =>
       (i.pages || []).map((p: any) => ({ ...p, integration: i.id })));
     setManagedRules((r.body?.integrations || []).flatMap((i: any) => (i.managedNodes || []).map((m: any) => ({ ...m, integration: i.id }))));

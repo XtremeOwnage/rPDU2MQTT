@@ -35,7 +35,7 @@ const integrations = {
       { name: 'probe', title: 'Test', description: 'Check Acme is reachable.', effect: 'read' },
       { name: 'flush', title: 'Flush now', description: 'Send everything buffered.', effect: 'write' },
     ],
-  }],
+  }, { id: 'vertiv', name: 'Vertiv rPDU', group: 'Sources' }],
 };
 
 // A plugin page: a function body returning mount(section, host).
@@ -99,8 +99,9 @@ const labels = query(sec, 'button', true).map(b => b.textContent);
 for (const want of ['Test', 'Flush now'])
   if (!labels.includes(want)) fail(`no '${want}' button; saw ${labels.join(', ') || '(none)'}`);
 
-// 5. The raw Plugins map is not rendered as its own page.
-if (query(getEl('nav'), 'a', true).some(a => a.dataset.label === 'Plugins'))
+// 5. The raw Plugins map is not rendered as its own page; the only Plugins page is the on/off list.
+const pluginsLinks = query(getEl('nav'), 'a', true).filter(a => a.dataset.label === 'Plugins');
+if (pluginsLinks.length !== 1 || pluginsLinks[0].dataset.section !== 'DisabledPlugins')
   fail('the raw Plugins map is rendered as its own page as well as the plugin sections');
 
 // 6. A plugin page is listed in its group and mounted from the plugin on first open.

@@ -76,6 +76,7 @@ const MODULES = [
   'sections/ha-energy.ts',
   'sections/ha-cleanup.ts',
   'sections/home.ts',
+  'sections/plugins.ts',
   'sections/features.ts',
   'sections/pdu-tags.ts',
   'plugin-pages.ts',

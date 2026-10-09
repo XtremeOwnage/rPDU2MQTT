@@ -22,11 +22,12 @@ import { addBalanceSection } from './sections/balance.js';
 import { addCircuitFinderSection } from './sections/circuit-finder.js';
 import { addPanelScheduleSection } from './sections/panel-schedule.js';
 import { addFloorPlanSection } from './sections/floor-plan.js';
-import { pluginPages, pluginPageTool } from './plugin-pages.js';
+import { pluginPages, pluginPageTool, integrationIds } from './plugin-pages.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
 import { addTagsSection } from './sections/tags-page.js';
 import { addHomeSection } from './sections/home.js';
+import { addPluginsSection } from './sections/plugins.js';
 import { addOverviewSection } from './sections/overview.js';
 import { addDiscoveryCleanup } from './sections/ha-cleanup.js';
 import { featureToggle } from './sections/features.js';
@@ -360,7 +361,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addBalanceSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { tool: addFloorPlanSection }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
-  { title: 'System', items: [{ tool: addHomeSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
+  { title: 'System', items: [{ tool: addHomeSection }, { tool: addPluginsSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
 // Display-label fixes, keyed by schema section key.
@@ -624,13 +625,6 @@ function renderConfigSection(node: any, nav: any, sections: any) {
     link.onclick = () => activate(link, sec);
   }
   if (node.key === 'Pdus') {
-    // The Vertiv plugin's own settings (Enabled) sit on this page.
-    const vertiv = state.schema.find((n: any) => n.isPlugin && n.key === 'vertiv');
-    if (vertiv) {
-      const box = el('fieldset', { class: 'setting-group' }, el('legend', { text: 'Plugin' }));
-      renderObjectBody(vertiv.properties, ensure(ensure(state.data, 'Plugins', {}), 'vertiv', {}), box, ['Plugins', 'vertiv']);
-      sec.insertBefore(box, sec.children[1] ?? null);
-    }
     const tags = renderPduTags();
     sec.appendChild(tags.el);
     const open = link.onclick;
@@ -647,7 +641,10 @@ export function build() {
 
   const byKey = new Map(state.schema.map((n: any) => [n.key, n]));
   // Sections with no page of their own.
-  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache', 'vertiv']);
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache', 'DisabledPlugins']);
+  // The PDU pages need the Vertiv plugin.
+  const noPdu = !integrationIds.has('vertiv');
+  if (noPdu) PDU_BLOCK.forEach(k => HIDDEN.add(k));
   // Schema sections are placed by their declared group (System if none); tools follow them.
   const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: [] as NavItem[] }));
   const groupFor = (title: string) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System')!;
@@ -656,7 +653,7 @@ export function build() {
     if (HIDDEN.has(n.key)) return;
     groupFor(n.group || 'System').items.push({ schema: n.key, child: n.key === 'Overrides' });
   });
-  const navItems = NAV_GROUPS.map(g => [...g.items]);
+  const navItems = NAV_GROUPS.map(g => g.items.filter(it => !(noPdu && 'after' in it && it.after === PDU_BLOCK)));
   pluginPages.forEach(p => (navItems[NAV_GROUPS.findIndex(g => g.title === p.group)] ?? navItems[navItems.length - 1]).push({ tool: pluginPageTool(p) }));
   navItems.forEach((list, i) => list.forEach(it => {
     // Place a tool after its first present anchor, behind tools already there; otherwise at the end.

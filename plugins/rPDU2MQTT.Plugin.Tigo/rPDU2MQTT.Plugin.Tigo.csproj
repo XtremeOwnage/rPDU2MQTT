@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>rPDU2MQTT.Plugin.Tigo</AssemblyName>
     <RootNamespace>rPDU2MQTT.Plugin.Tigo</RootNamespace>
+    <AssemblyTitle>Tigo TAP</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>

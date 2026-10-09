@@ -1883,6 +1883,11 @@ spec:
                 additionalProperties:
                   x-kubernetes-preserve-unknown-fields: true
                 description: Settings for externally loaded plugins, keyed by plugin id.
+              DisabledPlugins:
+                type: array
+                items:
+                  type: string
+                description: Plugins not to load, by folder or DLL name. Restart to apply.
               Cache:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true

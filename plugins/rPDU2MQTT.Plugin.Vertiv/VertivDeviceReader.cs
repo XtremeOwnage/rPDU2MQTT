@@ -10,7 +10,7 @@ public sealed class VertivDeviceReader : IDeviceReader
 
     public VertivDeviceReader(PduInstanceRegistry registry) => this.registry = registry;
 
-    public bool Handles(string instanceId, Config cfg) => registry.Enabled && registry.All.ContainsKey(instanceId);
+    public bool Handles(string instanceId, Config cfg) => registry.All.ContainsKey(instanceId);
 
     public async Task<PduData?> ReadAsync(string instanceId, Config cfg, CancellationToken ct)
         => registry.All.TryGetValue(instanceId, out var pdu) ? await pdu.ReadAsync(ct) : null;

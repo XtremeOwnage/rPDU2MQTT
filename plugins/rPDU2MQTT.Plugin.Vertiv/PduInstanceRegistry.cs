@@ -8,7 +8,6 @@ public sealed class PduInstanceRegistry : IPduInstances
 {
     private readonly Config config;
     private readonly PduInstanceFactory factory;
-    private readonly Func<bool> enabled;
     private readonly object gate = new();
     private readonly Dictionary<string, PDU> instances = new(StringComparer.OrdinalIgnoreCase);
     // Config signature each instance was built with, for reconciliation.
@@ -17,9 +16,8 @@ public sealed class PduInstanceRegistry : IPduInstances
     /// <summary>The DefaultInstanceKey entry, else the first built; null when none.</summary>
     public string? PrimaryId { get; private set; }
 
-    public PduInstanceRegistry(Config config, PduInstanceFactory factory, Func<bool>? enabled = null)
+    public PduInstanceRegistry(Config config, PduInstanceFactory factory)
     {
-        this.enabled = enabled ?? (() => true);
         this.config = config;
         this.factory = factory;
         foreach (var (id, pduCfg) in config.Pdus)
@@ -125,18 +123,11 @@ public sealed class PduInstanceRegistry : IPduInstances
     public IPduInstance? Preview(Config cfg)
         => string.IsNullOrWhiteSpace(cfg.Primary.Connection?.Host) ? null : factory.Create(cfg.Primary, cfg);
 
-    /// <summary>False when the plugin is switched off; the host then sees no instances.</summary>
-    public bool Enabled => enabled();
-
-    string? IPduInstances.PrimaryId => Enabled ? PrimaryId : null;
-    IPduInstance? IPduInstances.Primary => Enabled ? Primary : null;
-    IPduInstance? IPduInstances.Get(string instanceId) => Enabled ? Get(instanceId) : null;
+    string? IPduInstances.PrimaryId => PrimaryId;
+    IPduInstance? IPduInstances.Primary => Primary;
+    IPduInstance? IPduInstances.Get(string instanceId) => Get(instanceId);
     IReadOnlyDictionary<string, IPduInstance> IPduInstances.All
     {
-        get
-        {
-            if (!Enabled) return new Dictionary<string, IPduInstance>();
-            lock (gate) return instances.ToDictionary(kv => kv.Key, kv => (IPduInstance)kv.Value, StringComparer.OrdinalIgnoreCase);
-        }
+        get { lock (gate) return instances.ToDictionary(kv => kv.Key, kv => (IPduInstance)kv.Value, StringComparer.OrdinalIgnoreCase); }
     }
 }
