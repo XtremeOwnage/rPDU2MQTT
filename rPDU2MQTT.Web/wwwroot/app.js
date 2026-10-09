@@ -17841,7 +17841,7 @@ function build() {
 
   state.schema.forEach((n     ) => {
     if (HIDDEN.has(n.key)) return;
-    groupFor(n.group || 'System').items.push({ schema: n.key });
+    groupFor(n.group || 'System').items.push({ schema: n.key, child: n.key === 'Overrides' });
   });
   const navItems = NAV_GROUPS.map(g => [...g.items]);
   pluginPages.forEach(p => (navItems[NAV_GROUPS.findIndex(g => g.title === p.group)] ?? navItems[navItems.length - 1]).push({ tool: pluginPageTool(p) }));
