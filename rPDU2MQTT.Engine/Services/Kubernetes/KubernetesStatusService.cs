@@ -13,12 +13,12 @@ public sealed class KubernetesStatusService : IHostedService, IDisposable
 {
     private readonly KubernetesConfigSource source;
     private readonly IHiveMQClient mqtt;
-    private readonly PduInstanceRegistry pdus;
+    private readonly Core.Integrations.IPduInstances pdus;
     private readonly PeriodicTimer timer;
     private readonly CancellationTokenSource stoppingCts = new();
     private Task loop = Task.CompletedTask;
 
-    public KubernetesStatusService(KubernetesConfigSource source, IHiveMQClient mqtt, PduInstanceRegistry pdus, Config cfg)
+    public KubernetesStatusService(KubernetesConfigSource source, IHiveMQClient mqtt, Core.Integrations.IPduInstances pdus, Config cfg)
     {
         this.source = source;
         this.mqtt = mqtt;
@@ -39,7 +39,7 @@ public sealed class KubernetesStatusService : IHostedService, IDisposable
             try
             {
                 int deviceCount = 0;
-                try { if (pdus.Primary is { } pdu) deviceCount = (await pdu.GetRootData_Public(ct)).Devices?.Count ?? 0; }
+                try { if (pdus.Primary is { } pdu) deviceCount = (await pdu.ReadAsync(ct)).Devices?.Count ?? 0; }
                 catch { /* report connectivity even if a poll fails */ }
 
                 await source.PatchStatusAsync(new

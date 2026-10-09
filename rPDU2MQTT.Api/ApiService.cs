@@ -24,14 +24,14 @@ namespace rPDU2MQTT.Services;
 public sealed class ApiService : IHostedService, IAsyncDisposable
 {
     private readonly Config cfg;
-    private readonly PduInstanceRegistry registry;
+    private readonly Core.Integrations.IPduInstances registry;
     private readonly ISnapshotCache snapshots;
     private readonly HealthState health;
     private readonly IHiveMQClient mqtt;
     private readonly Core.Flow.IFlowValueSource? live;
     private WebApplication? app;
 
-    public ApiService(Config cfg, PduInstanceRegistry registry, ISnapshotCache snapshots, HealthState health, IHiveMQClient mqtt, Core.Flow.IFlowValueSource? live = null)
+    public ApiService(Config cfg, Core.Integrations.IPduInstances registry, ISnapshotCache snapshots, HealthState health, IHiveMQClient mqtt, Core.Flow.IFlowValueSource? live = null)
     {
         this.live = live;
         this.cfg = cfg;
@@ -146,7 +146,7 @@ public sealed class ApiService : IHostedService, IAsyncDisposable
     }
 
     // Validate the instance exists (no silent fall-back to primary) and has write actions enabled.
-    private bool Resolve(string id, out PDU? pdu, out IResult? error)
+    private bool Resolve(string id, out Core.Integrations.IPduInstance? pdu, out IResult? error)
     {
         pdu = null;
         error = null;

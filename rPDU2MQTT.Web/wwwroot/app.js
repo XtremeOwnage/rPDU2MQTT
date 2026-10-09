@@ -17223,7 +17223,7 @@ function scalarInput(node     , obj     )      {
   const touched = () => refreshDirty();
   let el     ;
   if (node.type === 'bool') {
-    el = document.createElement('input'); el.type = 'checkbox'; el.className = 'switch'; el.checked = !!obj[node.key];
+    el = document.createElement('input'); el.type = 'checkbox'; el.className = 'switch'; el.checked = !!(obj[node.key] ?? node.default);
     el.onchange = () => { obj[node.key] = el.checked; touched(); };
   } else if (node.type === 'enum') {
     el = document.createElement('select');
@@ -17811,6 +17811,13 @@ function renderConfigSection(node     , nav     , sections     ) {
     link.onclick = () => activate(link, sec);
   }
   if (node.key === 'Pdus') {
+    // The Vertiv plugin's own settings (Enabled) sit on this page.
+    const vertiv = state.schema.find((n     ) => n.isPlugin && n.key === 'vertiv');
+    if (vertiv) {
+      const box = el('fieldset', { class: 'setting-group' }, el('legend', { text: 'Plugin' }));
+      renderObjectBody(vertiv.properties, ensure(ensure(state.data, 'Plugins', {}), 'vertiv', {}), box, ['Plugins', 'vertiv']);
+      sec.insertBefore(box, sec.children[1] ?? null);
+    }
     const tags = renderPduTags();
     sec.appendChild(tags.el);
     const open = link.onclick;
@@ -17827,7 +17834,7 @@ function build() {
 
   const byKey = new Map(state.schema.map((n     ) => [n.key, n]));
   // Sections with no page of their own.
-  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache']);
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache', 'vertiv']);
   // Schema sections are placed by their declared group (System if none); tools follow them.
   const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: []              }));
   const groupFor = (title        ) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System') ;

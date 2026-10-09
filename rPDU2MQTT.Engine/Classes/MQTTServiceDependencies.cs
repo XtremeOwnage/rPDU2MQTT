@@ -6,7 +6,7 @@ namespace rPDU2MQTT.Classes;
 /// <summary>Shared dependencies for MQTT services.</summary>
 public class MQTTServiceDependencies
 {
-    public MQTTServiceDependencies(IHiveMQClient mqtt, Config cfg, PduInstanceRegistry pdus, ISnapshotCache snapshotCache, LeaderState? leader = null)
+    public MQTTServiceDependencies(IHiveMQClient mqtt, Config cfg, Core.Integrations.IPduInstances pdus, ISnapshotCache snapshotCache, LeaderState? leader = null)
     {
         Mqtt = mqtt;
         Cfg = cfg;
@@ -18,10 +18,10 @@ public class MQTTServiceDependencies
     public IHiveMQClient Mqtt { get; }
     public Config Cfg { get; }
 
-    private readonly PduInstanceRegistry pdus;
+    private readonly Core.Integrations.IPduInstances pdus;
 
     /// <summary>The primary PDU, or null when none is configured.</summary>
-    public PDU? PDU => pdus.Primary;
+    public Core.Integrations.IPduInstance? PDU => pdus.Primary;
 
     /// <summary>Latest pipeline snapshot per source (the PduPoller produces; consumers read).</summary>
     public ISnapshotCache SnapshotCache { get; }

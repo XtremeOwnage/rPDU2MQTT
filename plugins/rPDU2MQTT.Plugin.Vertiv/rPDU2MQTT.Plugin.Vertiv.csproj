@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>rPDU2MQTT.Plugin.Vertiv</AssemblyName>
+    <RootNamespace>rPDU2MQTT.Plugin.Vertiv</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Ship only the plugin DLL; the host provides Core. -->
+    <ProjectReference Include="..\..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="rPDU2MQTT.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,19 +1,26 @@
+using rPDU2MQTT.Core.Integrations;
 using rPDU2MQTT.Models.Config;
 
-namespace rPDU2MQTT.Classes;
+namespace rPDU2MQTT.Plugin.Vertiv;
 
 /// <summary>The live <see cref="PDU"/> per configured instance with a host.</summary>
-public sealed class PduInstanceRegistry
+public sealed class PduInstanceRegistry : IPduInstances
 {
+    private readonly Config config;
     private readonly PduInstanceFactory factory;
+    private readonly Func<bool> enabled;
     private readonly object gate = new();
     private readonly Dictionary<string, PDU> instances = new(StringComparer.OrdinalIgnoreCase);
+    // Config signature each instance was built with, for reconciliation.
+    private readonly Dictionary<string, string> signatures = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The DefaultInstanceKey entry, else the first built; null when none.</summary>
     public string? PrimaryId { get; private set; }
 
-    public PduInstanceRegistry(Config config, PduInstanceFactory factory)
+    public PduInstanceRegistry(Config config, PduInstanceFactory factory, Func<bool>? enabled = null)
     {
+        this.enabled = enabled ?? (() => true);
+        this.config = config;
         this.factory = factory;
         foreach (var (id, pduCfg) in config.Pdus)
             TryCreateInternal(id, pduCfg);
@@ -32,6 +39,7 @@ public sealed class PduInstanceRegistry
         }
         var pdu = factory.Create(pduCfg);
         instances[id] = pdu;
+        signatures[id] = InstanceReconcile.Signature(pduCfg);
         PrimaryId ??= id;
         return pdu;
     }
@@ -70,6 +78,7 @@ public sealed class PduInstanceRegistry
         {
             if (PrimaryId is null) return false;
             factory.Repoint(instances[PrimaryId], pduCfg);
+            signatures[PrimaryId] = InstanceReconcile.Signature(pduCfg);
             return true;
         }
     }
@@ -79,6 +88,55 @@ public sealed class PduInstanceRegistry
     {
         if (string.Equals(id, PrimaryId, StringComparison.OrdinalIgnoreCase))
             return false;
-        lock (gate) return instances.Remove(id);
+        lock (gate)
+        {
+            signatures.Remove(id);
+            return instances.Remove(id);
+        }
+    }
+
+    /// <summary>Bring the instances in line with <see cref="Config.Pdus"/>.</summary>
+    public Task ReconcileAsync()
+    {
+        Dictionary<string, string> running;
+        lock (gate) running = new(signatures, StringComparer.OrdinalIgnoreCase);
+        var (toStop, toStart, primaryChanged) = InstanceReconcile.Plan(running, config.Pdus, PrimaryId);
+
+        if (primaryChanged && PrimaryId is { } primary && config.Pdus.TryGetValue(primary, out var primaryCfg))
+        {
+            Log.Information($"Primary PDU instance '{primary}' changed; re-pointing it.");
+            try { RepointPrimary(primaryCfg); }
+            catch (Exception ex) { Log.Error(ex, $"Could not re-point primary PDU instance '{primary}' ({ex.Message}); keeping the previous connection."); }
+        }
+
+        foreach (var id in toStop)
+        {
+            Log.Information($"Stopping PDU instance '{id}' (removed or changed).");
+            Remove(id);
+        }
+
+        foreach (var id in toStart)
+            if (config.Pdus.TryGetValue(id, out var pduCfg))
+                TryCreate(id, pduCfg);
+
+        return Task.CompletedTask;
+    }
+
+    public IPduInstance? Preview(Config cfg)
+        => string.IsNullOrWhiteSpace(cfg.Primary.Connection?.Host) ? null : factory.Create(cfg.Primary, cfg);
+
+    /// <summary>False when the plugin is switched off; the host then sees no instances.</summary>
+    public bool Enabled => enabled();
+
+    string? IPduInstances.PrimaryId => Enabled ? PrimaryId : null;
+    IPduInstance? IPduInstances.Primary => Enabled ? Primary : null;
+    IPduInstance? IPduInstances.Get(string instanceId) => Enabled ? Get(instanceId) : null;
+    IReadOnlyDictionary<string, IPduInstance> IPduInstances.All
+    {
+        get
+        {
+            if (!Enabled) return new Dictionary<string, IPduInstance>();
+            lock (gate) return instances.ToDictionary(kv => kv.Key, kv => (IPduInstance)kv.Value, StringComparer.OrdinalIgnoreCase);
+        }
     }
 }

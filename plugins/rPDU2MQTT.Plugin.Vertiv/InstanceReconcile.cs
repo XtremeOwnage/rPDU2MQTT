@@ -1,6 +1,6 @@
 using rPDU2MQTT.Models.Config;
 
-namespace rPDU2MQTT.Classes;
+namespace rPDU2MQTT.Plugin.Vertiv;
 
 /// <summary>Plans running PDU instances against <see cref="Config.Pdus"/>.</summary>
 public static class InstanceReconcile

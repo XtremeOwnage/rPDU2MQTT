@@ -1,3 +1,4 @@
+using rPDU2MQTT.Plugin.Vertiv;
 using rPDU2MQTT.Abstractions.Pdu;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.Integrations;

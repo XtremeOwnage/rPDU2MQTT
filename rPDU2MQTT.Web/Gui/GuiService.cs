@@ -36,9 +36,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     private readonly IConfigSource configSource;
     private readonly IHostApplicationLifetime lifetime;
     private readonly HealthState health;
-    private readonly PduInstanceFactory pduFactory;
-    private readonly PduInstanceRegistry registry;
-    private readonly InstanceManager instances;
+    private readonly Core.Integrations.IPduInstances registry;
     private readonly EmonCmsStatus emonCmsStatus;
     private readonly Core.IProcessRestarter? restarter;
     private readonly Core.ISnapshotCache snapshots;
@@ -72,7 +70,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     // Last outcome per Modbus device, for diagnostics.
     private readonly Core.Modbus.ModbusDevices? modbusDevices;
 
-    public GuiService(Config config, IHiveMQClient mqtt, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null)
+    public GuiService(Config config, IHiveMQClient mqtt, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, Core.Integrations.IPduInstances registry, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null)
     {
         this.live = live;
         this.pluginSections = pluginSections;
@@ -94,9 +92,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         this.configSource = configSource;
         this.lifetime = lifetime;
         this.health = health;
-        this.pduFactory = pduFactory;
         this.registry = registry;
-        this.instances = instances;
         this.emonCmsStatus = emonCmsStatus;
         this.restarter = restarter;
         this.snapshots = snapshots;
@@ -108,8 +104,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     private const string NoPdu = "No PDU instance configured.";
 
     /// <summary>Current data for an instance from the snapshot cache, else a direct poll.</summary>
-    private async Task<Models.PDU.PduData> ResolveData(string id, PDU? pdu, CancellationToken ct) =>
-        snapshots.Get(id)?.Data ?? (pdu is null ? new Models.PDU.PduData() : await pdu.GetRootData_Public(ct));
+    private async Task<Models.PDU.PduData> ResolveData(string id, Core.Integrations.IPduInstance? pdu, CancellationToken ct) =>
+        snapshots.Get(id)?.Data ?? (pdu is null ? new Models.PDU.PduData() : await pdu.ReadAsync(ct));
 
     /// <summary>The instance id a request targets, else the primary's.</summary>
     private string ResolveInstanceId(string? requested) =>
@@ -118,7 +114,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             : registry.PrimaryId ?? Config.DefaultInstanceKey;
 
     /// <summary>Resolve the PDU and its config from <c>?instance=</c> or a body field.</summary>
-    private (string Id, PDU? Pdu, Models.Config.PduConfig Cfg) ResolveInstance(string? requested)
+    private (string Id, Core.Integrations.IPduInstance? Pdu, Models.Config.PduConfig Cfg) ResolveInstance(string? requested)
     {
         var id = ResolveInstanceId(requested);
         return (id, registry.Get(id), config.Pdus.TryGetValue(id, out var c) ? c : new());
@@ -749,7 +745,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 try
                 {
                     config.Pdus = reloaded.Pdus;
-                    await instances.ReconcileAsync();
+                    await registry.ReconcileAsync();
                     instanceMessage = " PDU instances were applied live.";
                 }
                 catch (Exception ex)
@@ -2085,7 +2081,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                var data = await pduFactory.Create(parsed.Primary, parsed).GetRootData_Public(cts.Token);
+                if (registry.Preview(parsed) is not { } preview)
+                    return Results.Json(new { ok = false, message = NoPdu }, ConfigSchema.Json);
+                var data = await preview.ReadAsync(cts.Token);
                 return Results.Json(BuildPaths(data, parsed), ConfigSchema.Json);
             }
             catch (Exception ex)

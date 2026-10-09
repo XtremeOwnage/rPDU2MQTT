@@ -1,3 +1,4 @@
+using rPDU2MQTT.Plugin.Vertiv;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Startup;

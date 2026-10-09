@@ -21,7 +21,7 @@ namespace rPDU2MQTT.Services;
 /// </summary>
 public sealed class DeviceOutletControl : IOutletControl
 {
-    private readonly PduInstanceRegistry registry;
+    private readonly Core.Integrations.IPduInstances registry;
     private readonly ISnapshotCache snapshots;
     private readonly ILogger<DeviceOutletControl>? log;
     // Devices supplied by plugins, which own their own writes — a PDU can't reach someone else's hardware.
@@ -29,7 +29,7 @@ public sealed class DeviceOutletControl : IOutletControl
     private readonly Config? cfg;
     private readonly ISingleOwnerLease lease;
 
-    public DeviceOutletControl(PduInstanceRegistry registry, ISnapshotCache snapshots,
+    public DeviceOutletControl(Core.Integrations.IPduInstances registry, ISnapshotCache snapshots,
         ILogger<DeviceOutletControl>? log = null, IntegrationRegistry? integrations = null, Config? cfg = null,
         ISingleOwnerLease? lease = null)
     {
@@ -166,7 +166,7 @@ public sealed class DeviceOutletControl : IOutletControl
     }
 
     /// <summary>Which PDU this device is on, and whether it can be written to at all.</summary>
-    private bool Resolve(string deviceId, out string instanceId, out PDU? pdu, out string refusal)
+    private bool Resolve(string deviceId, out string instanceId, out Core.Integrations.IPduInstance? pdu, out string refusal)
     {
         pdu = null;
         instanceId = InstanceFor(deviceId) ?? "";

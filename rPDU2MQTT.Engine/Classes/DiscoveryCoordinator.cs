@@ -7,9 +7,9 @@ public sealed class DiscoveryCoordinator
 {
     private readonly Config config;
     private readonly IConfigSource configSource;
-    private readonly PduInstanceRegistry pdus;
+    private readonly Core.Integrations.IPduInstances pdus;
 
-    public DiscoveryCoordinator(Config config, IConfigSource configSource, PduInstanceRegistry pdus)
+    public DiscoveryCoordinator(Config config, IConfigSource configSource, Core.Integrations.IPduInstances pdus)
     {
         this.config = config;
         this.configSource = configSource;

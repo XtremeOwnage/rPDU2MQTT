@@ -29,12 +29,13 @@ public sealed class StatusReporter : BackgroundService
     private readonly Services.ICacheClient? cacheProbe;
     private readonly Core.Flow.IMeasurementHistory? history;
     private readonly LeaderState? leader;
+    private readonly Core.Integrations.IPduInstances? pdus;
     private readonly Core.History.LocalSeriesStore? localHistory;
     // Checking a directory means writing a probe file into it, so it is done once a minute, not per tick.
     private IReadOnlyList<Core.StorageUse>? storage;
     private DateTime storageCheckedUtc = DateTime.MinValue;
 
-    public StatusReporter(Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null, Core.Status.StatusBoard? statusBoard = null, Core.History.LocalSeriesStore? localHistory = null, LeaderState? leader = null)
+    public StatusReporter(Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null, Core.Status.StatusBoard? statusBoard = null, Core.History.LocalSeriesStore? localHistory = null, LeaderState? leader = null, Core.Integrations.IPduInstances? pdus = null)
     {
         this.config = config;
         board = statusBoard ?? new Core.Status.StatusBoard();
@@ -50,6 +51,7 @@ public sealed class StatusReporter : BackgroundService
         this.history = history;
         this.localHistory = localHistory;
         this.leader = leader;
+        this.pdus = pdus;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -76,7 +78,7 @@ public sealed class StatusReporter : BackgroundService
         // One card per PDU instance, judged against that instance's own poll cadence. Driven by config, not
         // just by what has arrived — a configured PDU that has never polled has to show up as waiting.
         var latest = snapshots.All.ToDictionary(s => s.InstanceId, StringComparer.OrdinalIgnoreCase);
-        foreach (var id in config.ConfiguredPdus.Select(kv => kv.Key).Union(latest.Keys, StringComparer.OrdinalIgnoreCase))
+        foreach (var id in (pdus?.All.Keys ?? []).Union(latest.Keys, StringComparer.OrdinalIgnoreCase))
             board.Report($"pdu:{id}", Kind.Device, new ComponentReport
         {
                 Title = $"PDU · {id}",

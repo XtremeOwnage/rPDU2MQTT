@@ -21,7 +21,7 @@ public sealed class MqttPduPublisher
 {
     private readonly Config cfg;
     private readonly IMessagePublisher publisher;
-    private readonly PduInstanceRegistry pdus;
+    private readonly Core.Integrations.IPduInstances pdus;
 
     // When the data being published was read. Set per snapshot, so a device is stamped with its OWN poll
     // time rather than the moment the pass happened to be assembled.
@@ -37,7 +37,7 @@ public sealed class MqttPduPublisher
         Converters = { new Models.Converters.TimeSpanToSecondsConverter(), new Models.Converters.EnumToPropertyNameConverter() },
     };
 
-    public MqttPduPublisher(Config cfg, IMessagePublisher publisher, PduInstanceRegistry pdus)
+    public MqttPduPublisher(Config cfg, IMessagePublisher publisher, Core.Integrations.IPduInstances pdus)
     {
         this.cfg = cfg;
         this.publisher = publisher;

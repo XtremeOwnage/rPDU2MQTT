@@ -18,7 +18,7 @@ public abstract class baseMQTTService : IHostedService, IDisposable
     private readonly CancellationTokenSource stoppingCts = new();
     protected Config cfg { get; }
     private readonly MQTTServiceDependencies dependencies;
-    protected PDU? pdu => dependencies.PDU;
+    protected Core.Integrations.IPduInstance? pdu => dependencies.PDU;
     private readonly Core.ISnapshotCache snapshotCache;
     private readonly Core.LeaderState? leader;
 

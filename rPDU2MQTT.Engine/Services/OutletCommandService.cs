@@ -18,7 +18,7 @@ public class OutletCommandService : IHostedService
     private readonly HiveMQClient mqtt;
     private readonly Config cfg;
     private readonly MQTTServiceDependencies deps;
-    private PDU pdu => deps.PDU ?? throw new InvalidOperationException("No PDU instance configured.");
+    private Core.Integrations.IPduInstance pdu => deps.PDU ?? throw new InvalidOperationException("No PDU instance configured.");
     private readonly Core.LeaderState? leader;
     private readonly Abstractions.Pdu.IOutletControl? outletControl;
     private readonly string[] commandFilters;
