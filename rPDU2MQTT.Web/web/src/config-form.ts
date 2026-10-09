@@ -642,7 +642,7 @@ export function build() {
 
   const byKey = new Map(state.schema.map((n: any) => [n.key, n]));
   // Sections with no page of their own.
-  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache', 'DisabledPlugins', 'DisabledIntegrations']);
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache', 'DisabledPlugins']);
   // The PDU pages need the Vertiv plugin.
   const noPdu = !integrationIds.has('vertiv');
   if (noPdu) PDU_BLOCK.forEach(k => HIDDEN.add(k));

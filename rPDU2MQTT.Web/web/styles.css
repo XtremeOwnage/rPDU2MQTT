@@ -340,8 +340,6 @@
   input[type=checkbox].switch:focus-visible { outline:none; box-shadow:var(--ring); }
   input[type=checkbox].switch:disabled { opacity:.5; cursor:not-allowed; }
   .switch-wrap { display:inline-flex; align-items:center; gap:9px; }
-  /* An integration's own switch, under its plugin. */
-  .plugin-part { margin-left:var(--sp-5); }
   .switch-state { font-size:12px; font-weight:600; color:var(--muted); user-select:none; }
 
   fieldset {

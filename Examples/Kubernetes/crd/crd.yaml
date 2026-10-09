@@ -1888,11 +1888,6 @@ spec:
                 items:
                   type: string
                 description: Plugins not to load, by folder or DLL name. Restart to apply.
-              DisabledIntegrations:
-                type: array
-                items:
-                  type: string
-                description: Integrations of loaded plugins not to start, by id (e.g. emoncms-source). Restart to apply.
               Cache:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true

@@ -8,13 +8,12 @@ const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import
   .filter(n => n.key !== '_README');
 const fail = (m) => { console.error('plugins check FAILED: ' + m); process.exit(1); };
 
-const config = { Pdus: {}, DisabledPlugins: ['vertiv'], DisabledIntegrations: [], EnergyFlow: { Nodes: [], Links: [] } };
+const config = { Pdus: {}, DisabledPlugins: ['vertiv'], EnergyFlow: { Nodes: [], Links: [] } };
 const plugins = [
   { key: 'tigo', name: 'Tigo TAP', version: '1.0.0', bundled: true, disabled: false, integrations: ['tigo'] },
   { key: 'vertiv', name: 'Vertiv rPDU', version: '1.0.0', bundled: true, disabled: true, integrations: [] },
   { key: 'emoncms', name: 'EmonCMS', description: 'Exports readings to EmonCMS.', version: '1.0.0', bundled: true, disabled: false, integrations: ['emoncms', 'emoncms-source'],
-    parts: [{ id: 'emoncms', name: 'EmonCMS', capabilities: ['destination', 'history'], disabled: false },
-            { id: 'emoncms-source', name: 'EmonCMS feeds', capabilities: ['source', 'values'], disabled: false }] },
+    capabilities: ['destination', 'configures', 'history', 'actions', 'source', 'values'] },
 ];
 const { sandbox, getEl } = makeDom({
   bodies: (url) =>
@@ -52,13 +51,9 @@ if (JSON.stringify(config.DisabledPlugins) !== '["tigo"]') fail(`DisabledPlugins
 if (!query(link, '.nav-badge', true).length) fail('the Plugins page shows no unsaved change');
 
 const emon = row('EmonCMS');
-if (!query(emon, '.desc', true).some(d => d.textContent === 'Exports readings to EmonCMS.')) fail('the plugin description is not shown');
-const feeds = row('EmonCMS feeds');
-if (!feeds || !query(feeds, '.desc', true).some(d => d.textContent === 'emoncms-source · Node values')) fail('an integration has no row of its own, or its capabilities are not named');
-sw('EmonCMS feeds').checked = false; sw('EmonCMS feeds').onchange();
-if (JSON.stringify(config.DisabledIntegrations) !== '["emoncms-source"]') fail(`DisabledIntegrations is ${JSON.stringify(config.DisabledIntegrations)}`);
-const emonPlugin = query(emon, 'input', true)[0];
-emonPlugin.checked = false; emonPlugin.onchange();
-if (!sw('EmonCMS feeds').disabled) fail('an integration can still be switched with its plugin off');
+const descs = query(emon, '.desc', true).map(d => d.textContent);
+if (!descs.includes('Exports readings to EmonCMS.')) fail('the plugin description is not shown');
+if (!descs.includes('Provides: Node value source, Destination, History provider')) fail(`the plugin's capabilities are not listed: ${descs.join(' | ')}`);
+if (query(emon, 'input', true).length !== 1 || row('EmonCMS feeds')) fail('a plugin has more than its one switch');
 
-console.log('plugins: each plugin has a description and a switch that edits DisabledPlugins, each integration of a plugin with several has its own for DisabledIntegrations, the PDU pages leave the nav when Vertiv is not loaded, the EmonCMS page when EmonCMS is not, and Floor Plans when its plugin is not');
+console.log('plugins: each plugin has a description, what it provides, and a switch that edits DisabledPlugins, the PDU pages leave the nav when Vertiv is not loaded, the EmonCMS page when EmonCMS is not, and Floor Plans when its plugin is not');
