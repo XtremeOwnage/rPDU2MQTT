@@ -101,7 +101,7 @@ for (const want of ['Test', 'Flush now'])
 
 // 5. The raw Plugins map is not rendered as its own page; the only Plugins page is the on/off list.
 const pluginsLinks = query(getEl('nav'), 'a', true).filter(a => a.dataset.label === 'Plugins');
-if (pluginsLinks.length !== 1 || pluginsLinks[0].dataset.section !== 'DisabledPlugins')
+if (pluginsLinks.length !== 1 || pluginsLinks[0].dataset.section !== 'DisabledPlugins,DisabledIntegrations')
   fail('the raw Plugins map is rendered as its own page as well as the plugin sections');
 
 // 6. A plugin page is listed in its group and mounted from the plugin on first open.

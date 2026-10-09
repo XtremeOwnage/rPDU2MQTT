@@ -110,8 +110,8 @@ public static class ServiceConfiguration
 
         // Externally loaded plugins; one that fails to load is reported and skipped.
         var plugins = Plugins.PluginLoader.LoadAll(cfg.DisabledPlugins, m => Log.Information(m));
-        services.AddSingleton(new Plugins.PluginCatalog(plugins));
-        var pluginIntegrations = plugins.SelectMany(p => p.Integrations).ToList();
+        services.AddSingleton(new Plugins.PluginCatalog(plugins, cfg.DisabledIntegrations));
+        var pluginIntegrations = Plugins.PluginLoader.Started(plugins, cfg.DisabledIntegrations, m => Log.Information(m)).ToList();
         var pluginHost = new Plugins.PluginHost(cfg);
         services.AddSingleton(pluginHost);
         if (pluginIntegrations.Count > 0)

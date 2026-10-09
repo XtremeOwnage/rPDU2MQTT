@@ -7,6 +7,7 @@
     <AssemblyName>rPDU2MQTT.Plugin.EmonCms</AssemblyName>
     <RootNamespace>rPDU2MQTT.Plugin.EmonCms</RootNamespace>
     <AssemblyTitle>EmonCMS</AssemblyTitle>
+    <Description>Exports readings to EmonCMS and provisions its feeds. Reads feeds back as node values and as history.</Description>
   </PropertyGroup>
 
   <ItemGroup>

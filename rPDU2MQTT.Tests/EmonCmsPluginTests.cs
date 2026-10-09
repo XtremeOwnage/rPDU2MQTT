@@ -34,6 +34,23 @@ public class EmonCmsPluginTests
     }
 
     [Fact]
+    public void ADisabledIntegration_IsNotStarted_ButIsListedWithItsPlugin()
+    {
+        var bridge = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "rPDU2MQTT", "bin"));
+        var built = Directory.EnumerateFiles(bridge, "rPDU2MQTT.Plugin.EmonCms.dll", SearchOption.AllDirectories).First(f => f.Contains(Path.Combine("bundled-plugins", "emoncms")));
+        var found = Plugins.PluginLoader.Load(Path.GetDirectoryName(built)).Select(p => p with { Key = "emoncms", Bundled = true }).ToList();
+
+        var started = Plugins.PluginLoader.Started(found, ["EmonCMS-Source"]).Select(i => i.Id).ToList();
+        Assert.Equal(["emoncms"], started);
+
+        var listed = Assert.Single(new Plugins.PluginCatalog(found, ["emoncms-source"]).Plugins);
+        Assert.Equal("EmonCMS", listed.Name);
+        Assert.False(string.IsNullOrWhiteSpace(listed.Description));
+        Assert.Contains(listed.Parts!, p => p is { Id: "emoncms", Disabled: false } && p.Capabilities.Contains("destination"));
+        Assert.Contains(listed.Parts!, p => p is { Id: "emoncms-source", Disabled: true } && p.Capabilities.Contains("values"));
+    }
+
+    [Fact]
     public void UseHost_ReadsTheHostsConfig()
     {
         var cfg = new Config();

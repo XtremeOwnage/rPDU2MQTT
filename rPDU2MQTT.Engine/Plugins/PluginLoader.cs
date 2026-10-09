@@ -107,6 +107,17 @@ public static class PluginLoader
         }
     }
 
+    /// <summary>The integrations of loaded plugins, less those named in <paramref name="disabled"/>.</summary>
+    public static IEnumerable<IIntegration> Started(IEnumerable<LoadedPlugin> plugins, IEnumerable<string>? disabled, Action<string>? log = null)
+    {
+        var off = new HashSet<string>(disabled ?? [], StringComparer.OrdinalIgnoreCase);
+        foreach (var integration in plugins.SelectMany(p => p.Integrations))
+        {
+            if (off.Contains(integration.Id)) log?.Invoke($"Integration disabled: {integration.Id}.");
+            else yield return integration;
+        }
+    }
+
     /// <summary>Bind each plugin to its settings, writing a default section for any not yet configured.</summary>
     public static void Configure(IEnumerable<IIntegration> plugins, Config cfg, Action<string>? warn = null)
     {

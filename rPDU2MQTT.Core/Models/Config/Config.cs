@@ -104,6 +104,10 @@ public class Config
     [YamlMember(Alias = "DisabledPlugins", DefaultValuesHandling = DefaultValuesHandling.OmitEmptyCollections, Description = "Plugins not to load, by folder or DLL name. Restart to apply.")]
     public List<string> DisabledPlugins { get; set; } = new();
 
+    /// <summary>Integrations of loaded plugins not to start, by integration id.</summary>
+    [YamlMember(Alias = "DisabledIntegrations", DefaultValuesHandling = DefaultValuesHandling.OmitEmptyCollections, Description = "Integrations of loaded plugins not to start, by id (e.g. emoncms-source). Restart to apply.")]
+    public List<string> DisabledIntegrations { get; set; } = new();
+
     /// <summary>Shared Redis/Valkey cache — durable state that survives restarts and is shared by replicas.</summary>
     public CacheConfig Cache { get; set; } = new CacheConfig();
 
@@ -131,6 +135,7 @@ public class Config
         EnergyFlow = other.EnergyFlow;
         Plugins = other.Plugins;
         DisabledPlugins = other.DisabledPlugins;
+        DisabledIntegrations = other.DisabledIntegrations;
         Modbus = other.Modbus;
         Operator = other.Operator;
         PlanStorage = other.PlanStorage;

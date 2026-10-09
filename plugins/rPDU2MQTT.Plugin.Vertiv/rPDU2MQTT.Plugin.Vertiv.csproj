@@ -7,6 +7,7 @@
     <AssemblyName>rPDU2MQTT.Plugin.Vertiv</AssemblyName>
     <RootNamespace>rPDU2MQTT.Plugin.Vertiv</RootNamespace>
     <AssemblyTitle>Vertiv rPDU</AssemblyTitle>
+    <Description>Polls Vertiv / Geist rack PDUs over HTTP, with outlet control.</Description>
   </PropertyGroup>
 
   <ItemGroup>
