@@ -32,14 +32,11 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 {
     private readonly Config config;
     private readonly IHiveMQClient mqtt;
-    private readonly PDU pdu;
     private readonly DiscoveryCoordinator discovery;
     private readonly IConfigSource configSource;
     private readonly IHostApplicationLifetime lifetime;
     private readonly HealthState health;
-    private readonly PduInstanceFactory pduFactory;
-    private readonly PduInstanceRegistry registry;
-    private readonly InstanceManager instances;
+    private readonly Core.Integrations.IPduInstances registry;
     private readonly EmonCmsStatus emonCmsStatus;
     private readonly Core.IProcessRestarter? restarter;
     private readonly Core.ISnapshotCache snapshots;
@@ -73,7 +70,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     // Last outcome per Modbus device, for diagnostics.
     private readonly Core.Modbus.ModbusDevices? modbusDevices;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null)
+    public GuiService(Config config, IHiveMQClient mqtt, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, Core.Integrations.IPduInstances registry, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null)
     {
         this.live = live;
         this.pluginSections = pluginSections;
@@ -91,14 +88,11 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         this.modbusDevices = modbusDevices;
         this.config = config;
         this.mqtt = mqtt;
-        this.pdu = pdu;
         this.discovery = discovery;
         this.configSource = configSource;
         this.lifetime = lifetime;
         this.health = health;
-        this.pduFactory = pduFactory;
         this.registry = registry;
-        this.instances = instances;
         this.emonCmsStatus = emonCmsStatus;
         this.restarter = restarter;
         this.snapshots = snapshots;
@@ -107,21 +101,23 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         this.haEnergy = haEnergy;
     }
 
+    private const string NoPdu = "No PDU instance configured.";
+
     /// <summary>Current data for an instance from the snapshot cache, else a direct poll.</summary>
-    private async Task<Models.PDU.PduData> ResolveData(string id, PDU pdu, CancellationToken ct) =>
-        snapshots.Get(id)?.Data ?? await pdu.GetRootData_Public(ct);
+    private async Task<Models.PDU.PduData> ResolveData(string id, Core.Integrations.IPduInstance? pdu, CancellationToken ct) =>
+        snapshots.Get(id)?.Data ?? (pdu is null ? new Models.PDU.PduData() : await pdu.ReadAsync(ct));
 
     /// <summary>The instance id a request targets, else the primary's.</summary>
     private string ResolveInstanceId(string? requested) =>
         !string.IsNullOrEmpty(requested) && registry.All.ContainsKey(requested)
             ? requested
-            : (registry.All.ContainsKey(Config.DefaultInstanceKey) ? Config.DefaultInstanceKey : registry.All.Keys.First());
+            : registry.PrimaryId ?? Config.DefaultInstanceKey;
 
     /// <summary>Resolve the PDU and its config from <c>?instance=</c> or a body field.</summary>
-    private (string Id, PDU Pdu, Models.Config.PduConfig Cfg) ResolveInstance(string? requested)
+    private (string Id, Core.Integrations.IPduInstance? Pdu, Models.Config.PduConfig Cfg) ResolveInstance(string? requested)
     {
         var id = ResolveInstanceId(requested);
-        return (id, registry.Get(id), config.Pdus[id]);
+        return (id, registry.Get(id), config.Pdus.TryGetValue(id, out var c) ? c : new());
     }
 
     /// <summary>Gui.AuthType is None.</summary>
@@ -424,7 +420,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             {
                 foreach (var o in device.Outlets.OrderBy(o => o.Key))
                     entities.Add(BuildLiveEntity(device.Entity_DisplayName, o.Entity_DisplayName, "outlet", o.Key + 1,
-                        pdu.ResolveOutletState(device.Key, o.Key, o.State), o.Measurements));
+                        pdu?.ResolveOutletState(device.Key, o.Key, o.State) ?? o.State, o.Measurements));
                 foreach (var e in device.Entity)
                     entities.Add(BuildLiveEntity(device.Entity_DisplayName, e.Entity_DisplayName, "entity", null, null, e.Measurements));
             }
@@ -749,7 +745,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 try
                 {
                     config.Pdus = reloaded.Pdus;
-                    await instances.ReconcileAsync();
+                    await registry.ReconcileAsync();
                     instanceMessage = " PDU instances were applied live.";
                 }
                 catch (Exception ex)
@@ -2085,7 +2081,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                var data = await pduFactory.Create(parsed.Primary, parsed).GetRootData_Public(cts.Token);
+                if (registry.Preview(parsed) is not { } preview)
+                    return Results.Json(new { ok = false, message = NoPdu }, ConfigSchema.Json);
+                var data = await preview.ReadAsync(cts.Token);
                 return Results.Json(BuildPaths(data, parsed), ConfigSchema.Json);
             }
             catch (Exception ex)
@@ -2102,6 +2100,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var (id, pdu, instanceCfg) = ResolveInstance(ctx.Request.Query["instance"]);
+                if (pdu is null) return Results.Json(new { ok = false, message = NoPdu }, ConfigSchema.Json);
                 var data = await ResolveData(id, pdu, cts.Token);
                 var outlets = data.Devices.SelectMany(d => d.Outlets.OrderBy(o => o.Key).Select(o => new
                 {
@@ -2172,6 +2171,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 return Results.BadRequest(new { ok = false, message = "groupKey and action are required." });
 
             var (_, pdu, instanceCfg) = ResolveInstance(req.Instance);
+            if (pdu is null)
+                return Results.Json(new { ok = false, message = NoPdu }, statusCode: 404);
             if (!instanceCfg.ActionsEnabled)
                 return Results.Json(new { ok = false, message = "Write actions are disabled for this PDU instance (ActionsEnabled is false)." }, statusCode: 409);
 
@@ -2202,6 +2203,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 return Results.BadRequest(new { ok = false, message = "deviceId, index and action are required." });
 
             var (_, pdu, instanceCfg) = ResolveInstance(req.Instance);
+            if (pdu is null)
+                return Results.Json(new { ok = false, message = NoPdu }, statusCode: 404);
             if (!instanceCfg.ActionsEnabled)
                 return Results.Json(new { ok = false, message = "Write actions are disabled for this PDU instance (ActionsEnabled is false)." }, statusCode: 409);
 
@@ -2244,6 +2247,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 return Results.BadRequest(new { ok = false, message = "A label request body is required." });
 
             var (_, pdu, instanceCfg) = ResolveInstance(req.Instance);
+            if (pdu is null)
+                return Results.Json(new { ok = false, message = NoPdu }, statusCode: 404);
             if (!instanceCfg.ActionsEnabled)
                 return Results.Json(new { ok = false, message = "Write actions are disabled for this PDU instance (ActionsEnabled is false)." }, statusCode: 409);
 

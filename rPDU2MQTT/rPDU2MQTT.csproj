@@ -33,6 +33,7 @@
 		<ProjectReference Include="..\rPDU2MQTT.Web\rPDU2MQTT.Web.csproj" />
 		<!-- Bundled plugins: built with the bridge, not referenced by it. -->
 		<ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.Tigo\rPDU2MQTT.Plugin.Tigo.csproj" ReferenceOutputAssembly="false" Private="false" />
+		<ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.Vertiv\rPDU2MQTT.Plugin.Vertiv.csproj" ReferenceOutputAssembly="false" Private="false" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -52,9 +53,10 @@
 	</ItemGroup>
 
 
-	<!-- Copy each bundled plugin's DLL to plugins/<name>/ in the build and publish output. -->
+	<!-- Copy each bundled plugin's DLL to bundled-plugins/<name>/ in the build and publish output. -->
 	<ItemGroup>
 		<BundledPlugin Include="..\plugins\rPDU2MQTT.Plugin.Tigo\rPDU2MQTT.Plugin.Tigo.csproj" PluginDir="tigo" />
+		<BundledPlugin Include="..\plugins\rPDU2MQTT.Plugin.Vertiv\rPDU2MQTT.Plugin.Vertiv.csproj" PluginDir="vertiv" />
 	</ItemGroup>
 	<Target Name="ResolveBundledPlugins">
 		<MSBuild Projects="@(BundledPlugin)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
@@ -62,9 +64,9 @@
 		</MSBuild>
 	</Target>
 	<Target Name="CopyBundledPlugins" AfterTargets="Build" DependsOnTargets="ResolveBundledPlugins">
-		<Copy SourceFiles="@(BundledPluginDll)" DestinationFolder="$(OutDir)plugins\%(BundledPluginDll.PluginDir)" SkipUnchangedFiles="true" />
+		<Copy SourceFiles="@(BundledPluginDll)" DestinationFolder="$(OutDir)bundled-plugins\%(BundledPluginDll.PluginDir)" SkipUnchangedFiles="true" />
 	</Target>
 	<Target Name="PublishBundledPlugins" AfterTargets="Publish" DependsOnTargets="ResolveBundledPlugins">
-		<Copy SourceFiles="@(BundledPluginDll)" DestinationFolder="$(PublishDir)plugins\%(BundledPluginDll.PluginDir)" SkipUnchangedFiles="true" />
+		<Copy SourceFiles="@(BundledPluginDll)" DestinationFolder="$(PublishDir)bundled-plugins\%(BundledPluginDll.PluginDir)" SkipUnchangedFiles="true" />
 	</Target>
 </Project>

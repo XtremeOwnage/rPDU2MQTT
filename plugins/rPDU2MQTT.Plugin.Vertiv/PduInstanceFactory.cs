@@ -2,13 +2,9 @@ using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.Config.Schemas;
 
-namespace rPDU2MQTT.Classes;
+namespace rPDU2MQTT.Plugin.Vertiv;
 
-/// <summary>
-/// Builds a <see cref="PDU"/> (with its own HttpClient + <see cref="PduApiHandler"/>) for a single
-/// configured instance. Each instance gets an HttpClient bound to its connection/credentials; the
-/// shared global <see cref="Config"/> (Overrides, ParentTopic) is passed through.
-/// </summary>
+/// <summary>Builds a <see cref="PDU"/> with its own HttpClient for one configured instance.</summary>
 public sealed class PduInstanceFactory
 {
     private readonly Config config;
@@ -28,11 +24,7 @@ public sealed class PduInstanceFactory
         return new PDU(instanceConfig, configForOverrides, api);
     }
 
-    /// <summary>
-    /// Re-point an existing PDU at a new configuration, instead of building a replacement (#192). Used for
-    /// the primary instance, whose object identity is pinned by DI. Built through the same path as
-    /// <see cref="Create(PduConfig)"/>, so a re-pointed instance is configured identically to a fresh one.
-    /// </summary>
+    /// <summary>Re-point an existing PDU at a new configuration (#192).</summary>
     public void Repoint(PDU pdu, PduConfig instanceConfig)
     {
         ThrowError.TestRequiredConfigurationSection(instanceConfig.Connection, "Pdus[].Connection");

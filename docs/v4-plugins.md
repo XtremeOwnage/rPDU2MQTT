@@ -54,10 +54,11 @@ history, configuration publisher), Prometheus, Home Assistant (discovery, Energy
 
 | Plugin | Project | Output folder |
 |--------|---------|---------------|
-| Tigo TAP | `plugins/rPDU2MQTT.Plugin.Tigo` | `plugins/tigo/` |
+| Vertiv rPDU | `plugins/rPDU2MQTT.Plugin.Vertiv` | `bundled-plugins/vertiv/` |
+| Tigo TAP | `plugins/rPDU2MQTT.Plugin.Tigo` | `bundled-plugins/tigo/` |
 
 - Each references only `rPDU2MQTT.Core`.
-- The host project builds them and copies each DLL into `plugins/<name>/` of its build and publish output.
-- They load through `PluginLoader`, the same as a third-party DLL.
-- A volume mounted over `/app/plugins`, or `RPDU2MQTT_PLUGINS` set to another directory, replaces the bundled
-  plugins. Copy `plugins/tigo/` into that directory to keep Tigo.
+- The host project builds them and copies each DLL into `bundled-plugins/<name>/` of its build and publish output.
+- They load through `PluginLoader`, the same as a third-party DLL, after the plugins in `/app/plugins` (or
+  `RPDU2MQTT_PLUGINS`). A DLL of the same name in that directory replaces the bundled one.
+- Vertiv: `Plugins.vertiv.Enabled` (default true) switches it off; it is also off when no PDU has a host.

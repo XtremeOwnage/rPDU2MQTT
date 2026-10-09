@@ -5,9 +5,9 @@ using rPDU2MQTT.Models.PDU.DummyDevices;
 using rPDU2MQTT.Models.PDU.OneView;
 using System.Diagnostics.CodeAnalysis;
 
-namespace rPDU2MQTT.Classes;
+namespace rPDU2MQTT.Plugin.Vertiv;
 
-public partial class PDU
+public partial class PDU : Core.Integrations.IPduInstance
 {
     private readonly Config config;
     private Models.Config.PduConfig instanceConfig;
@@ -31,16 +31,7 @@ public partial class PDU
     /// <summary>The address this PDU is currently pointed at (changes when it is re-pointed).</summary>
     public string BaseAddress => api.BaseAddress;
 
-    /// <summary>
-    /// Point this PDU at a different host/credentials/settings in place (#192).
-    /// <para>
-    /// The object itself is kept: the primary instance is the DI singleton the GUI, control and discovery
-    /// all hold a reference to, so it can never be swapped out — only re-pointed. Everything cached here
-    /// describes the OLD device, so it is all dropped: the OneView detection (a different host may not be
-    /// a OneView master), the poll cache, and the pending-state latches (they key off the old device's
-    /// outlets and would otherwise mask the new device's real state until they expire).
-    /// </para>
-    /// </summary>
+    /// <summary>Point this PDU at a different host in place (#192); drops OneView detection, poll cache and pending latches.</summary>
     public void Repoint(Models.Config.PduConfig newConfig, HttpClient newHttp)
     {
         instanceConfig = newConfig;
@@ -231,7 +222,7 @@ public partial class PDU
     /// </remarks>
     /// <param name="cancellationToken"></param>
     /// <returns></returns>
-    public async Task<PduData> GetRootData_Public(CancellationToken cancellationToken)
+    public async Task<PduData> ReadAsync(CancellationToken cancellationToken)
     {
         var ttl = TimeSpan.FromSeconds(Math.Max(1, instanceConfig.PollInterval / 2.0));
 

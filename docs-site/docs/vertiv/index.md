@@ -4,7 +4,7 @@ title: Vertiv rPDU
 
 # Vertiv rPDU
 
-Vertiv / Geist rack PDUs, read over their HTTP API. One or more PDUs per install.
+Vertiv / Geist rack PDUs, read over their HTTP API. One or more PDUs per install. Bundled plugin: `plugins/rPDU2MQTT.Plugin.Vertiv`.
 
 ## In the GUI
 
@@ -14,6 +14,7 @@ Vertiv / Geist rack PDUs, read over their HTTP API. One or more PDUs per install
 
 | Field | Setting | Default |
 | --- | --- | --- |
+| Plugin › Enabled | `Plugins.vertiv.Enabled` | on |
 | Instance name | `Pdus.<name>` | `default` |
 | Poll Interval (seconds) | `PollInterval` | `5` |
 | Enable Write Actions | `ActionsEnabled` | off |
@@ -28,6 +29,7 @@ Vertiv / Geist rack PDUs, read over their HTTP API. One or more PDUs per install
 | Connection › Validate Certificate | `Connection.ValidateCertificate` | on |
 | Credentials › Username / Password | `Credentials.Username` / `Credentials.Password` | |
 
+- **Plugin › Enabled** off stops polling and control for every PDU; takes effect after a restart.
 - **+ Add** adds another PDU. **Remove** deletes one.
 - **Enable Write Actions** needs credentials. It adds outlet switches, reboot buttons, delays and power-on action in Home Assistant and on [PDU Control](control.md).
 - The **Tags** table sets default tags for all PDUs, all outlets, and each PDU or outlet. See [Tags](../energy-flow/nodes.md#tags).

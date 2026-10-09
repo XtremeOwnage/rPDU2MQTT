@@ -385,13 +385,11 @@ public class TigoPluginTests
     [Fact]
     public void TheBridgeShipsThePlugin_AndTheLoaderFindsIt()
     {
-        var dir = Path.Combine(AppContext.BaseDirectory, "plugins");
-        // Load from the bridge's build output.
         var bridge = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "rPDU2MQTT", "bin"));
         var built = Directory.Exists(bridge)
-            ? Directory.EnumerateFiles(bridge, "rPDU2MQTT.Plugin.Tigo.dll", SearchOption.AllDirectories).FirstOrDefault(f => f.Contains(Path.Combine("plugins", "tigo")))
+            ? Directory.EnumerateFiles(bridge, "rPDU2MQTT.Plugin.Tigo.dll", SearchOption.AllDirectories).FirstOrDefault(f => f.Contains(Path.Combine("bundled-plugins", "tigo")))
             : null;
-        Assert.True(built is not null, "the bridge's build did not copy the Tigo plugin into plugins/tigo/");
+        Assert.True(built is not null, "the bridge's build did not copy the Tigo plugin into bundled-plugins/tigo/");
         var loaded = Plugins.PluginLoader.Load(Path.GetDirectoryName(built));
         Assert.Contains(loaded.SelectMany(p => p.Integrations), i => i.Id == "tigo");
     }

@@ -69,17 +69,12 @@ public static class ServiceConfiguration
         // Instantiated explicitly in Program.cs before the initial connect.
         services.AddSingleton(sp => new MqttEventHandler((HiveMQClient)sp.GetRequiredService<IHiveMQClient>()));
 
-        services.AddSingleton<PduInstanceFactory>();
-        services.AddSingleton<PduInstanceRegistry>();
-        // The primary instance backs GUI control, live view and discovery.
-        services.AddSingleton<PDU>(sp => sp.GetRequiredService<PduInstanceRegistry>().Primary);
 
         services.AddSingleton<MQTTServiceDependencies>();
 
         services.AddSingleton<Core.IMessageBus, Core.ChannelMessageBus>();
         services.AddSingleton<Core.SnapshotCache>();
         services.AddSingleton<Core.ISnapshotCache>(sp => sp.GetRequiredService<Core.SnapshotCache>());
-        services.AddSingleton<InstanceManager>();
         // Non-worker nodes also drain the bus to fill their cache from the worker's snapshots.
         if (worker || api || ui)
         {
@@ -118,7 +113,7 @@ public static class ServiceConfiguration
             services.AddHostedService<Services.ModbusPollService>();
 
         // Externally loaded plugins; one that fails to load is reported and skipped.
-        var plugins = Plugins.PluginLoader.Load(log: m => Log.Information(m));
+        var plugins = Plugins.PluginLoader.LoadAll(log: m => Log.Information(m));
         var pluginIntegrations = plugins.SelectMany(p => p.Integrations).ToList();
         if (pluginIntegrations.Count > 0)
         {
@@ -199,6 +194,14 @@ public static class ServiceConfiguration
         if (cfg.History.Enabled && cfg.History.ValueFallback)
             services.AddHostedService<Services.HistoryValueSourceService>();
 
+        // PDU instances come from a plugin (Vertiv); none when it isn't loaded.
+        var pduProvider = pluginIntegrations.OfType<Core.Integrations.IPduInstanceProvider>().FirstOrDefault();
+        services.AddSingleton(sp => pduProvider?.Attach(cfg, sp.GetRequiredService<Core.ISnapshotCache>())
+            ?? new Core.Integrations.PduAttachment(new Core.Integrations.NoPduInstances(), null));
+        services.AddSingleton(sp => sp.GetRequiredService<Core.Integrations.PduAttachment>().Instances);
+        if (pduProvider is not null)
+            services.AddSingleton(sp => sp.GetRequiredService<Core.Integrations.PduAttachment>().Reader!);
+
         // Device plugins are driven by the same poller as the built-in reader.
         var devicePlugins = pluginIntegrations.OfType<Core.Integrations.IDeviceSourcePlugin>().ToList();
         if (devicePlugins.Count > 0)
@@ -230,7 +233,6 @@ public static class ServiceConfiguration
         services.AddHostedService<Hosting.IntegrationFaultReporter>();
         services.AddSingleton<Core.Integrations.IMessagePublisher, Services.MqttMessagePublisher>();
         services.AddSingleton<Core.Integrations.IBrokerConnection, Services.HiveMqBrokerConnection>();
-        services.AddSingleton<Core.Integrations.IDeviceReader, Integrations.Vertiv.VertivDeviceReader>();
 
         services.AddSingleton<Core.Integrations.INodeProvider, Hosting.MqttNodeProvider>();
         services.AddSingleton<Core.Integrations.INodeProvider, Hosting.ModbusNodeProvider>();

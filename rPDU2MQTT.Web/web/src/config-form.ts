@@ -35,7 +35,7 @@ function scalarInput(node: any, obj: any): any {
   const touched = () => refreshDirty();
   let el: any;
   if (node.type === 'bool') {
-    el = document.createElement('input'); el.type = 'checkbox'; el.className = 'switch'; el.checked = !!obj[node.key];
+    el = document.createElement('input'); el.type = 'checkbox'; el.className = 'switch'; el.checked = !!(obj[node.key] ?? node.default);
     el.onchange = () => { obj[node.key] = el.checked; touched(); };
   } else if (node.type === 'enum') {
     el = document.createElement('select');
@@ -624,6 +624,13 @@ function renderConfigSection(node: any, nav: any, sections: any) {
     link.onclick = () => activate(link, sec);
   }
   if (node.key === 'Pdus') {
+    // The Vertiv plugin's own settings (Enabled) sit on this page.
+    const vertiv = state.schema.find((n: any) => n.isPlugin && n.key === 'vertiv');
+    if (vertiv) {
+      const box = el('fieldset', { class: 'setting-group' }, el('legend', { text: 'Plugin' }));
+      renderObjectBody(vertiv.properties, ensure(ensure(state.data, 'Plugins', {}), 'vertiv', {}), box, ['Plugins', 'vertiv']);
+      sec.insertBefore(box, sec.children[1] ?? null);
+    }
     const tags = renderPduTags();
     sec.appendChild(tags.el);
     const open = link.onclick;
@@ -640,14 +647,14 @@ export function build() {
 
   const byKey = new Map(state.schema.map((n: any) => [n.key, n]));
   // Sections with no page of their own.
-  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache']);
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache', 'vertiv']);
   // Schema sections are placed by their declared group (System if none); tools follow them.
   const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: [] as NavItem[] }));
   const groupFor = (title: string) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System')!;
 
   state.schema.forEach((n: any) => {
     if (HIDDEN.has(n.key)) return;
-    groupFor(n.group || 'System').items.push({ schema: n.key });
+    groupFor(n.group || 'System').items.push({ schema: n.key, child: n.key === 'Overrides' });
   });
   const navItems = NAV_GROUPS.map(g => [...g.items]);
   pluginPages.forEach(p => (navItems[NAV_GROUPS.findIndex(g => g.title === p.group)] ?? navItems[navItems.length - 1]).push({ tool: pluginPageTool(p) }));

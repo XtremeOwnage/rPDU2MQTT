@@ -1116,7 +1116,7 @@ required. The poll runs only when a feed is bound.
 Per-panel readings from Tigo TS4 optimizers, read from the TAP's RS485 bus.
 
 - Hardware: an RS485-to-Ethernet gateway in raw TCP mode, 38400 baud, 8N1.
-- Plugin: `plugins/rPDU2MQTT.Plugin.Tigo`, loaded from `plugins/tigo/`.
+- Plugin: `plugins/rPDU2MQTT.Plugin.Tigo`, loaded from `bundled-plugins/tigo/`.
 - Protocol: from [openTAPtoX](https://github.com/jontubs/openTAPtoX) (MIT). Not a Tigo API.
 
 **GUI:** Sources → **Tigo TAP**. Add a connection under **Connections**, then Save.

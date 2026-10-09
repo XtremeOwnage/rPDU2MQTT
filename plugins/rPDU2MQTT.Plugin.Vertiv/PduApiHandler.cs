@@ -5,7 +5,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 
-namespace rPDU2MQTT.Classes;
+namespace rPDU2MQTT.Plugin.Vertiv;
 
 /// <summary>
 /// This class handles requests to, and from the rPDU API.
@@ -25,12 +25,7 @@ public class PduApiHandler
         this.instanceConfig = instanceConfig;
     }
 
-    /// <summary>
-    /// Point this handler at a different host/credentials, keeping the handler object so its owning
-    /// <see cref="PDU"/> (the DI singleton) stays valid (#192). Session tokens and the device→port map are
-    /// tied to the old host, so they're dropped: replaying them against a new PDU would fail auth or,
-    /// worse, address the wrong device.
-    /// </summary>
+    /// <summary>Point this handler at a different host (#192); drops session tokens and the device→port map.</summary>
     public void Repoint([DisallowNull, NotNull] HttpClient newHttp, PduConfig newConfig)
     {
         ArgumentNullException.ThrowIfNull(newHttp);

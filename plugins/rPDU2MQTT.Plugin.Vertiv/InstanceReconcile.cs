@@ -1,19 +1,11 @@
 using rPDU2MQTT.Models.Config;
 
-namespace rPDU2MQTT.Classes;
+namespace rPDU2MQTT.Plugin.Vertiv;
 
-/// <summary>
-/// Pure reconciliation logic for the running PDU instances vs the desired <see cref="Config.Pdus"/>:
-/// what to stop (removed/changed) and (re)start (added/changed). Kept side-effect-free so it's unit-testable;
-/// <see cref="Services.InstanceManager"/> applies the plan.
-/// </summary>
+/// <summary>Plans running PDU instances against <see cref="Config.Pdus"/>.</summary>
 public static class InstanceReconcile
 {
-    /// <summary>
-    /// A signature of everything that requires rebuilding an instance's PDU/poller when it changes:
-    /// the connection target, TLS, timeout, credentials and poll cadence. (ActionsEnabled / Remap are
-    /// read live by the sinks &amp; discovery, so they don't need a poller rebuild.)
-    /// </summary>
+    /// <summary>Settings that require rebuilding an instance when changed.</summary>
     public static string Signature(PduConfig c)
     {
         var con = c.Connection;
@@ -24,17 +16,11 @@ public static class InstanceReconcile
             c.PollInterval.ToString());
     }
 
-    /// <summary>
-    /// Plan the move from the currently-running instance signatures to the desired config. Returns the ids
-    /// to stop (removed or changed) and to start (added or changed); a changed non-primary instance appears
-    /// in both (rebuild). The primary's PDU is the fixed DI singleton, so it's never rebuilt that way — a
-    /// changed primary is surfaced via <c>primaryChanged</c>, and the manager re-points it in place (#192).
-    /// Hostless desired entries are ignored.
-    /// </summary>
+    /// <summary>Ids to stop and start; a changed primary is reported via <c>primaryChanged</c> and re-pointed in place.</summary>
     public static (List<string> toStop, List<string> toStart, bool primaryChanged) Plan(
         IReadOnlyDictionary<string, string> running,
         IReadOnlyDictionary<string, PduConfig> desired,
-        string primaryId)
+        string? primaryId)
     {
         var toStop = new List<string>();
         var toStart = new List<string>();

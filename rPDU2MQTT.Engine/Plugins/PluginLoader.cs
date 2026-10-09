@@ -11,24 +11,7 @@ namespace rPDU2MQTT.Plugins;
 /// <param name="Error">Why it could not be loaded, or null.</param>
 public sealed record LoadedPlugin(string File, IReadOnlyList<IIntegration> Integrations, string? Error = null);
 
-/// <summary>
-/// Loads integrations from assemblies dropped into a plugins directory.
-///
-/// <para>
-/// Writing one is: reference <c>rPDU2MQTT.Core</c>, implement <see cref="IIntegration"/> and whichever
-/// capabilities apply, drop the DLL in <c>plugins/</c>. Core is the whole SDK — it carries the contracts,
-/// the config model, the flow engine and the helpers, and it references no ASP.NET and no MQTT
-/// client, so a plugin inherits none of those either.
-/// </para>
-/// <para>
-/// What a runtime plugin gets for free, because both are generated rather than compiled: a rendered
-/// settings page (the GUI's form is drawn from a schema built by reflection at startup) and its actions on
-/// the API (routes are derived from the capabilities it declares). What it does not get is a place in the
-/// Kubernetes CRD — that is a compile-time contract published to the API server, and it cannot describe a
-/// type that exists only on one operator's machine. Under Kubernetes, plugin settings live in the
-/// <c>Plugins</c> map, which the CRD leaves open.
-/// </para>
-/// </summary>
+/// <summary>Loads integrations from plugin assemblies.</summary>
 public static class PluginLoader
 {
     /// <summary>Where plugins live, unless <c>RPDU2MQTT_PLUGINS</c> says otherwise.</summary>
@@ -36,6 +19,22 @@ public static class PluginLoader
         Environment.GetEnvironmentVariable("RPDU2MQTT_PLUGINS") is { Length: > 0 } dir
             ? dir
             : Path.Combine(AppContext.BaseDirectory, "plugins");
+
+    /// <summary>Plugins shipped with the bridge; not hidden by a volume over <see cref="DefaultDirectory"/>.</summary>
+    public static string BundledDirectory => Path.Combine(AppContext.BaseDirectory, "bundled-plugins");
+
+    /// <summary>External plugins, then bundled ones not already loaded from the external directory.</summary>
+    public static IReadOnlyList<LoadedPlugin> LoadAll(Action<string>? log = null)
+    {
+        var external = Load(DefaultDirectory, log);
+        var names = external.Select(p => Path.GetFileName(p.File)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var bundled = Directory.Exists(BundledDirectory)
+            ? Directory.EnumerateDirectories(BundledDirectory)
+                .Where(d => !Directory.EnumerateFiles(d, "*.dll").Any(f => names.Contains(Path.GetFileName(f))))
+                .SelectMany(d => Load(d, log))
+            : [];
+        return [.. external, .. bundled];
+    }
 
     /// <summary>
     /// Load every plugin in <paramref name="directory"/>. Never throws: a plugin that will not load is
