@@ -195,6 +195,9 @@ somewhere else.
 Each plugin gets its own load context, so two plugins can depend on different versions of the same library.
 A plugin that fails to load is reported and skipped — it cannot stop the bridge starting.
 
+To keep a plugin from loading at all, switch it off on **System › Plugins**, or list its folder or DLL name
+(without `.dll`) under `DisabledPlugins`. Its own `Enabled` setting only stops its work; the DLL still loads.
+
 ## What a plugin does not get
 
 **A place in the Kubernetes CRD.** The CRD is a compile-time contract published to the API server and

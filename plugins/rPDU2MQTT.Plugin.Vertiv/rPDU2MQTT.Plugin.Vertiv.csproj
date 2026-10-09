@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>rPDU2MQTT.Plugin.Vertiv</AssemblyName>
     <RootNamespace>rPDU2MQTT.Plugin.Vertiv</RootNamespace>
+    <AssemblyTitle>Vertiv rPDU</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>

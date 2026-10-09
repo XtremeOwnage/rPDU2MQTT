@@ -24,5 +24,6 @@ Every setting in `config.yaml`, one page per top-level section, generated from `
 | [Plan Storage](planstorage.md) | 11 |
 | [Modbus](modbus.md) | 11 |
 | [Plugins](plugins.md) | 1 |
+| [Disabled Plugins](disabledplugins.md) | 1 |
 | [Cache](cache.md) | 6 |
 | [Operator](operator.md) | 8 |

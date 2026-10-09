@@ -45,6 +45,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     private readonly Core.Flow.IFlowValueSource? live;
     // Config sections contributed by loaded plugins.
     private readonly PluginSchemaSections? pluginSections;
+    // Every plugin found at startup, loaded or not.
+    private readonly rPDU2MQTT.Plugins.PluginCatalog? pluginCatalog;
     // Every integration, built-in or from plugins.
     private readonly Core.Integrations.IntegrationRegistry? integrations;
     // Write seam: routes to the owning PDU or plugin.
@@ -70,8 +72,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     // Last outcome per Modbus device, for diagnostics.
     private readonly Core.Modbus.ModbusDevices? modbusDevices;
 
-    public GuiService(Config config, IHiveMQClient mqtt, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, Core.Integrations.IPduInstances registry, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null)
+    public GuiService(Config config, IHiveMQClient mqtt, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, Core.Integrations.IPduInstances registry, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null, rPDU2MQTT.Plugins.PluginCatalog? pluginCatalog = null)
     {
+        this.pluginCatalog = pluginCatalog;
         this.live = live;
         this.pluginSections = pluginSections;
         this.integrations = integrations;
@@ -1819,6 +1822,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
             return Results.Json(new { ok = true, nodes = found }, ConfigSchema.Json);
         });
+
+        app.MapGet("/api/plugins", () => Results.Json(pluginCatalog?.Plugins ?? [], ConfigSchema.Json));
 
         app.MapGet("/api/integrations", () =>
         {

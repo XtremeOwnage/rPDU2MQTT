@@ -61,4 +61,5 @@ history, configuration publisher), Prometheus, Home Assistant (discovery, Energy
 - The host project builds them and copies each DLL into `bundled-plugins/<name>/` of its build and publish output.
 - They load through `PluginLoader`, the same as a third-party DLL, after the plugins in `/app/plugins` (or
   `RPDU2MQTT_PLUGINS`). A DLL of the same name in that directory replaces the bundled one.
-- Vertiv: `Plugins.vertiv.Enabled` (default true) switches it off; it is also off when no PDU has a host.
+- `DisabledPlugins` lists folder or DLL names to skip; a skipped plugin is never loaded. GUI: **System › Plugins**.
+- Vertiv is off when no PDU has a host.
