@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 
-namespace rPDU2MQTT.Integrations.EmonCms;
+namespace rPDU2MQTT.Plugin.EmonCms;
 
 /// <summary>
 /// Reading EmonCMS's own answers: the feed list a lookup is resolved against, and the point series a

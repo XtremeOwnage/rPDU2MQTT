@@ -1,12 +1,11 @@
 using System.Text.Json;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core;
-using rPDU2MQTT.Integrations.EmonCms;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.PDU;
 
-namespace rPDU2MQTT.Services;
+namespace rPDU2MQTT.Plugin.EmonCms;
 
 /// <summary>The outcome of a feed-provisioning pass, surfaced to the GUI's manual trigger.</summary>
 public sealed record EmonFeedSyncResult(bool Ok, string Message, int FeedsCreated = 0, int ProcessesSet = 0, int VirtualFeeds = 0);
@@ -20,15 +19,22 @@ public sealed class EmonCmsFeedSync
 {
     private static readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly Config config;
-    private readonly ISnapshotCache snapshots;
-    private readonly Core.Flow.IFlowValueSource? live;
+    private readonly Func<ISnapshotCache> snapshotsOf;
+    private readonly Func<Core.Flow.IFlowValueSource?> liveOf;
 
     public EmonCmsFeedSync(Config config, ISnapshotCache snapshots, Core.Flow.IFlowValueSource? live = null)
+        : this(config, () => snapshots, () => live) { }
+
+    /// <summary>Resolves the host's services on first use.</summary>
+    public EmonCmsFeedSync(Config config, Func<ISnapshotCache> snapshots, Func<Core.Flow.IFlowValueSource?> live)
     {
         this.config = config;
-        this.snapshots = snapshots;
-        this.live = live;
+        snapshotsOf = snapshots;
+        liveOf = live;
     }
+
+    private ISnapshotCache snapshots => snapshotsOf();
+    private Core.Flow.IFlowValueSource? live => liveOf();
 
     /// <summary>Every cached snapshot's devices, as one set of PDU data.</summary>
     public PduData Merged()

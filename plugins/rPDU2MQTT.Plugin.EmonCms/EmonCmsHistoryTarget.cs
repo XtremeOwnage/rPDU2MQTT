@@ -2,7 +2,7 @@ using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.History;
 using rPDU2MQTT.Helpers;
 
-namespace rPDU2MQTT.Integrations.EmonCms;
+namespace rPDU2MQTT.Plugin.EmonCms;
 
 /// <summary>Writes copied history into the feeds the EmonCMS export writes, only where a feed holds nothing in that interval.</summary>
 public sealed class EmonCmsHistoryTarget(HttpClient http, Config cfg) : IHistoryTarget

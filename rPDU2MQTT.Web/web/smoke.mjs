@@ -64,7 +64,7 @@ const bodies = (url) =>
   url.includes('/api/flow/live') ? liveValues :
   url.includes('/api/schema') ? schema :
   url.includes('/api/instances') ? { ok: true, instances: [] } :
-  url.includes('/api/integrations') ? { ok: true, integrations: [{ id: 'vertiv', name: 'Vertiv rPDU', pages: [] }] } :
+  url.includes('/api/integrations') ? { ok: true, integrations: [{ id: 'vertiv', name: 'Vertiv rPDU', pages: [] }, { id: 'emoncms', name: 'EmonCMS', pages: [] }] } :
   url.includes('/api/plugins') ? [{ key: 'vertiv', name: 'Vertiv rPDU', bundled: true, disabled: false, integrations: ['vertiv'] }] :
   url.includes('/api/config') ? config :
   url.includes('/api/flow') ? flowGraph :

@@ -1,4 +1,4 @@
-namespace rPDU2MQTT.Integrations.EmonCms;
+namespace rPDU2MQTT.Plugin.EmonCms;
 
 /// <summary>
 /// One EmonCMS feed as <c>/feed/list.json</c> describes it: enough to find it, read it, and know how old

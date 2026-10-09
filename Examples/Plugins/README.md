@@ -58,6 +58,8 @@ Implement the ones that apply. A plugin is a vendor, not a single interface — 
 | `IIntegrationApi` | Actions beyond the standard ones. |
 | `IStatusProvider` | Decide what your own health means, when the default is not specific enough. |
 | `IConfigurablePlugin` | Carry your own settings section. |
+| `IHistoryBackend` | Be a `History.Provider`, and a target for copied history. |
+| `IPluginHostUser` | Receive the host's services: config, snapshots, live values, broker publisher, export status. |
 
 ### Receiving data
 

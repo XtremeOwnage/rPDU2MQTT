@@ -17874,6 +17874,8 @@ function build() {
   // The PDU pages need the Vertiv plugin.
   const noPdu = !integrationIds.has('vertiv');
   if (noPdu) PDU_BLOCK.forEach(k => HIDDEN.add(k));
+  // The EmonCMS page needs the EmonCMS plugin.
+  if (!integrationIds.has('emoncms')) HIDDEN.add('EmonCMS');
   // Schema sections are placed by their declared group (System if none); tools follow them.
   const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: []              }));
   const groupFor = (title        ) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System') ;

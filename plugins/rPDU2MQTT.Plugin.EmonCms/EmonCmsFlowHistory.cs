@@ -5,7 +5,7 @@ using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Helpers;
 using Serilog;
 
-namespace rPDU2MQTT.Integrations.EmonCms;
+namespace rPDU2MQTT.Plugin.EmonCms;
 
 /// <summary>
 /// Past flow values from EmonCMS feeds.

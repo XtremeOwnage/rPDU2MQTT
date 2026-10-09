@@ -1,5 +1,5 @@
 using rPDU2MQTT.Core.History;
-using rPDU2MQTT.Integrations.EmonCms;
+using rPDU2MQTT.Plugin.EmonCms;
 using Xunit;
 
 namespace rPDU2MQTT.Tests;

@@ -55,6 +55,7 @@ history, configuration publisher), Prometheus, Home Assistant (discovery, Energy
 | Plugin | Project | Output folder |
 |--------|---------|---------------|
 | Vertiv rPDU | `plugins/rPDU2MQTT.Plugin.Vertiv` | `bundled-plugins/vertiv/` |
+| EmonCMS | `plugins/rPDU2MQTT.Plugin.EmonCms` | `bundled-plugins/emoncms/` |
 | Tigo TAP | `plugins/rPDU2MQTT.Plugin.Tigo` | `bundled-plugins/tigo/` |
 
 - Each references only `rPDU2MQTT.Core`.
@@ -63,3 +64,4 @@ history, configuration publisher), Prometheus, Home Assistant (discovery, Energy
   `RPDU2MQTT_PLUGINS`). A DLL of the same name in that directory replaces the bundled one.
 - `DisabledPlugins` lists folder or DLL names to skip; a skipped plugin is never loaded. GUI: **System › Plugins**.
 - Vertiv is off when no PDU has a host.
+- EmonCMS keeps its `EmonCMS` config section in Core, so existing configs, the CRD and `RPDU2MQTT_EMONCMS_APIKEY` are unchanged.
