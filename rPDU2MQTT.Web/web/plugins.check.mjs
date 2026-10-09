@@ -1,4 +1,4 @@
-// System › Plugins: a switch per plugin writes DisabledPlugins; without Vertiv the PDU pages are gone.
+// System › Plugins: a switch per plugin writes DisabledPlugins; without Vertiv the PDU pages are gone, without EmonCMS its page.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -28,6 +28,7 @@ await new Promise(r => setTimeout(r, 60));
 const labels = query(getEl('nav'), 'a', true).map(a => a.dataset.label);
 for (const gone of ['Vertiv rPDU', 'Overrides', 'Live Data', 'PDU Control', 'Paths'])
   if (labels.includes(gone)) fail(`"${gone}" is in the nav with Vertiv not loaded`);
+if (labels.includes('EmonCMS')) fail('"EmonCMS" is in the nav with EmonCMS not loaded');
 
 const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Plugins');
 if (!link) fail('there is no Plugins page');
@@ -44,4 +45,4 @@ sw('Tigo TAP').checked = false; sw('Tigo TAP').onchange();
 if (JSON.stringify(config.DisabledPlugins) !== '["tigo"]') fail(`DisabledPlugins is ${JSON.stringify(config.DisabledPlugins)}`);
 if (!query(link, '.nav-badge', true).length) fail('the Plugins page shows no unsaved change');
 
-console.log('plugins: each plugin has a switch that edits DisabledPlugins, and the PDU pages leave the nav when Vertiv is not loaded');
+console.log('plugins: each plugin has a switch that edits DisabledPlugins, the PDU pages leave the nav when Vertiv is not loaded, and the EmonCMS page when EmonCMS is not');

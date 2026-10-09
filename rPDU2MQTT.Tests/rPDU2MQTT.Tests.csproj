@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\rPDU2MQTT\rPDU2MQTT.csproj" />
+    <ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.EmonCms\rPDU2MQTT.Plugin.EmonCms.csproj" />
     <ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.Tigo\rPDU2MQTT.Plugin.Tigo.csproj" />
     <ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.Vertiv\rPDU2MQTT.Plugin.Vertiv.csproj" />
   </ItemGroup>

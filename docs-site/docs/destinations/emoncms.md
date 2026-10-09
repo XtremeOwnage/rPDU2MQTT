@@ -4,7 +4,7 @@ title: EmonCMS
 
 # EmonCMS
 
-Sends measurements to EmonCMS every poll. EmonCMS creates the inputs.
+Sends measurements to EmonCMS every poll. EmonCMS creates the inputs. Bundled plugin: `plugins/rPDU2MQTT.Plugin.EmonCms`.
 
 Turn on with `EmonCMS.Enabled: true` in the config file. The page appears under **Destinations** once enabled.
 

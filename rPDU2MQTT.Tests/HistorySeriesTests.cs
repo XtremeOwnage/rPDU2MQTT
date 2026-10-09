@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Net;
 using rPDU2MQTT.Classes;
-using rPDU2MQTT.Integrations.EmonCms;
+using rPDU2MQTT.Plugin.EmonCms;
 using rPDU2MQTT.Integrations.HomeAssistant;
 
 namespace rPDU2MQTT.Tests;

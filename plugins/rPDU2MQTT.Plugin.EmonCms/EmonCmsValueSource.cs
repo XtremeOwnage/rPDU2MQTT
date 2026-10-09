@@ -3,7 +3,7 @@ using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Core.Integrations;
 using rPDU2MQTT.Models.Config;
 
-namespace rPDU2MQTT.Integrations.EmonCms;
+namespace rPDU2MQTT.Plugin.EmonCms;
 
 /// <summary>
 /// EmonCMS read the other way round: a flow node valued from a feed's current reading.
@@ -28,11 +28,12 @@ namespace rPDU2MQTT.Integrations.EmonCms;
 /// </para>
 /// </summary>
 public sealed class EmonCmsValueSource
-    : IIntegration, IValueSourcePlugin, IIntegrationApi, IStatusProvider, IFlowValueDiagnostics, IWithheldSources
+    : IIntegration, IValueSourcePlugin, IIntegrationApi, IStatusProvider, IFlowValueDiagnostics, IWithheldSources, IPluginHostUser
 {
     private readonly HttpClient http;
-    private readonly Config cfg;
-    private readonly IPeriodAuditor? auditor;
+    private Config cfg = new();
+    private Func<IPeriodAuditor?> auditorOf = () => null;
+    private IPeriodAuditor? auditor => auditorOf();
 
     // The staleness rules live in the cache (Core), as they do for the MQTT and Modbus ingests, so a
     // reading expires by exactly the same rule wherever it came from.
@@ -44,11 +45,20 @@ public sealed class EmonCmsValueSource
     private int resolved;
     private volatile WithheldSource[] unresolved = [];
 
+    /// <summary>Loaded as a plugin; the host supplies its services through <see cref="UseHost"/>.</summary>
+    public EmonCmsValueSource() => http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+
     public EmonCmsValueSource(Config cfg, HttpClient? http = null, IPeriodAuditor? auditor = null)
     {
         this.cfg = cfg;
-        this.auditor = auditor;
+        auditorOf = () => auditor;
         this.http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+    }
+
+    public void UseHost(IPluginHost host)
+    {
+        cfg = host.Config;
+        auditorOf = () => host.Auditor;
     }
 
     // --- Identity -------------------------------------------------------------------------------------

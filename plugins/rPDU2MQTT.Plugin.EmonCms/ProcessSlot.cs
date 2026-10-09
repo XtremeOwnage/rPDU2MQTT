@@ -1,4 +1,4 @@
-namespace rPDU2MQTT.Integrations.EmonCms;
+namespace rPDU2MQTT.Plugin.EmonCms;
 
 /// <summary>EmonCMS process keys for generated processlists, written as <c>key:feedid</c>.</summary>
 public static class ProcessSlot

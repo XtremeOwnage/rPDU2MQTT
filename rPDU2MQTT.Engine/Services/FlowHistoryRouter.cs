@@ -1,6 +1,5 @@
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.Flow;
-using rPDU2MQTT.Integrations.EmonCms;
 using rPDU2MQTT.Integrations.Prometheus;
 
 namespace rPDU2MQTT.Services;
@@ -8,11 +7,14 @@ namespace rPDU2MQTT.Services;
 /// <summary>
 /// Chooses the backend per call from the live configuration.
 /// </summary>
-public sealed class FlowHistoryRouter(HttpClient http, Config cfg, Core.History.LocalSeriesStore? store = null) : IMeasurementHistory
+public sealed class FlowHistoryRouter(HttpClient http, Config cfg, Core.History.LocalSeriesStore? store = null,
+                                      IEnumerable<Core.History.IHistoryBackend>? plugins = null) : IMeasurementHistory
 {
     private readonly PrometheusFlowHistory prometheus = new(http, cfg);
     private readonly Integrations.Local.LocalFlowHistory? local = store is null ? null : new(cfg, store);
-    private readonly EmonCmsFlowHistory emoncms = new(http, cfg);
+    // Backends contributed by plugins, by id.
+    private readonly Dictionary<string, IMeasurementHistory> plugged = (plugins ?? [])
+        .ToDictionary(p => p.HistoryId, p => p.CreateHistory(http, cfg), StringComparer.OrdinalIgnoreCase);
     private readonly Integrations.HomeAssistant.HomeAssistantHistory homeAssistant = new(http, cfg);
 
     /// <summary>Every backend by id, whichever is chosen, so history can be copied between them.</summary>
@@ -20,9 +22,9 @@ public sealed class FlowHistoryRouter(HttpClient http, Config cfg, Core.History.
     {
         get
         {
-            var all = new Dictionary<string, IMeasurementHistory>(StringComparer.OrdinalIgnoreCase)
+            var all = new Dictionary<string, IMeasurementHistory>(plugged, StringComparer.OrdinalIgnoreCase)
             {
-                ["emoncms"] = emoncms, ["prometheus"] = prometheus, ["homeassistant"] = homeAssistant,
+                ["prometheus"] = prometheus, ["homeassistant"] = homeAssistant,
             };
             if (local is not null) all["local"] = local;
             return all;
@@ -33,10 +35,10 @@ public sealed class FlowHistoryRouter(HttpClient http, Config cfg, Core.History.
     // property that made IMeasurementHistory the template the rest of the contracts were copied from.
     private IMeasurementHistory Current => cfg.History.Provider?.ToLowerInvariant() switch
     {
-        "emoncms" => emoncms,
         "homeassistant" => homeAssistant,
         // Its own store, when one was built: without a directory to keep it in there is nothing to read.
         "local" when local is not null => local,
+        { } id when plugged.TryGetValue(id, out var plugin) => plugin,
         _ => prometheus,
     };
 

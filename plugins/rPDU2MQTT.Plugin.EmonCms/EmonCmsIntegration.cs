@@ -1,13 +1,12 @@
 using System.Text.Json;
 using rPDU2MQTT.Classes;
-using rPDU2MQTT.Integrations.EmonCms;
 using rPDU2MQTT.Core.Flow;
+using rPDU2MQTT.Core.History;
 using rPDU2MQTT.Core.Integrations;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Models.Config;
-using rPDU2MQTT.Services;
 
-namespace rPDU2MQTT.Integrations.EmonCms;
+namespace rPDU2MQTT.Plugin.EmonCms;
 
 /// <summary>
 /// EmonCMS: a destination (measurements over its HTTP input API or its MQTT input), a history provider
@@ -21,32 +20,50 @@ namespace rPDU2MQTT.Integrations.EmonCms;
 /// </para>
 /// </summary>
 public sealed class EmonCmsIntegration
-    : IIntegration, IMeasurementDestination, IMeasurementHistory, IConfigurationPublisher, IStatusProvider, IIntegrationApi
+    : IIntegration, IMeasurementDestination, IMeasurementHistory, IConfigurationPublisher, IStatusProvider, IIntegrationApi,
+      IHistoryBackend, IPluginHostUser, ISingleOwnerLeaseUser
 {
     private static readonly HttpClient http = new();
-    private readonly Config cfg;
-    private readonly EmonCmsStatus status;
-    private readonly EmonCmsFeedSync feeds;
-    private readonly EmonCmsFlowHistory history;
-    private readonly Core.Flow.IFlowValueSource? live;
-    private readonly IMessagePublisher? publisher;
+    private Config cfg = new();
+    private Func<IntegrationStatus> status = () => new();
+    private EmonCmsFeedSync? feeds;
+    private EmonCmsFlowHistory history = null!;
+    private Func<IMessagePublisher?> publisher = () => null;
     // Provisioning writes to EmonCMS, so exactly one process may do it — two racing each other create
     // duplicate feeds. The lease is what makes it once.
-    private readonly ISingleOwnerLease lease;
+    private ISingleOwnerLease lease = new SoleOwnerLease();
+
+    /// <summary>Loaded as a plugin; the host supplies its services through <see cref="UseHost"/>.</summary>
+    public EmonCmsIntegration() => Bind(cfg);
 
     public EmonCmsIntegration(
-        Config cfg, EmonCmsStatus status, EmonCmsFeedSync feeds,
-        Core.Flow.IFlowValueSource? live = null, IMessagePublisher? publisher = null,
-        ISingleOwnerLease? lease = null)
+        Config cfg, IntegrationStatus status, EmonCmsFeedSync feeds,
+        IMessagePublisher? publisher = null, ISingleOwnerLease? lease = null)
     {
         this.lease = lease ?? new SoleOwnerLease();
-        this.cfg = cfg;
-        this.status = status;
+        this.status = () => status;
         this.feeds = feeds;
-        this.live = live;
-        this.publisher = publisher;
-        history = new EmonCmsFlowHistory(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }, cfg);
+        this.publisher = () => publisher;
+        Bind(cfg);
     }
+
+    public void UseHost(IPluginHost host)
+    {
+        status = () => host.Status;
+        feeds = new EmonCmsFeedSync(host.Config, () => host.Snapshots, () => host.LiveValues);
+        publisher = () => host.Publisher;
+        Bind(host.Config);
+    }
+
+    public void UseLease(ISingleOwnerLease lease) => this.lease = lease;
+
+    private void Bind(Config c)
+    {
+        cfg = c;
+        history = new EmonCmsFlowHistory(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }, c);
+    }
+
+    private EmonCmsFeedSync Feeds => feeds ?? throw new InvalidOperationException("EmonCMS is not attached to a host.");
 
     // --- Identity -------------------------------------------------------------------------------------
 
@@ -70,7 +87,7 @@ public sealed class EmonCmsIntegration
     public async Task<(bool Ok, string Detail)> ProbeAsync(Config c, CancellationToken ct)
     {
         if (c.EmonCMS.Transport == EmonCmsTransport.Mqtt)
-            return (publisher is not null, publisher is not null ? "publishing to the broker" : "no broker publisher available");
+            return publisher() is not null ? (true, "publishing to the broker") : (false, "no broker publisher available");
 
         var (ok, detail) = await history.ProbeAsync(ct);
         return (ok, detail);
@@ -90,9 +107,9 @@ public sealed class EmonCmsIntegration
         if (!Enabled(c)) return new(HealthLevel.Off, "Disabled");
         if (Misconfigured(c) is { } fault) return new(HealthLevel.Bad, "Misconfigured", fault);
 
-        var last = status.Snapshot();
-        if (!status.HasAttempted) return new(HealthLevel.Warn, "Waiting", $"{c.EmonCMS.Transport} · no export attempted yet");
-        return last.Ok == false
+        var last = status().For(Id);
+        if (last?.LastAttemptUtc is null) return new(HealthLevel.Warn, "Waiting", $"{c.EmonCMS.Transport} · no export attempted yet");
+        return last.LastOk == false
             ? new(HealthLevel.Bad, "Error", last.LastError ?? "Last export failed")
             : new(HealthLevel.Good, "Exporting", $"{c.EmonCMS.Transport} · {last.Count} values");
     }
@@ -113,9 +130,9 @@ public sealed class EmonCmsIntegration
         {
             if (cfg.EmonCMS.Transport == EmonCmsTransport.Mqtt)
             {
-                if (publisher is null) throw new InvalidOperationException("No broker publisher is available for the EmonCMS MQTT transport.");
+                var broker = publisher() ?? throw new InvalidOperationException("No broker publisher is available for the EmonCMS MQTT transport.");
                 foreach (var (device, values) in payloads)
-                    await publisher.PublishAsync(
+                    await broker.PublishAsync(
                         MetricsHelper.EmonCmsMqttTopic(device, cfg), JsonSerializer.Serialize(values),
                         retain: false, ct, pass.AtUtc);
             }
@@ -124,13 +141,13 @@ public sealed class EmonCmsIntegration
                 await SendViaHttp(combined, ct);
             }
 
-            status.RecordSuccess(total);
+            status().RecordSuccess(Id, total);
         }
         catch (Exception ex)
         {
             // Recorded here for the GUI's own indicator, then rethrown so the host records it against this
             // integration on the Status board. One destination failing never stops the others.
-            status.RecordFailure(ex.Message);
+            status().RecordFailure(Id, ex.Message);
             throw;
         }
     }
@@ -167,7 +184,7 @@ public sealed class EmonCmsIntegration
     {
         var message = "Another instance is provisioning EmonCMS feeds.";
         await lease.RunIfOwnerAsync("emoncms:feeds",
-            async token => message = (await feeds.ReconcileAsync(pass.Snapshot, token)).Message, ct);
+            async token => message = (await Feeds.ReconcileAsync(pass.Snapshot, token)).Message, ct);
         return message;
     }
 
@@ -176,7 +193,7 @@ public sealed class EmonCmsIntegration
     {
         var message = "Another instance is managing EmonCMS feeds.";
         await lease.RunIfOwnerAsync("emoncms:feeds",
-            async token => message = (await feeds.DeleteStaleAsync(pass.Snapshot, inputs: true, feeds: true, token)).Message, ct);
+            async token => message = (await Feeds.DeleteStaleAsync(pass.Snapshot, inputs: true, feeds: true, token)).Message, ct);
         return message;
     }
 
@@ -189,7 +206,7 @@ public sealed class EmonCmsIntegration
             ActionEffect.Read,
             async (_, ct) =>
             {
-                var plan = await feeds.FindStaleAsync(feeds.Merged(), ct);
+                var plan = await Feeds.FindStaleAsync(Feeds.Merged(), ct);
                 return new
                 {
                     ok = plan.Refused is null,
@@ -214,7 +231,7 @@ public sealed class EmonCmsIntegration
                 object? result = new { ok = false, message = "Another instance is managing EmonCMS feeds." };
                 await lease.RunIfOwnerAsync("emoncms:feeds", async token =>
                 {
-                    var r = await feeds.DeleteAllAsync(token);
+                    var r = await Feeds.DeleteAllAsync(token);
                     result = new { ok = r.Ok, message = r.Message };
                 }, ct);
                 return result;
@@ -226,7 +243,7 @@ public sealed class EmonCmsIntegration
         object? result = new { ok = false, message = "Another instance is managing EmonCMS feeds." };
         await lease.RunIfOwnerAsync("emoncms:feeds", async token =>
         {
-            var r = await feeds.DeleteStaleAsync(feeds.Merged(), inputs, feedsToo, token);
+            var r = await Feeds.DeleteStaleAsync(Feeds.Merged(), inputs, feedsToo, token);
             result = new { ok = r.Ok, message = r.Message };
         }, ct);
         return result;
@@ -239,4 +256,12 @@ public sealed class EmonCmsIntegration
         => history.ValuesAtAsync(nodeIds, metric, atUtc, ct);
 
     public Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct) => history.ProbeAsync(ct);
+
+    public string HistoryId => Id;
+
+    public IMeasurementHistory CreateHistory(HttpClient client, Config c) => new EmonCmsFlowHistory(client, c);
+
+    public IHistoryTarget? CreateHistoryTarget(HttpClient client, Config c) => new EmonCmsHistoryTarget(client, c);
+
+    public string? HistoryUnavailable(Config c) => string.IsNullOrWhiteSpace(c.EmonCMS.Url) ? "EmonCMS.Url is not set" : null;
 }

@@ -87,13 +87,9 @@ public static class ServiceConfiguration
 
         services.AddSingleton<Services.EmonCmsStatus>();
 
-        AddCache(services, cfg);
-
         services.AddSingleton<DiscoveryCoordinator>();
 
         services.AddSingleton<Services.HaEnergyDashboardSync>();
-
-        services.AddSingleton<Services.EmonCmsFeedSync>();
 
         // Live values written directly by in-process sources.
         var liveValues = new Core.Flow.FlowValueCache();
@@ -116,12 +112,16 @@ public static class ServiceConfiguration
         var plugins = Plugins.PluginLoader.LoadAll(cfg.DisabledPlugins, m => Log.Information(m));
         services.AddSingleton(new Plugins.PluginCatalog(plugins));
         var pluginIntegrations = plugins.SelectMany(p => p.Integrations).ToList();
+        var pluginHost = new Plugins.PluginHost(cfg);
+        services.AddSingleton(pluginHost);
         if (pluginIntegrations.Count > 0)
         {
             Plugins.PluginLoader.Configure(pluginIntegrations, cfg, m => Log.Warning(m));
+            foreach (var user in pluginIntegrations.OfType<Core.Integrations.IPluginHostUser>()) user.UseHost(pluginHost);
             foreach (var integration in pluginIntegrations)
                 services.AddSingleton(typeof(Core.Integrations.IIntegration), integration);
         }
+        AddCache(services, cfg, pluginIntegrations.OfType<Core.History.IHistoryBackend>().ToList());
         PluginSections = Plugins.PluginLoader.Sections(pluginIntegrations).ToList();
         // Plugin source types offered in the node editor.
         Services.Gui.ConfigSchema.PluginSourceTypes = pluginIntegrations
@@ -132,9 +132,6 @@ public static class ServiceConfiguration
         // Built-in sources are constructed once and registered as that same instance.
         var haSource = new Integrations.HomeAssistant.HomeAssistantValueSource(cfg);
         services.AddSingleton<Core.Integrations.IIntegration>(haSource);
-        services.AddSingleton(sp => new Integrations.EmonCms.EmonCmsValueSource(
-            cfg, auditor: sp.GetService<Core.Flow.IPeriodAuditor>()));
-        services.AddSingleton<Core.Integrations.IIntegration>(sp => sp.GetRequiredService<Integrations.EmonCms.EmonCmsValueSource>());
         // The built-in ingests as integrations, using the same instances the flow reads.
         services.AddSingleton<Core.Integrations.IIntegration>(sp => sp.GetRequiredService<Services.EnergyFlowMqttSourceService>());
         services.AddSingleton<Core.Integrations.IIntegration>(sp => sp.GetRequiredService<Services.EnergyFlowModbusSourceService>());
@@ -150,8 +147,7 @@ public static class ServiceConfiguration
             services.AddSingleton(sp => new Services.EnergyAggregationService(
                 cfg,
                 new Core.Flow.CompositeFlowValueSource(
-                    [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), liveValues, haSource,
-                     sp.GetRequiredService<Integrations.EmonCms.EmonCmsValueSource>(), .. pluginSources]),
+                    [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), liveValues, haSource, .. pluginSources]),
                 sp.GetRequiredService<Core.Flow.IEnergyStore>(),
                 sp.GetRequiredService<Core.ISnapshotCache>(),
                 sp.GetService<LeaderState>()));
@@ -170,7 +166,6 @@ public static class ServiceConfiguration
                 [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(),
                 liveValues,
                 haSource,
-                sp.GetRequiredService<Integrations.EmonCms.EmonCmsValueSource>(),
                 .. pluginSources,
                 // Derived totals and history last: the composite takes the first fresh reading.
                 sp.GetRequiredService<Services.EnergyAggregationService>(),
@@ -179,7 +174,7 @@ public static class ServiceConfiguration
                     : [])])
             : new Core.Flow.CompositeFlowValueSource(
                 [sp.GetRequiredService<Services.EnergyFlowMqttSourceService>(), liveValues,
-                 haSource, sp.GetRequiredService<Integrations.EmonCms.EmonCmsValueSource>(), .. pluginSources,
+                 haSource, .. pluginSources,
                  .. (cfg.History.Enabled && cfg.History.ValueFallback
                      ? new Core.Flow.IFlowValueSource[] { sp.GetRequiredService<Core.Flow.HistoryValueSource>() }
                      : [])]), cfg));
@@ -221,6 +216,7 @@ public static class ServiceConfiguration
         // Hands the cluster lease and the plugin store to integrations that ask for them.
         services.AddSingleton(sp =>
         {
+            pluginHost.Attach(sp);
             var registry = new Core.Integrations.IntegrationRegistry(sp.GetServices<Core.Integrations.IIntegration>());
             var lease = sp.GetRequiredService<Core.Integrations.ISingleOwnerLease>();
             foreach (var user in registry.All.OfType<Core.Integrations.ISingleOwnerLeaseUser>()) user.UseLease(lease);
@@ -328,8 +324,10 @@ public static class ServiceConfiguration
     }
 
     /// <summary>Registers the history store, router, copy service and writer.</summary>
-    public static void AddHistory(IServiceCollection services, Config cfg)
+    /// <param name="backends">History backends contributed by plugins.</param>
+    public static void AddHistory(IServiceCollection services, Config cfg, IReadOnlyList<Core.History.IHistoryBackend>? backends = null)
     {
+        backends ??= [];
         var historyPath = !string.IsNullOrWhiteSpace(cfg.History.LocalPath) ? cfg.History.LocalPath
             : Environment.GetEnvironmentVariable("RPDU2MQTT_HISTORY_DIRECTORY") is { Length: > 0 } mounted ? mounted
             : Path.Combine(AppContext.BaseDirectory, "history");
@@ -344,16 +342,18 @@ public static class ServiceConfiguration
         // Short timeout so a dashboard read cannot hang on a slow backend.
         services.AddSingleton<Core.Flow.IMeasurementHistory>(sp =>
             new Services.FlowHistoryRouter(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }, cfg,
-                                           sp.GetRequiredService<Core.History.LocalSeriesStore>()));
+                                           sp.GetRequiredService<Core.History.LocalSeriesStore>(), backends));
         // Copies read weeks at a time, so use a longer timeout.
         services.AddSingleton(sp =>
         {
             var store = sp.GetRequiredService<Core.History.LocalSeriesStore>();
             var slow = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
-            return new Services.HistoryCopyService(cfg, new Services.FlowHistoryRouter(slow, cfg, store).Backends,
-                [new Integrations.Local.LocalHistoryTarget(cfg, store), new Integrations.EmonCms.EmonCmsHistoryTarget(slow, cfg)],
+            return new Services.HistoryCopyService(cfg, new Services.FlowHistoryRouter(slow, cfg, store, backends).Backends,
+                [new Integrations.Local.LocalHistoryTarget(cfg, store),
+                 .. backends.Select(b => b.CreateHistoryTarget(slow, cfg)).OfType<Core.History.IHistoryTarget>()],
                 store, sp.GetRequiredService<Core.Flow.IFlowValueSource>(),
-                sp.GetService<Core.ISnapshotCache>(), sp.GetService<LeaderState>());
+                sp.GetService<Core.ISnapshotCache>(), sp.GetService<LeaderState>(),
+                backends.ToDictionary(b => b.HistoryId, b => (Func<string?>)(() => b.HistoryUnavailable(cfg)), StringComparer.OrdinalIgnoreCase));
         });
         services.AddHostedService(sp => new Services.LocalHistoryWriterService(
             cfg, sp.GetRequiredService<Core.Flow.IFlowValueSource>(),
@@ -362,9 +362,9 @@ public static class ServiceConfiguration
             sp.GetService<LeaderState>()));
     }
 
-    public static void AddCache(IServiceCollection services, Config cfg)
+    public static void AddCache(IServiceCollection services, Config cfg, IReadOnlyList<Core.History.IHistoryBackend>? historyBackends = null)
     {
-        AddHistory(services, cfg);
+        AddHistory(services, cfg, historyBackends);
 
         services.AddSingleton<Core.Flow.IPeriodAuditor>(sp =>
         {

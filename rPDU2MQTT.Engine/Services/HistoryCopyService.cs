@@ -10,7 +10,8 @@ namespace rPDU2MQTT.Services;
 /// <summary>Copies every node's history from one backend to another in the background, filling only what the destination lacks.</summary>
 public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, IMeasurementHistory> sources,
                                        IEnumerable<IHistoryTarget> targets, LocalSeriesStore store, IFlowValueSource live,
-                                       ISnapshotCache? snapshots = null, LeaderState? leader = null)
+                                       ISnapshotCache? snapshots = null, LeaderState? leader = null,
+                                       IReadOnlyDictionary<string, Func<string?>>? unavailable = null)
 {
     // Steps per read: EmonCMS refuses more than 8928 points, Prometheus more than 11000.
     private const int StepsPerRead = 8000;
@@ -37,7 +38,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
     public string? SourceUnavailable(string id) => id switch
     {
         _ when !sources.ContainsKey(id) => "not a history backend",
-        "emoncms" when string.IsNullOrWhiteSpace(cfg.EmonCMS.Url) => "EmonCMS.Url is not set",
+        _ when unavailable?.TryGetValue(id, out var why) == true => why(),
         "prometheus" when string.IsNullOrWhiteSpace(cfg.History.PrometheusUrl) => "History.PrometheusUrl is not set",
         "homeassistant" when string.IsNullOrWhiteSpace(cfg.HASS.EnergyDashboard.Url) || string.IsNullOrWhiteSpace(cfg.HASS.EnergyDashboard.Token)
             => "the Home Assistant URL and token are not set",
