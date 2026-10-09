@@ -33,6 +33,7 @@
 		<ProjectReference Include="..\rPDU2MQTT.Web\rPDU2MQTT.Web.csproj" />
 		<!-- Bundled plugins: built with the bridge, not referenced by it. -->
 		<ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.EmonCms\rPDU2MQTT.Plugin.EmonCms.csproj" ReferenceOutputAssembly="false" Private="false" />
+		<ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.FloorPlan\rPDU2MQTT.Plugin.FloorPlan.csproj" ReferenceOutputAssembly="false" Private="false" />
 		<ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.Tigo\rPDU2MQTT.Plugin.Tigo.csproj" ReferenceOutputAssembly="false" Private="false" />
 		<ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.Vertiv\rPDU2MQTT.Plugin.Vertiv.csproj" ReferenceOutputAssembly="false" Private="false" />
 	</ItemGroup>
@@ -57,6 +58,7 @@
 	<!-- Copy each bundled plugin's DLL to bundled-plugins/<name>/ in the build and publish output. -->
 	<ItemGroup>
 		<BundledPlugin Include="..\plugins\rPDU2MQTT.Plugin.EmonCms\rPDU2MQTT.Plugin.EmonCms.csproj" PluginDir="emoncms" />
+		<BundledPlugin Include="..\plugins\rPDU2MQTT.Plugin.FloorPlan\rPDU2MQTT.Plugin.FloorPlan.csproj" PluginDir="floorplan" />
 		<BundledPlugin Include="..\plugins\rPDU2MQTT.Plugin.Tigo\rPDU2MQTT.Plugin.Tigo.csproj" PluginDir="tigo" />
 		<BundledPlugin Include="..\plugins\rPDU2MQTT.Plugin.Vertiv\rPDU2MQTT.Plugin.Vertiv.csproj" PluginDir="vertiv" />
 	</ItemGroup>

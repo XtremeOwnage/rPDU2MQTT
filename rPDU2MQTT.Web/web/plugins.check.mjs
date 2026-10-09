@@ -29,6 +29,9 @@ const labels = query(getEl('nav'), 'a', true).map(a => a.dataset.label);
 for (const gone of ['Vertiv rPDU', 'Overrides', 'Live Data', 'PDU Control', 'Paths'])
   if (labels.includes(gone)) fail(`"${gone}" is in the nav with Vertiv not loaded`);
 if (labels.includes('EmonCMS')) fail('"EmonCMS" is in the nav with EmonCMS not loaded');
+if (labels.includes('Floor Plans')) fail('"Floor Plans" is in the nav with the floor plan plugin not loaded');
+for (const kept of ['Panel Schedule', 'Nodes', 'Node Data'])
+  if (!labels.includes(kept)) fail(`"${kept}" left the nav with the floor plan plugin not loaded`);
 
 const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Plugins');
 if (!link) fail('there is no Plugins page');
@@ -45,4 +48,4 @@ sw('Tigo TAP').checked = false; sw('Tigo TAP').onchange();
 if (JSON.stringify(config.DisabledPlugins) !== '["tigo"]') fail(`DisabledPlugins is ${JSON.stringify(config.DisabledPlugins)}`);
 if (!query(link, '.nav-badge', true).length) fail('the Plugins page shows no unsaved change');
 
-console.log('plugins: each plugin has a switch that edits DisabledPlugins, the PDU pages leave the nav when Vertiv is not loaded, and the EmonCMS page when EmonCMS is not');
+console.log('plugins: each plugin has a switch that edits DisabledPlugins, the PDU pages leave the nav when Vertiv is not loaded, the EmonCMS page when EmonCMS is not, and Floor Plans when its plugin is not');

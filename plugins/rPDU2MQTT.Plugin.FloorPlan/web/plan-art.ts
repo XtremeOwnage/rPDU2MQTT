@@ -1,6 +1,5 @@
 // What the floor plans are drawn with (#463, #464): surface textures at their real size, a pictogram per kind of
 // placed item, and doors and windows as an architect draws them.
-import { svgEl } from './helpers.js';
 
 /// Surfaces a room, outdoor zone or the ground can have, with their names.
 export const PLAN_SURFACES: [string, string][] = [

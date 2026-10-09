@@ -2,19 +2,6 @@
 // (#463), the outlets, fixtures, devices and utility gear placed on it and the cable runs between them (#464,
 // #465), shaded live by what each room draws (#466), with a trace that finds an outlet's breaker from the
 // outlet (#468). One Edit mode with a tool palette, undo and redo, and sizes in feet or metres.
-import { activate, api, btn, closeSheet, el, ensure, navLink, openSheet, svgEl, toast, formatMeasure } from '../helpers.js';
-import { state } from '../state.js';
-import { refreshDirty } from '../dirty.js';
-import { sparkline } from '../charts.js';
-import { analyse } from '../circuit-finder.js';
-import { circuitSession } from '../circuit-session.js';
-import { type Pt, planDownstream, planProtectedBy, planRect, planArea, planCentroid, planShapeAt, planSnap, planMove, planClamp, planRound, planScaleMax, planNearestOnSegment, planNearestWall, planPathLength, planIsBox, planBounds, planContains } from '../plan-geometry.js';
-import { planUnitSystem, planFmtLen, planFmtArea, planParseLen, planGridStep, planSnapStep, planScaleBar, planDefaultPlot } from '../plan-units.js';
-import { planHistory } from '../plan-history.js';
-import { searchSelect, type Choice } from '../search-select.js';
-import { makeMenu } from '../context-menu.js';
-import { planSolve, planSharedCorners, planCornerAngle, planEdgeCorners, planRefsAfterInsert, planRefsAfterRemove, planRefsWithout, type PlanRef, type PlanConstraint } from '../plan-constraints.js';
-import { PLAN_FOOTPRINTS, planFootprintArt, planTexture, planTextureId, PLAN_SURFACE_COLOURS, PLAN_SURFACES, PLAN_GROUNDS, PLAN_KINDS, PLAN_SUPPLY_KINDS, PLAN_OPENINGS, planTextures, planGlyph, planOpening, planCircuitColor } from '../plan-art.js';
 
 type Place = {
   id: string; name: string; kind: string; site: string; floor: string | null; value: number | null; state: string;
@@ -81,11 +68,10 @@ function fpToolIcon(tool: string): any {
   return s;
 }
 
-export function addFloorPlanSection(nav: any, sections: any) {
-  const link = navLink(nav, 'Floor Plans', '⌗');
-  link.dataset.section = 'EnergyFlow.Sites,EnergyFlow.Placements,EnergyFlow.Runs,EnergyFlow.AutoLocations,EnergyFlow.Panels';
-  const sec = el('div', { class: 'section fp' });
-  sections.appendChild(sec);
+/// Mounted by the host on first open; `show` runs on every open.
+export default function mount(sec: any, host: any) {
+  ({ api, btn, closeSheet, el, ensure, openSheet, svgEl, toast, formatMeasure, state, refreshDirty, sparkline, analyse, circuitSession, searchSelect, makeMenu } = host);
+  sec.classList.add('fp');
   sec.appendChild(el('h2', { text: 'Floor Plans' }));
   sec.appendChild(el('div', { class: 'desc' },
     'Each floor at real size: rooms and outdoor zones, doors and windows, and the outlets, lights, panels, meters '
@@ -3047,10 +3033,9 @@ export function addFloorPlanSection(nav: any, sections: any) {
   });
   window.addEventListener('keyup', (e: any) => { if (e.key === ' ' && spaceDown) { spaceDown = false; svg.classList.remove('is-panning'); } });
 
-  link.onclick = () => { activate(link, sec); render(); load(); readStorage(); };
   // The live view keeps up with the house while it is on screen.
   setInterval(() => { if (sec.classList.contains('active') && !dragging && mode === 'view' && period === 'now') load(); }, 10000);
-  return { link, sec };
+  return { show: () => { render(); load(); readStorage(); } };
 }
 
 
