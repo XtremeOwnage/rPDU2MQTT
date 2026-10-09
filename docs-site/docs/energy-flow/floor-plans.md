@@ -4,7 +4,7 @@ title: Floor plans
 
 # Floor plans
 
-**Energy Flow › Floor Plans**. Each floor at real size: rooms, outdoor zones, doors, windows, placed items and the cable runs between them. Rooms are shaded by what they draw.
+**Energy Flow › Floor Plans**. Each floor at real size: rooms, outdoor zones, doors, windows, placed items and the cable runs between them. Rooms are shaded by what they draw. Bundled plugin: `plugins/rPDU2MQTT.Plugin.FloorPlan`.
 
 ![Floor plan with wiring](../assets/screenshots/floor-plan.webp)
 

@@ -21,8 +21,7 @@ import { addGroupsSection } from './sections/groups.js';
 import { addBalanceSection } from './sections/balance.js';
 import { addCircuitFinderSection } from './sections/circuit-finder.js';
 import { addPanelScheduleSection } from './sections/panel-schedule.js';
-import { addFloorPlanSection } from './sections/floor-plan.js';
-import { pluginPages, pluginPageTool, integrationIds } from './plugin-pages.js';
+import { pluginPages, pluginPageTool, integrationIds, type PluginPage } from './plugin-pages.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
 import { addTagsSection } from './sections/tags-page.js';
@@ -351,14 +350,16 @@ function renderList(node: any, arr: any[], path: string[]) {
 
 // Nav groups; ungrouped schema sections fall into System.
 /// `after` names the schema section(s) a tool follows; without it a tool goes to the end of its group.
+/// `page` holds a plugin page's place; it is dropped when that plugin is not loaded.
 type NavItem = { schema: string, child?: boolean }
-  | { tool: (nav: any, sections: any) => any, child?: boolean, after?: string | string[] };
+  | { tool: (nav: any, sections: any) => any, child?: boolean, after?: string | string[] }
+  | { page: string };
 /** Anchors for the PDU tabs, in order of preference. */
 const PDU_BLOCK = ['Overrides', 'Pdus'];
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   // Sources: the PDU tabs are children of the Vertiv rPDU page.
   { title: 'Sources', items: [{ tool: addLiveDataSection, child: true, after: PDU_BLOCK }, { tool: addControlSection, child: true, after: PDU_BLOCK }, { tool: addPathsSection, child: true, after: PDU_BLOCK }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addBalanceSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { tool: addFloorPlanSection }, { tool: addNodeDataSection }] },
+  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addBalanceSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { page: 'floor-plans' }, { tool: addNodeDataSection }] },
   { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   { title: 'System', items: [{ tool: addHomeSection }, { tool: addPluginsSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
@@ -655,8 +656,15 @@ export function build() {
     if (HIDDEN.has(n.key)) return;
     groupFor(n.group || 'System').items.push({ schema: n.key, child: n.key === 'Overrides' });
   });
-  const navItems = NAV_GROUPS.map(g => g.items.filter(it => !(noPdu && 'after' in it && it.after === PDU_BLOCK)));
-  pluginPages.forEach(p => (navItems[NAV_GROUPS.findIndex(g => g.title === p.group)] ?? navItems[navItems.length - 1]).push({ tool: pluginPageTool(p) }));
+  const placed = new Set<PluginPage>();
+  const navItems = NAV_GROUPS.map(g => g.items.filter(it => !(noPdu && 'after' in it && it.after === PDU_BLOCK)).flatMap(it => {
+    if (!('page' in it)) return [it];
+    const p = pluginPages.find(pp => pp.id === it.page && !placed.has(pp));
+    if (!p) return [];
+    placed.add(p);
+    return [{ tool: pluginPageTool(p) }];
+  }));
+  pluginPages.filter(p => !placed.has(p)).forEach(p => (navItems[NAV_GROUPS.findIndex(g => g.title === p.group)] ?? navItems[navItems.length - 1]).push({ tool: pluginPageTool(p) }));
   navItems.forEach((list, i) => list.forEach(it => {
     // Place a tool after its first present anchor, behind tools already there; otherwise at the end.
     const items = navGroups[i].items;

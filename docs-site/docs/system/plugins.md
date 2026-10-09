@@ -20,6 +20,7 @@ title: Plugins
 - Every plugin is on by default.
 - With **Vertiv rPDU** off, its pages (**Vertiv rPDU**, **Overrides**, **Live Data**, **PDU Control**, **Paths**) are hidden.
 - With **EmonCMS** off, its page is hidden, nodes cannot read EmonCMS feeds, and `emoncms` is no longer a history backend. Its settings are kept.
+- With **Floor Plans** off, its page is hidden. Sites, rooms, placements and runs stay in `EnergyFlow` and keep working: location dropdowns, location totals, **Panel Schedule** and the Home Assistant area sync.
 
 ## In YAML
 
@@ -28,4 +29,4 @@ DisabledPlugins:
   - vertiv
 ```
 
-Each entry is a plugin folder name (`vertiv`, `tigo`, `emoncms`) or, for a loose DLL in `/app/plugins`, its file name without `.dll`. Case-insensitive.
+Each entry is a plugin folder name (`vertiv`, `tigo`, `emoncms`, `floorplan`) or, for a loose DLL in `/app/plugins`, its file name without `.dll`. Case-insensitive.

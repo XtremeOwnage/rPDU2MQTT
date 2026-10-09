@@ -1,5 +1,5 @@
 // Plugin-provided GUI pages, mounted on first open.
-import { activate, api, btn, el, ensure, navLink, toast } from './helpers.js';
+import { activate, api, btn, closeSheet, el, ensure, formatMeasure, navLink, openSheet, svgEl, toast } from './helpers.js';
 import { state } from './state.js';
 import { refreshDirty } from './dirty.js';
 import { saveConfig } from './sections/flow.js';
@@ -9,6 +9,11 @@ import { timelineStrip } from './sections/timeline.js';
 import { stepToFit } from './sections/trends-shared.js';
 import { tempUnit, toTemp, fromTemp, fmtTemp } from './temp-units.js';
 import { setManagedRules } from './managed-nodes.js';
+import { sparkline } from './charts.js';
+import { analyse } from './circuit-finder.js';
+import { circuitSession } from './circuit-session.js';
+import { searchSelect } from './search-select.js';
+import { makeMenu } from './context-menu.js';
 
 export type PluginPage = { integration: string; id: string; title: string; group: string; icon?: string; configSection?: string };
 
@@ -27,6 +32,7 @@ export async function loadPluginPages() {
 }
 
 const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection, timelineStrip, stepToFit,
+  openSheet, closeSheet, svgEl, formatMeasure, sparkline, analyse, circuitSession, searchSelect, makeMenu,
   temp: { unit: tempUnit, to: toTemp, from: fromTemp, fmt: fmtTemp } });
 
 export function pluginPageTool(p: PluginPage) {
