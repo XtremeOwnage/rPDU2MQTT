@@ -5,7 +5,12 @@ changelog:
   categories:
     - title: Breaking Changes
       labels:
+        - impact/breaking
         - kind/major
+    - title: Migrations and Config Changes
+      labels:
+        - impact/migration
+        - impact/config
     - title: Features
       labels:
         - kind/feature

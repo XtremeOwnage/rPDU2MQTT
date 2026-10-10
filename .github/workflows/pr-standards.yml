@@ -58,6 +58,43 @@ jobs:
               errors.push(`Title prefix [${prefix}] requires label ${kinds[prefix]}, but the PR has ${kindLabels[0]}.`);
             }
 
+            // Impact labels inferred from changed paths. Never removed, and not re-added once someone has removed one.
+            const impactPaths = {
+              'impact/config': [
+                /^rPDU2MQTT\.Core\/Models\/Config\//,
+                /^rPDU2MQTT\.Core\/ConfigSchema\.cs$/,
+                /^rPDU2MQTT\.Core\/Integrations\/PluginSchemaSections\.cs$/,
+                /^Examples\/Configuration\/config\.spec\.yaml$/,
+                /^Examples\/Kubernetes\/crd\/crd\.yaml$/,
+                /^charts\/rpdu2mqtt\/files\/rpduconfig-crd\.yaml$/,
+              ],
+              'impact/helm': [/^charts\//],
+            };
+            const files = await github.paginate(github.rest.pulls.listFiles, { ...context.repo, pull_number: pr.number, per_page: 100 });
+            const wanted = new Set(Object.entries(impactPaths)
+              .filter(([, res]) => files.some(f => res.some(re => re.test(f.filename))))
+              .map(([label]) => label));
+            if (prefix === 'Major') wanted.add('impact/breaking');
+            const events = await github.paginate(github.rest.issues.listEvents, { ...context.repo, issue_number: pr.number, per_page: 100 });
+            const removed = new Set(events.filter(e => e.event === 'unlabeled').map(e => e.label.name));
+            const missing = [...wanted].filter(l => !labels.includes(l) && !removed.has(l));
+            if (missing.length) {
+              try {
+                await github.rest.issues.addLabels({ ...context.repo, issue_number: pr.number, labels: missing });
+                labels = labels.concat(missing);
+                core.info(`Added ${missing.join(', ')} from changed paths.`);
+              } catch (e) {
+                core.warning(`Could not add ${missing.join(', ')}: ${e.message}`);
+              }
+            }
+
+            if (labels.includes('impact/breaking') && prefix !== 'Major') {
+              errors.push('impact/breaking requires the [Major] prefix.');
+            }
+            if (prefix === 'Major' && !labels.includes('impact/breaking')) {
+              errors.push('[Major] requires the impact/breaking label.');
+            }
+
             if (errors.length) {
               errors.forEach(e => core.error(e));
               core.setFailed('PR does not follow the standards in CONTRIBUTING.md.');
