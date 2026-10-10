@@ -4,7 +4,7 @@ using rPDU2MQTT.Services.Gui;
 
 namespace rPDU2MQTT.Plugin.Locations;
 
-/// <summary>What the Floor Plans page asks for: totals per place, a place's history, tags to rooms, and rooms as Home Assistant areas.</summary>
+/// <summary>Floor Plans page actions.</summary>
 internal sealed class LocationEndpoints(IPluginHost host)
 {
     private PduData Merged()
@@ -185,7 +185,7 @@ internal sealed class LocationEndpoints(IPluginHost host)
         return new { ok = true, tags, plan = LocationMigration.Plan(LocationSettings.Of(cfg), flow, mappings) };
     }
 
-    /// <summary>Rooms as Home Assistant areas (#467): what would change, or the change.</summary>
+    /// <summary>Rooms as Home Assistant areas (#467).</summary>
     public async Task<object> AreasAsync(Config cfg, bool apply, CancellationToken ct)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);

@@ -166,8 +166,7 @@ PlanStorage:
 
 `Circuit` is `<panel id>/<breaker number>`. Ids are unique across sites, floors, rooms and areas.
 
-Where a node is, where a panel is mounted, and the rooms a circuit serves are kept on each one under `Ext.locations`
-and set in the node editor and **Panel Schedule** under **Plugin settings**:
+Node, panel and breaker places (`Ext.locations`, under **Plugin settings**):
 
 ```yaml
 EnergyFlow:
@@ -180,4 +179,4 @@ EnergyFlow:
         - { Number: "12", Ext: { locations: { Rooms: [kitchen] } } }
 ```
 
-Older configs with these under `EnergyFlow`, or `Location` and `Rooms` set directly, are moved on load.
+Older layouts migrate on load.

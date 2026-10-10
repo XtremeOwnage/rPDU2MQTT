@@ -4,15 +4,11 @@ using rPDU2MQTT.Core.Integrations;
 
 namespace rPDU2MQTT.Models.Config;
 
-/// <summary>
-/// Sites, placements, runs and location rules used to live in EnergyFlow, and each node's, panel's and breaker's
-/// place on the entity itself. They now belong to the Locations plugin: its section, and its settings on each entity.
-/// </summary>
+/// <summary>Moves pre-plugin location settings to Plugins.locations and Ext.locations.</summary>
 public static class LegacyLocations
 {
     public const string PluginId = "locations";
 
-    /// <summary>Moves anything still in the old places to the plugin's, leaving what the plugin already has alone.</summary>
     public static void Migrate(rPDU2MQTT.Classes.Config config)
     {
         var flow = config.EnergyFlow;
@@ -55,7 +51,6 @@ public static class LegacyLocations
             }
         }
 
-        // Disabling Floor Plans now disables the plugin that replaced it.
         if (config.DisabledPlugins is { } off)
             for (var i = 0; i < off.Count; i++)
                 if (string.Equals(off[i]?.Trim(), "floorplan", StringComparison.OrdinalIgnoreCase)) off[i] = PluginId;

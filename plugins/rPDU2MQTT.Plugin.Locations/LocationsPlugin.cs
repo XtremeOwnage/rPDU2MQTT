@@ -3,10 +3,7 @@ using rPDU2MQTT.Services.Gui;
 
 namespace rPDU2MQTT.Plugin.Locations;
 
-/// <summary>
-/// Sites, floors, rooms and areas: where each node, panel and circuit is, energy totalled per place, places
-/// published as tiers and Home Assistant areas, and the Floor Plans page.
-/// </summary>
+/// <summary>Sites, floors, rooms and areas.</summary>
 public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntityExtensionProvider, IExportContributor, IAreaProvider,
     IIntegrationApi, IPluginHostUser, IGuiPageProvider, IStatusProvider
 {
@@ -25,7 +22,7 @@ public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntity
 
     public Type ConfigType => typeof(LocationSettings);
 
-    /// <summary>Settings are read from the configuration each time, so a page's unsaved edits can be totalled too.</summary>
+    /// <summary>Read per call, so unsaved page edits can be totalled.</summary>
     public void ApplyConfig(object settings) { }
 
     public IReadOnlyDictionary<string, Type> EntityExtensions { get; } = new Dictionary<string, Type>
@@ -76,7 +73,6 @@ public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntity
         LocationIndex.For(cfg).All.Where(e => kinds is null || kinds.Contains(e.Kind))
             .Select(e => new[] { e.Id, Describe(e) }).ToArray();
 
-    /// <summary>Indented by depth, so the tree reads in a flat list.</summary>
     private static string Describe(LocationEntry e) => e.Kind switch
     {
         LocationKind.Site => e.Label,
@@ -85,7 +81,7 @@ public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntity
         _ => "    " + e.Label,
     };
 
-    /// <summary>The configuration a page sent, as it is on screen before Save; the saved one when it sent none.</summary>
+    /// <summary>The posted config, else the saved one.</summary>
     private static Config Posted(IntegrationActionContext ctx) =>
         string.IsNullOrWhiteSpace(ctx.Body) ? ctx.Config : ConfigSchema.FromJson(ctx.Body);
 

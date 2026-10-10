@@ -36,10 +36,8 @@ public sealed class LocationIndex
         return index;
     }
 
-    /// <summary>The place a node names as its own, as written; blank when it names none.</summary>
     public static string OwnLocation(EnergyFlowNode node) => EntityExtensions.Read<NodeLocation>(node, LocationSettings.PluginId).Location?.Trim() ?? "";
 
-    /// <summary>The rooms and areas a breaker's circuit serves, as written.</summary>
     public static List<string> ServedRooms(BreakerConfig breaker) =>
         (EntityExtensions.Read<BreakerRooms>(breaker, LocationSettings.PluginId).Rooms ?? new()).Where(r => !string.IsNullOrWhiteSpace(r)).ToList();
 

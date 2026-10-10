@@ -1881,7 +1881,6 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
         app.MapPost("/api/integrations/{id}/{action}", (string id, string action, HttpContext ctx) => RunAction(id, action, ctx, readOnly: false));
 
-        // An action that only reads, for links and pickers that fetch with GET.
         app.MapGet("/api/integrations/{id}/{action}", (string id, string action, HttpContext ctx) => RunAction(id, action, ctx, readOnly: true));
 
         // Live discovered structure for the Overrides editor.
@@ -2574,7 +2573,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         if (found is null || (readOnly && found.Effect != Core.Integrations.ActionEffect.Read))
             return Results.Json(new { ok = false, message = $"'{integration.DisplayName}' has no action called '{action}'." }, ConfigSchema.Json);
 
-        // Query string and form fields, flattened; a JSON body is handed over as sent, its top-level text and numbers also flattened.
+        // Query, form and top-level JSON scalars flattened; JSON body also passed raw.
         var args = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (k, v) in ctx.Request.Query) args[k] = v.ToString();
         string? body = null;

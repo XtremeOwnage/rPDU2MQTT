@@ -120,7 +120,6 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   let nodes: { id: string; label: string; kind: string }[] = [];
 
   const flowIn = () => ensure(state.data, 'EnergyFlow', {});
-  // Items placed on the floor plans, kept by the Locations plugin.
   const placementsIn = (): any[] => state.data?.Plugins?.locations?.Placements || [];
   const panelsIn = (): any[] => ensure(flowIn(), 'Panels', []);
   const clampsIn = (): any[] => ensure(flowIn(), 'Clamps', []);

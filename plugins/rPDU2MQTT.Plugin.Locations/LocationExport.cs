@@ -22,7 +22,7 @@ public static class LocationExport
             .ToDictionary(kv => kv.Key, kv => index[kv.Value]!.Label, StringComparer.OrdinalIgnoreCase);
 }
 
-/// <summary>Places as export tiers and rooms as Home Assistant areas, through the contributor hooks a plugin uses.</summary>
+/// <summary>Places as tiers; rooms as areas.</summary>
 public sealed class LocationContributor : IExportContributor, IAreaProvider
 {
     public IReadOnlyList<ContributedTier> Tiers(ExportPass pass, Config cfg)

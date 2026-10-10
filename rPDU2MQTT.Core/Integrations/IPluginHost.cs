@@ -21,7 +21,7 @@ public interface IPluginHost
 
     IPeriodAuditor? Auditor { get; }
 
-    /// <summary>Stored history, or null when history is off.</summary>
+    /// <summary>Null when history is off.</summary>
     IMeasurementHistory? History => null;
 }
 

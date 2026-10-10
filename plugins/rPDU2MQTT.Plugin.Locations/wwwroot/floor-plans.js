@@ -845,8 +845,6 @@ function mount(sec     , host     ) {
 
   // --- Config access -------------------------------------------------------------------------------
   const flowIn = () => ensure(state.data, 'EnergyFlow', {});
-  // Sites, items, wiring and location rules are the Locations plugin's own section; where a node is and which
-  // rooms a circuit serves are its settings on the node and the breaker.
   const locIn = () => ensure(ensure(state.data, 'Plugins', {}), 'locations', {});
   const sitesIn = ()        => ensure(locIn(), 'Sites', []);
   const itemsIn = ()        => ensure(locIn(), 'Placements', []);
@@ -854,9 +852,7 @@ function mount(sec     , host     ) {
   const servedBy = (breaker     )           => breaker?.Ext?.locations?.Rooms || [];
   const setServed = (breaker     , rooms          ) => { ensure(ensure(breaker, 'Ext', {}), 'locations', {}).Rooms = rooms; };
   const placeNode = (node     , place        ) => { ensure(ensure(node, 'Ext', {}), 'locations', {}).Location = place; };
-  /// What is on screen, before Save, for the bridge to total.
   const onScreen = () => JSON.stringify({ EnergyFlow: flowIn(), Plugins: { locations: locIn() } });
-  /// One of the plugin's actions, answered in the shape the page reads: { body: { ok, ... } }.
   const call = async (action        , query = '', body         ) => {
     const r      = await api(`/api/integrations/locations/${action}${query}`, { method: 'POST', body: body ?? onScreen() });
     const b = r?.body || {};

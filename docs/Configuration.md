@@ -1487,7 +1487,7 @@ Gui:
   DistanceUnits: imperial            # auto, imperial or metric
   TemperatureUnits: fahrenheit       # auto, celsius or fahrenheit
 Plugins:
-  locations:                         # the Locations plugin: places, items and wiring
+  locations:
     Sites:
       - Id: home
         Name: Home
@@ -1566,9 +1566,7 @@ EnergyFlow:
             locations: { Rooms: [kitchen, garage] }   # the rooms and areas this circuit serves
 ```
 
-Ids are shared by sites, floors, rooms and areas and must be unique across all of them. A config that still
-has these under `EnergyFlow`, or `Location` and `Rooms` directly on nodes, panels and breakers, is moved here
-on load.
+Ids are shared by sites, floors, rooms and areas and must be unique across all of them. Older layouts migrate on load.
 
 **Node location**, first match:
 

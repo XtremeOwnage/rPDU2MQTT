@@ -3,10 +3,10 @@ using rPDU2MQTT.Models.PDU;
 
 namespace rPDU2MQTT.Plugin.Locations;
 
-/// <summary>Rooms published to Home Assistant as areas, over one signed-in session (#467).</summary>
+/// <summary>Rooms as Home Assistant areas (#467).</summary>
 internal sealed class HaAreaSync(HomeAssistantSocket session)
 {
-    /// <summary>This bridge's device identifiers and the room each is in: tiers, places, and native PDUs and outlets.</summary>
+    /// <summary>Device identifier → room id.</summary>
     public static IReadOnlyDictionary<string, string> DeviceRooms(LocationIndex index, PduData merged, EnergyFlowConfig flow)
     {
         var placed = LocationRollup.Placed(index, FlowTopology.For(merged, flow))
@@ -47,14 +47,14 @@ internal sealed class HaAreaSync(HomeAssistantSocket session)
         return (areas, devices);
     }
 
-    /// <summary>What publishing rooms as areas would do, read from Home Assistant but writing nothing.</summary>
+    /// <summary>Read-only preview.</summary>
     public async Task<HaAreaPlan> PlanAsync(LocationIndex index, IReadOnlyDictionary<string, string> deviceRooms)
     {
         var (areas, devices) = await ReadRegistry();
         return HaAreaPlan.Build(Rooms(index), areas, devices, deviceRooms);
     }
 
-    /// <summary>Create, rename and link the areas, and put unplaced devices in them. Returns each room's area id.</summary>
+    /// <summary>Applies the plan; returns room id → area id.</summary>
     public async Task<(HaAreaPlan Plan, Dictionary<string, string> Linked, List<string> Failed)> ApplyAsync(
         LocationIndex index, IReadOnlyDictionary<string, string> deviceRooms)
     {

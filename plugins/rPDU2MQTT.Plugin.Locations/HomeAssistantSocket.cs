@@ -4,10 +4,7 @@ using System.Text.Json.Nodes;
 
 namespace rPDU2MQTT.Plugin.Locations;
 
-/// <summary>
-/// One signed-in session on Home Assistant's WebSocket API, with the shared URL and token under HomeAssistant.
-/// Nothing is subscribed, so the reply to each command is the next frame.
-/// </summary>
+/// <summary>Home Assistant WebSocket session. No subscriptions, so each reply is the next frame.</summary>
 internal sealed class HomeAssistantSocket : IDisposable
 {
     private readonly ClientWebSocket ws = new();
@@ -35,7 +32,6 @@ internal sealed class HomeAssistantSocket : IDisposable
         catch { socket.Dispose(); throw; }
     }
 
-    /// <summary>Sends a command such as "config/area_registry/list" and returns Home Assistant's reply.</summary>
     public async Task<JsonNode?> CallAsync(string type, JsonObject? args = null)
     {
         var msg = new JsonObject { ["id"] = nextId++, ["type"] = type };

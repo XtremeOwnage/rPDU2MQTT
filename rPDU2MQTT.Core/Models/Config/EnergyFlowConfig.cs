@@ -89,25 +89,25 @@ public class EnergyFlowConfig
     [Description("CT clamps: which breaker's wire each one is on, the monitor channel it is plugged into, its rating, and whether it is on backwards.")]
     public List<CtClampConfig> Clamps { get; set; } = new();
 
-    /// <summary>Where Sites used to live. Moved to the Locations plugin's section on load; never written once moved.</summary>
+    /// <summary>Legacy; migrated by LegacyLocations.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("Sites")]
     [YamlMember(Alias = "Sites")]
     public object? LegacySites { get; set; }
 
-    /// <summary>Where Placements used to live. Moved to the Locations plugin's section on load; never written once moved.</summary>
+    /// <summary>Legacy; migrated by LegacyLocations.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("Placements")]
     [YamlMember(Alias = "Placements")]
     public object? LegacyPlacements { get; set; }
 
-    /// <summary>Where Runs used to live. Moved to the Locations plugin's section on load; never written once moved.</summary>
+    /// <summary>Legacy; migrated by LegacyLocations.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("Runs")]
     [YamlMember(Alias = "Runs")]
     public object? LegacyRuns { get; set; }
 
-    /// <summary>Where AutoLocations used to live. Moved to the Locations plugin's section on load; never written once moved.</summary>
+    /// <summary>Legacy; migrated by LegacyLocations.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("AutoLocations")]
     [YamlMember(Alias = "AutoLocations")]
@@ -290,7 +290,7 @@ public class EnergyFlowNode : IExtensible
     [Description("Free-form tags for filtering the diagram and the energy views — e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows.")]
     public List<string> Tags { get; set; } = new();
 
-    /// <summary>Where the node's place used to live. Moved to its Locations plugin settings on load; never written once moved.</summary>
+    /// <summary>Legacy; migrated by LegacyLocations.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("Location")]
     [YamlMember(Alias = "Location")]

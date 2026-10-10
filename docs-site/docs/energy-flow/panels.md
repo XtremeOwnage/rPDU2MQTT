@@ -21,7 +21,7 @@ title: Panels and circuits
 | Trace… | Identify an unknown breaker |
 | Print… | Printable schedule for the panel door (fits one Letter or A4 page at 42 slots) |
 | Name, Slots, This panel is, Fed by | Panel settings |
-| Plugin settings › Locations › Location | Where it is mounted: `Ext.locations.Location` |
+| Plugin settings › Locations › Location | `Ext.locations.Location` |
 
 === "Amps"
 
@@ -46,8 +46,8 @@ Click a breaker, or an empty slot, to edit it.
 | State | `State`: `identified`, `unknown`, `unused` |
 | Channel (per leg) | Writes a clamp: `Clamps[].Channel` |
 | One CT measures the whole circuit | `Clamps[].Whole` (double-pole) |
-| Plugin settings › Locations › Rooms | `Ext.locations.Rooms`: the rooms and areas it serves |
-| Placed on it | Floor-plan items on this circuit (with the Locations plugin) |
+| Plugin settings › Locations › Rooms | `Ext.locations.Rooms` |
+| Placed on it | Floor-plan items on this circuit |
 
 **Trace it…** opens Trace for that breaker.
 

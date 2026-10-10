@@ -65,7 +65,7 @@ public static class Circuits
     /// Every circuit with what reads on it. A device beneath another device on the same circuit is not counted twice,
     /// and the remainder is never clamped: a device reading more than its circuit is flagged instead.
     /// </summary>
-    /// <param name="plugged">More devices and the circuit each is on, beside the nodes naming one, such as items placed on a floor plan.</param>
+    /// <param name="plugged">Extra (node, circuit) pairs.</param>
     public static IReadOnlyList<CircuitReport> Report(EnergyFlowConfig flow, IFlowValueSource? live, Func<string, double?> valueOf,
         FlowTopology? topology = null, string metric = FlowGraphBuilder.DefaultMetric, IEnumerable<(string Node, string Circuit)>? plugged = null)
     {

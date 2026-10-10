@@ -66,6 +66,4 @@ history, configuration publisher), Prometheus, Home Assistant (discovery, Energy
 - `DisabledPlugins` lists folder or DLL names to skip; a skipped plugin is never loaded. GUI: **System › Plugins**.
 - Vertiv is off when no PDU has a host.
 - EmonCMS keeps its `EmonCMS` config section in Core, so existing configs, the CRD and `RPDU2MQTT_EMONCMS_APIKEY` are unchanged.
-- Locations owns sites, rooms, placements, runs and location rules (`Plugins.locations`), each node's, panel's and
-  breaker's place (`Ext.locations`), place totals and tiers, the Floor Plans page and the Home Assistant area sync.
-  Plan image storage (`PlanStorage`, `/api/plans`) stays in the host.
+- Locations: `Plugins.locations`, `Ext.locations`, place totals, Floor Plans, area sync. Plan images stay in the host.

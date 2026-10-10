@@ -44,7 +44,7 @@ public class PanelConfig : IExtensible
     [Description("The energy-flow node that is this panel. Its reading is the power coming into the panel, and a circuit mapped to one of these breakers is placed beneath it.")]
     public string Node { get; set; } = "";
 
-    /// <summary>Where the panel's place used to live. Moved to its Locations plugin settings on load; never written once moved.</summary>
+    /// <summary>Legacy; migrated by LegacyLocations.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("Location")]
     [YamlMember(Alias = "Location")]
@@ -115,7 +115,7 @@ public class BreakerConfig : IExtensible
     [Description("What the wire is made of. Aluminium carries less for the same gauge, so a run sized in copper is not the same run in aluminium.")]
     public string Conductor { get; set; } = "";
 
-    /// <summary>Where the rooms a circuit serves used to live. Moved to its Locations plugin settings on load; never written once moved.</summary>
+    /// <summary>Legacy; migrated by LegacyLocations.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("Rooms")]
     [YamlMember(Alias = "Rooms")]

@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace rPDU2MQTT.Plugin.Locations;
 
-/// <summary>The plugin's own section, under Plugins.locations.</summary>
+/// <summary>Plugins.locations</summary>
 public sealed class LocationSettings
 {
     [Description("Where things are: sites, their floors, and the rooms and areas on each floor. Energy rolls up room → floor → site alongside the electrical hierarchy.")]
@@ -20,7 +20,6 @@ public sealed class LocationSettings
 
     public const string PluginId = "locations";
 
-    /// <summary>The section as saved in <paramref name="cfg"/>, or empty when there is none or it cannot be read.</summary>
     public static LocationSettings Of(Config cfg)
     {
         if (cfg.Plugins is null || !cfg.Plugins.TryGetValue(PluginId, out var raw) || raw is null) return new();
@@ -48,7 +47,6 @@ public sealed class LocationSettings
     };
 }
 
-/// <summary>Where a node is, kept on the node.</summary>
 public sealed class NodeLocation
 {
     [ChoicesFrom("/api/integrations/locations/places")]
@@ -56,7 +54,6 @@ public sealed class NodeLocation
     public string Location { get; set; } = "";
 }
 
-/// <summary>Where a panel is mounted, kept on the panel.</summary>
 public sealed class PanelLocation
 {
     [ChoicesFrom("/api/integrations/locations/places")]
@@ -64,7 +61,6 @@ public sealed class PanelLocation
     public string Location { get; set; } = "";
 }
 
-/// <summary>The rooms a breaker's circuit serves, kept on the breaker.</summary>
 public sealed class BreakerRooms
 {
     [ChoicesFrom("/api/integrations/locations/rooms")]
