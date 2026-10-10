@@ -81,7 +81,7 @@ function switchWrap(input: any) {
 
 // Render an object's properties: scalars in a multi-column grid, collections full-width.
 // `path` locates `target` in the config document.
-function renderObjectBody(properties: any[], target: any, container: any, path: string[] = []) {
+export function renderObjectBody(properties: any[], target: any, container: any, path: string[] = []) {
   const isComplex = (c: any) => c.type === 'object' || c.type === 'list' || c.type === 'dictionary';
   const scalars = (properties || []).filter(c => !isComplex(c));
   const complex = (properties || []).filter(isComplex);

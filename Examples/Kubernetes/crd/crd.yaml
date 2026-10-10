@@ -995,6 +995,12 @@ spec:
                         EmonCmsVirtualTag:
                           type: string
                           description: "EmonCMS tag this node's virtual feeds are filed under. Blank uses EmonCMS.Feeds.Virtual.Tag. Placeholders: {node}, {label}, {kind}."
+                        Ext:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                          additionalProperties:
+                            x-kubernetes-preserve-unknown-fields: true
+                          description: Settings plugins keep on this node, keyed by plugin id. Kept as they are while the plugin is not loaded.
                         StorageKwh:
                           type: number
                           description: 'For a battery node: usable storage capacity in kWh (display metadata; optional).'
@@ -1372,7 +1378,19 @@ spec:
                                 - unknown
                                 - unused
                                 description: Whether this breaker is identified, not yet identified (the '????' rows of a paper directory), or an unused slot. A new breaker starts unknown, so a blank row claims nothing.
+                              Ext:
+                                type: object
+                                x-kubernetes-preserve-unknown-fields: true
+                                additionalProperties:
+                                  x-kubernetes-preserve-unknown-fields: true
+                                description: Settings plugins keep on this breaker, keyed by plugin id. Kept as they are while the plugin is not loaded.
                           description: The breakers in this panel's slots.
+                        Ext:
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                          additionalProperties:
+                            x-kubernetes-preserve-unknown-fields: true
+                          description: Settings plugins keep on this panel, keyed by plugin id. Kept as they are while the plugin is not loaded.
                     description: 'Electrical panels and the breakers in their slots: breaker number, rating, wire label and what each one feeds, including the circuits nobody has identified yet.'
                   Clamps:
                     type: array

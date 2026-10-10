@@ -7,6 +7,7 @@ import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { column, rowOf } from '../panel-layout.js';
 import { locationChoices, choiceSelect } from '../location-options.js';
+import { extensionsFor, renderExtensions } from '../entity-extensions.js';
 import { integrationIds } from '../plugin-pages.js';
 
 /// A breaker as the API reports it, with its chain and power resolved.
@@ -90,6 +91,9 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     el('label', { class: 'ld-inst' }, 'Fed by ', feeders, feedAdd),
     el('label', { class: 'ld-inst' }, 'Mounted in ', whereBox));
   sec.appendChild(settings);
+  // Settings plugins keep on the panel.
+  const panelExt = el('div', { class: 'ps-ext' });
+  sec.appendChild(panelExt);
   const incoming = el('div', { class: 'desc ps-incoming' });
   sec.appendChild(incoming);
 
@@ -487,9 +491,15 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       ? el('ul', { class: 'ps-placed' }, ...onIt.map(p => el('li', { text: `${p.Label || p.Kind}${p.Room ? ' — ' + p.Room : ''}` })))
       : el('div', { class: 'desc', text: 'Nothing on the floor plans is linked to this circuit.' }));
 
+    // Settings plugins keep on the breaker, edited on a copy and kept on Apply like everything else here.
+    const extDraft: any = { Ext: entry?.Ext ? JSON.parse(JSON.stringify(entry.Ext)) : undefined };
+    const extBox = el('div', { class: 'ps-ext' });
+    if (extensionsFor('breaker').length) renderExtensions('breaker', extDraft, extBox, []);
+
     const save = btn('Apply', 'primary');
     save.onclick = () => {
       const target = entry || { Slot: slot };
+      if (extDraft.Ext) target.Ext = extDraft.Ext;
       const newNumber = number.value.trim() || String(slot);
       target.Slot = slot;
       target.Number = newNumber;
@@ -547,7 +557,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
         field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor),
         field('Rating (A)', amps), field('Poles', poles),
         field('Tandem', half, 'A tandem breaker is two half-height breakers sharing one slot.'),
-        field('State', stateSel), pickerRows, servesField, placedField,
+        field('State', stateSel), pickerRows, servesField, placedField, extBox,
         ...(b?.node ? [field('On the energy flow', el('div', {
           class: 'desc',
           style: { margin: '0' },
@@ -773,6 +783,8 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     whereSel.title = 'The room, area or floor this panel is mounted in.';
     whereSel.onchange = () => { if (cfg) { cfg.Location = whereSel.value || undefined; refreshDirty(); } };
     whereBox.appendChild(whereSel);
+    panelExt.innerHTML = '';
+    if (cfg) renderExtensions('panel', cfg, panelExt, ['EnergyFlow', 'Panels', String(panelsIn().indexOf(cfg))]);
     slotsIn.value = String(slots);
 
     // Which node is this panel, and what feeds it.

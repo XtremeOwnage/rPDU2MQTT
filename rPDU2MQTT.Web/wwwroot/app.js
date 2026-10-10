@@ -3934,6 +3934,42 @@ function choiceSelect(choices                    , value        , blank        )
   return sel;
 }
 
+// ── entity-extensions.ts ────────────────────────────────────────
+// Settings plugins keep on core entities they do not define — a node, a panel, a breaker — rendered from each
+// plugin's settings class, as a plugin's own section is. Stored in the entity's Ext, keyed by plugin id.
+
+/// The plugin sections declared for one kind of entity, read off its extension point in the schema.
+function extensionsFor(kind        )        {
+  const walk = (nodes                   )               => {
+    for (const n of nodes || []) {
+      if (n.extensionOf === kind) return n.extensions || [];
+      const hit = walk(n.properties) ?? (n.valueSchema ? walk([n.valueSchema]) : null);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  return walk(state.schema) || [];
+}
+
+/// A fieldset per plugin with this entity's settings. The entity only gains an Ext entry once something in it
+/// is changed, so opening an editor is never an edit. Returns how many plugins have a section.
+function renderExtensions(kind        , entity     , container     , path          , onChange             )         {
+  const sections = extensionsFor(kind);
+  sections.forEach(sec => {
+    const target = entity.Ext?.[sec.key] || {};
+    const fs = el('fieldset', { class: 'ext-section' });
+    fs.dataset.plugin = sec.key;
+    fs.appendChild(el('legend', { text: sec.label }));
+    renderObjectBody(sec.properties || [], target, fs, [...path, 'Ext', sec.key]);
+    // Runs after the control's own handler, which has already written into target.
+    const attach = () => { ensure(entity, 'Ext', {})[sec.key] = target; onChange?.(); refreshDirty(); };
+    fs.addEventListener('change', attach);
+    fs.addEventListener('click', (e     ) => { if (e.target?.tagName === 'BUTTON') attach(); });
+    container.appendChild(fs);
+  });
+  return sections.length;
+}
+
 // ── panel-layout.ts ─────────────────────────────────────────────
 // Where a breaker sits in the panel as it is drawn (#453): odd slots down the left column, even down the
 // right, a double-pole spanning the next slot in its own column, and a tandem sharing one slot.
@@ -7610,11 +7646,27 @@ function renderNodeEditor(node     , links       , cand                  , reren
   more.appendChild(moreGrid);
   box.appendChild(more);
 
+  // --- Settings plugins keep on this node. Folded until one of them has something set. ---
+  if (extensionsFor('node').length) {
+    const ext = el('details', { class: 'ne-more ne-ext' })                      ;
+    const kept = Object.keys(node.Ext || {}).length;
+    ext.open = kept > 0 || nodeEditorPluginsOpen;
+    ext.addEventListener('toggle', () => { nodeEditorPluginsOpen = ext.open; });
+    ext.appendChild(el('summary', { class: 'ne-more-summary' },
+      el('span', { text: 'Plugin settings' }),
+      el('span', { class: 'ne-count', text: kept ? `${kept} set` : '' })));
+    const at = ((state.data?.EnergyFlow?.Nodes || [])         ).indexOf(node);
+    renderExtensions('node', node, ext, ['EnergyFlow', 'Nodes', String(at)]);
+    box.appendChild(ext);
+  }
+
   return box;
 }
 
 /// Whether the filing section was left open, so a redraw after an edit inside it does not fold it away.
 let nodeEditorFilingOpen = false;
+/// Likewise for the plugin settings.
+let nodeEditorPluginsOpen = false;
 
 // ── sections/nodes.ts ───────────────────────────────────────────
 // Nodes page and the group manager.
@@ -12216,6 +12268,9 @@ function addPanelScheduleSection(nav     , sections     ) {
     el('label', { class: 'ld-inst' }, 'Fed by ', feeders, feedAdd),
     el('label', { class: 'ld-inst' }, 'Mounted in ', whereBox));
   sec.appendChild(settings);
+  // Settings plugins keep on the panel.
+  const panelExt = el('div', { class: 'ps-ext' });
+  sec.appendChild(panelExt);
   const incoming = el('div', { class: 'desc ps-incoming' });
   sec.appendChild(incoming);
 
@@ -12613,9 +12668,15 @@ function addPanelScheduleSection(nav     , sections     ) {
       ? el('ul', { class: 'ps-placed' }, ...onIt.map(p => el('li', { text: `${p.Label || p.Kind}${p.Room ? ' — ' + p.Room : ''}` })))
       : el('div', { class: 'desc', text: 'Nothing on the floor plans is linked to this circuit.' }));
 
+    // Settings plugins keep on the breaker, edited on a copy and kept on Apply like everything else here.
+    const extDraft      = { Ext: entry?.Ext ? JSON.parse(JSON.stringify(entry.Ext)) : undefined };
+    const extBox = el('div', { class: 'ps-ext' });
+    if (extensionsFor('breaker').length) renderExtensions('breaker', extDraft, extBox, []);
+
     const save = btn('Apply', 'primary');
     save.onclick = () => {
       const target = entry || { Slot: slot };
+      if (extDraft.Ext) target.Ext = extDraft.Ext;
       const newNumber = number.value.trim() || String(slot);
       target.Slot = slot;
       target.Number = newNumber;
@@ -12673,7 +12734,7 @@ function addPanelScheduleSection(nav     , sections     ) {
         field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor),
         field('Rating (A)', amps), field('Poles', poles),
         field('Tandem', half, 'A tandem breaker is two half-height breakers sharing one slot.'),
-        field('State', stateSel), pickerRows, servesField, placedField,
+        field('State', stateSel), pickerRows, servesField, placedField, extBox,
         ...(b?.node ? [field('On the energy flow', el('div', {
           class: 'desc',
           style: { margin: '0' },
@@ -12899,6 +12960,8 @@ function addPanelScheduleSection(nav     , sections     ) {
     whereSel.title = 'The room, area or floor this panel is mounted in.';
     whereSel.onchange = () => { if (cfg) { cfg.Location = whereSel.value || undefined; refreshDirty(); } };
     whereBox.appendChild(whereSel);
+    panelExt.innerHTML = '';
+    if (cfg) renderExtensions('panel', cfg, panelExt, ['EnergyFlow', 'Panels', String(panelsIn().indexOf(cfg))]);
     slotsIn.value = String(slots);
 
     // Which node is this panel, and what feeds it.

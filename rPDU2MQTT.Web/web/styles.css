@@ -1621,6 +1621,10 @@
 .history-copy-status .progress { max-width:none; height:8px; margin:var(--sp-2) 0 0; }
 .history-copy-head { display:flex; align-items:center; gap:var(--sp-2); }
 .setting-group > legend { padding: 0 6px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+/* Settings a plugin keeps on a node, panel or breaker. */
+.ext-section { margin: 10px 0 0; padding: 4px 14px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.ext-section > legend { padding: 0 6px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+.ne-ext > .ext-section { margin: 0 12px 12px; }
 
 /* Diagnostics: the directories this process writes to. */
 .diag-storage { margin: 4px 0 14px; overflow-x: auto; }

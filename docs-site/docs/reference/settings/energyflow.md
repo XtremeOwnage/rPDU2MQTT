@@ -30,6 +30,7 @@ Virtual upstream nodes (breakers, transfer switches, a “Total”) and their fe
 | `EnergyFlow.Nodes[].Hidden` | bool | `false` | Left off the flow diagrams. Still listed and editable. |
 | `EnergyFlow.Nodes[].EmonCmsTag` | string |  | EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}. |
 | `EnergyFlow.Nodes[].EmonCmsVirtualTag` | string |  | EmonCMS tag this node's virtual feeds are filed under. Blank uses EmonCMS.Feeds.Virtual.Tag. Placeholders: {node}, {label}, {kind}. |
+| `EnergyFlow.Nodes[].Ext` | map |  | Settings plugins keep on this node, keyed by plugin id. Kept as they are while the plugin is not loaded. |
 | `EnergyFlow.Nodes[].StorageKwh` | double |  | For a battery node: usable storage capacity in kWh (display metadata; optional). |
 | `EnergyFlow.Nodes[].Mode` | one of `auto`, `static`, `residual`, `untracked`, `none` | `auto` | How to value this node when it has no direct measurement: 'auto' (aggregate children; carries unmet demand only when it is the single path into a node — never splits a load between several unmeasured feeders), 'static' (a fixed leaf at Value), 'residual' (the designated absorber of what its target still needs — this is how you say where unaccounted power comes from), 'untracked' (show a measured parent's unaccounted consumption), or 'none' (never inferred). A live source always wins. |
 | `EnergyFlow.Nodes[].Sources` | list |  | Live value bindings for this node, one per metric. Each binds a metric to an external source (Type 'mqtt' today). Supersedes Value. |
@@ -107,6 +108,8 @@ Virtual upstream nodes (breakers, transfer switches, a “Total”) and their fe
 | `EnergyFlow.Panels[].Breakers[].Rooms` | list |  | The ids of the rooms and areas this breaker's circuit serves. A circuit serving several rooms lists each; its power then counts toward the smallest place holding all of them. |
 | `EnergyFlow.Panels[].Breakers[].Node` | string |  | The energy-flow node that is this circuit. Blank uses the channel measuring it, when a single channel does. |
 | `EnergyFlow.Panels[].Breakers[].State` | one of `identified`, `unknown`, `unused` | `unknown` | Whether this breaker is identified, not yet identified (the '????' rows of a paper directory), or an unused slot. A new breaker starts unknown, so a blank row claims nothing. |
+| `EnergyFlow.Panels[].Breakers[].Ext` | map |  | Settings plugins keep on this breaker, keyed by plugin id. Kept as they are while the plugin is not loaded. |
+| `EnergyFlow.Panels[].Ext` | map |  | Settings plugins keep on this panel, keyed by plugin id. Kept as they are while the plugin is not loaded. |
 | `EnergyFlow.Clamps` | list |  | CT clamps: which breaker's wire each one is on, the monitor channel it is plugged into, its rating, and whether it is on backwards. |
 | `EnergyFlow.Clamps[].Label` | string |  | The label written on the clamp, if it has one. Used to refer to this clamp from elsewhere. |
 | `EnergyFlow.Clamps[].Amps` | int |  | The clamp's rating in amps, as printed on it. For example 50 or 100. Range 1–1000. |
