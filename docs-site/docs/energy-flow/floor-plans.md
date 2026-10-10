@@ -101,7 +101,7 @@ Wiring an item with no circuit to one on a known circuit puts it on that circuit
 | Floor settings | Name, level, plot size, ground, **Arrange** |
 | Background | Upload a plan image (PNG, JPEG, WebP, SVG) |
 | Tools… › Rooms from tags | Turn room-like tags into rooms and areas, with a preview |
-| Tools… › Publish rooms to Home Assistant | Create or match HA areas and file devices into them, with a preview |
+| Tools… › Publish rooms to Home Assistant | See [Locations](locations.md#home-assistant) |
 | Export… | SVG, PNG, or all floors as JSON. **Import floor plans…** reads it back. |
 | Print | Print the floor |
 

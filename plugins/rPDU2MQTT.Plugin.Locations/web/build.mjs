@@ -10,8 +10,8 @@ await mkdir(outDir, { recursive: true });
 
 // Helpers first; the page (which defines mount) last.
 const PAGES = {
-  'floor-plans': ['host.ts', 'plan-geometry.ts', 'plan-units.ts', 'plan-history.ts', 'plan-constraints.ts', 'plan-art.ts', 'floor-plans.ts'],
-  'locations': ['host.ts', 'locations.ts'],
+  'floor-plans': ['host.ts', 'plan-geometry.ts', 'plan-units.ts', 'plan-history.ts', 'plan-constraints.ts', 'plan-art.ts', 'ha-publish.ts', 'floor-plans.ts'],
+  'locations': ['host.ts', 'ha-publish.ts', 'locations.ts'],
 };
 
 function debundle(js) {
@@ -43,6 +43,7 @@ for (const [page, modules] of Object.entries(PAGES)) {
   }
   const js = parts.join('\n\n').replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trimEnd();
   await writeFile(join(outDir, `${page}.js`), js + '\nreturn mount;\n');
-  await writeFile(join(outDir, `${page}.css`), minifyCss(await readFile(join(here, `${page}.css`), 'utf8')));
+  const css = await Promise.all([`${page}.css`, 'ha-publish.css'].map(f => readFile(join(here, f), 'utf8')));
+  await writeFile(join(outDir, `${page}.css`), minifyCss(css.join('\n')));
 }
 console.log(`plugin pages: wrote ${Object.keys(PAGES).map(p => p + '.js').join(', ')}`);

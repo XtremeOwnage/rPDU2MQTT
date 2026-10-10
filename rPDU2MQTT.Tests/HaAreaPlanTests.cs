@@ -55,4 +55,68 @@ public class HaAreaPlanTests
         Assert.Equal(HaAreaPlan.Ok, plan.Devices.Single(d => d.DeviceId == "d3").Action);
         Assert.DoesNotContain(plan.Devices, d => d.DeviceId == "d4");
     }
+
+    private static readonly Dictionary<string, string> NoDevices = new();
+
+    [Theory]
+    [InlineData(HaSyncMode.Create, HaAreaPlan.Create, HaAreaPlan.Rename)]
+    [InlineData(HaSyncMode.Update, HaAreaPlan.Skip, HaAreaPlan.Rename)]
+    [InlineData(HaSyncMode.Off, HaAreaPlan.Skip, HaAreaPlan.Ok)]
+    public void TheAreasMode_DecidesWhatIsCreatedOrRenamed(string mode, string missing, string linked)
+    {
+        var plan = HaAreaPlan.Build([new("office", "Office", null), new("den", "Family Room", "den_2"), new("kitchen", "Kitchen", null)],
+            Areas, [], NoDevices, new HaSyncConfig { Areas = mode });
+
+        Assert.Equal(missing, plan.Rooms[0].Action);
+        Assert.Equal(linked, plan.Rooms[1].Action);
+        Assert.Equal(HaAreaPlan.Link, plan.Rooms[2].Action);
+    }
+
+    [Fact]
+    public void DeviceAreasOff_LeavesDevicesAlone()
+    {
+        var plan = HaAreaPlan.Build([new("kitchen", "Kitchen", null)], Areas, [new("d1", "Fridge", ["f"], null)],
+            new Dictionary<string, string> { ["f"] = "kitchen" }, new HaSyncConfig { DeviceAreas = HaSyncMode.Off });
+
+        Assert.Empty(plan.Devices);
+    }
+
+    [Fact]
+    public void Floors_AreCreatedOrMatched_AndEachAreaGetsItsFloor()
+    {
+        var plan = HaAreaPlan.Build([new("kitchen", "Kitchen", null, "ground"), new("loft", "Loft", null, "upper")],
+            Areas, [], NoDevices, new HaSyncConfig { Floors = HaSyncMode.Create },
+            [new("ground", "Ground", 0, null), new("upper", "Upstairs", 1, null)], [new("first", "Ground", 0)]);
+
+        Assert.Equal(HaAreaPlan.Link, plan.Floors[0].Action);
+        Assert.Equal(HaAreaPlan.Create, plan.Floors[1].Action);
+        var kitchen = plan.Fields.Single(f => f.Room == "kitchen" && f.Field == "floor");
+        Assert.Equal(HaAreaPlan.Set, kitchen.Action);
+        Assert.Equal("first", kitchen.Value);
+        Assert.Equal(HaAreaPlan.Set, plan.Fields.Single(f => f.Room == "loft").Action);
+    }
+
+    [Fact]
+    public void FloorsOff_PlansNoFloors()
+    {
+        var plan = HaAreaPlan.Build([new("kitchen", "Kitchen", null, "ground")], Areas, [], NoDevices, new HaSyncConfig(),
+            [new("ground", "Ground", 0, null)], []);
+
+        Assert.Empty(plan.Floors);
+        Assert.Empty(plan.Fields);
+    }
+
+    [Theory]
+    [InlineData(HaSyncMode.Fill, HaAreaPlan.Keep)]
+    [InlineData(HaSyncMode.Always, HaAreaPlan.Set)]
+    public void AreaSensors_FillOnlyWhenUnset_OrAlways(string mode, string whenSet)
+    {
+        HaArea[] areas = [new("kitchen", "Kitchen", Temperature: "sensor.other"), new("den", "Den")];
+        var plan = HaAreaPlan.Build([new("kitchen", "Kitchen", null, Temperature: "sensor.k"), new("den", "Den", null, Humidity: "sensor.d")],
+            areas, [], NoDevices, new HaSyncConfig { AreaSensors = mode });
+
+        Assert.Equal(whenSet, plan.Fields.Single(f => f.Room == "kitchen").Action);
+        var den = plan.Fields.Single(f => f.Room == "den");
+        Assert.Equal(("humidity", HaAreaPlan.Set, "sensor.d"), (den.Field, den.Action, den.Value));
+    }
 }

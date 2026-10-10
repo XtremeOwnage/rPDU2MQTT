@@ -63,6 +63,9 @@ public class FloorConfig
     [Description("What the ground around the rooms looks like: grass, concrete, gravel, dirt, pavers or snow. Blank is plain paper.")]
     public string Ground { get; set; } = "";
 
+    [Description("The Home Assistant floor this floor was linked to, by floor id.")]
+    public string HaFloor { get; set; } = "";
+
     [Description("The rooms on this floor.")]
     public List<RoomConfig> Rooms { get; set; } = new();
 

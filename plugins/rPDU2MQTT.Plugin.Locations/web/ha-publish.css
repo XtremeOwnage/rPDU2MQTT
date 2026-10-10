@@ -1,0 +1,9 @@
+.ha-sheet h4 { margin: var(--sp-4) 0 var(--sp-2); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.ha-plan { display: grid; gap: 2px; font-size: 13px; }
+.ha-row { display: grid; grid-template-columns: minmax(8em, 1fr) 7em 2fr; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line-soft); }
+.ha-row span:nth-child(2) { font-weight: 600; }
+.ha-row.is-create span:nth-child(2), .ha-row.is-set span:nth-child(2) { color: var(--good); }
+.ha-row.is-rename span:nth-child(2), .ha-row.is-link span:nth-child(2) { color: var(--accent); }
+.ha-row.is-keep span:nth-child(2), .ha-row.is-ok span:nth-child(2), .ha-row.is-skip span:nth-child(2) { color: var(--muted); }
+.ha-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: var(--sp-3); }
+@media (max-width: 760px) { .ha-row { grid-template-columns: 1fr 1fr; } }
