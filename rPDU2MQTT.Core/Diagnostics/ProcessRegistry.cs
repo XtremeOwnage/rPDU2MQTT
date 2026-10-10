@@ -1,6 +1,5 @@
 namespace rPDU2MQTT.Core.Diagnostics;
 
-/// <summary>One integration's last outcome.</summary>
 public sealed record IntegrationReport
 {
     public bool? Ok { get; init; }
@@ -19,7 +18,6 @@ public sealed record ProcessInfo
     public DateTime StartedUtc { get; init; }
     public string? Version { get; init; }
     public DateTime TimestampUtc { get; init; }
-    /// <summary>Last outcome per integration id this process has run.</summary>
     public IReadOnlyDictionary<string, IntegrationReport> Integrations { get; init; } = new Dictionary<string, IntegrationReport>();
 }
 
@@ -73,7 +71,6 @@ public static class IntegrationReports
                    LastError = kv.Value.LastError, Count = kv.Value.Count,
                }, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Newest report for <paramref name="id"/> from a live process, or null.</summary>
     public static IntegrationReport? Freshest(IEnumerable<ProcessInfo> processes, string id)
         => processes.Where(p => (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= ProcessRegistry.StaleAfterSeconds)
                     .OrderByDescending(p => p.TimestampUtc)
