@@ -2,7 +2,7 @@ name: Issue Standards
 
 on:
   issues:
-    types: [opened, reopened, labeled, unlabeled, typed, untyped]
+    types: [opened, reopened, labeled, typed, untyped]
 
 concurrency:
   group: issue-standards-${{ github.event.issue.number }}
