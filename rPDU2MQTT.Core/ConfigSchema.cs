@@ -532,7 +532,8 @@ public static class ConfigSchema
         clone.Api.ApiKey = null;
         // Both of these travelled: the Home Assistant long-lived token and the cache password were written
         // into the CR spec on every save, and into the manifest the Export page offers for GitOps.
-        clone.HASS.EnergyDashboard.Token = null;
+        clone.HASS.Token = null;
+        clone.HASS.EnergyDashboard.LegacyToken = null;
         clone.Cache.Password = null;
         clone.PlanStorage.ObjectStore.SecretAccessKey = null;
         return clone;

@@ -40,7 +40,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
         _ when !sources.ContainsKey(id) => "not a history backend",
         _ when unavailable?.TryGetValue(id, out var why) == true => why(),
         "prometheus" when string.IsNullOrWhiteSpace(cfg.History.PrometheusUrl) => "History.PrometheusUrl is not set",
-        "homeassistant" when string.IsNullOrWhiteSpace(cfg.HASS.EnergyDashboard.Url) || string.IsNullOrWhiteSpace(cfg.HASS.EnergyDashboard.Token)
+        "homeassistant" when string.IsNullOrWhiteSpace(cfg.HASS.Url) || string.IsNullOrWhiteSpace(cfg.HASS.Token)
             => "the Home Assistant URL and token are not set",
         _ => null,
     };

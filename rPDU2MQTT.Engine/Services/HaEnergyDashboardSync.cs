@@ -241,7 +241,7 @@ public sealed class HaEnergyDashboardSync
     /// </summary>
     public async Task<IReadOnlyList<Core.HomeAssistant.HaDevice>> StaleDevicesAsync(CancellationToken ct = default)
     {
-        var ha = config.HASS.EnergyDashboard;
+        var ha = config.HASS;
         using var ws = await ConnectAuth(ha.Url ?? "", ha.Token ?? "", ct);
         var call = Caller(ws, ct);
 
@@ -299,7 +299,7 @@ public sealed class HaEnergyDashboardSync
     /// </summary>
     public async Task<int> DeleteDevicesAsync(IEnumerable<Core.HomeAssistant.HaDevice> devices, CancellationToken ct = default)
     {
-        var ha = config.HASS.EnergyDashboard;
+        var ha = config.HASS;
         using var ws = await ConnectAuth(ha.Url ?? "", ha.Token ?? "", ct);
         var call = Caller(ws, ct);
 

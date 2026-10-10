@@ -66,7 +66,7 @@ Fields on every binding:
 - **Accumulation**: check the topic across midnight. A daily counter drops at midnight; a lifetime counter does not.
 - A live reading replaces the node's fixed **Value**. Negative readings count as `0`.
 - EmonCMS bindings need `EmonCMS.Url` and a read API key. `EmonCMS.Enabled` is not required.
-- Home Assistant bindings use `HomeAssistant.EnergyDashboard.Url` and its token.
+- Home Assistant bindings use `HomeAssistant.Url` and its token.
 - `unavailable` or non-numeric values supply nothing.
 
 ### Derived values

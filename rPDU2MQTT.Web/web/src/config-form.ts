@@ -994,7 +994,7 @@ function sectionActions(node: any) {
       add('Clear discovery', clearHa, 'danger');
       // The two cleanups "Clear discovery" cannot do.
     }
-    bar.appendChild(externalLink('Open Home Assistant', () => cfgUrl('HomeAssistant', 'EnergyDashboard', 'Url'), 'Open Home Assistant'));
+    bar.appendChild(externalLink('Open Home Assistant', () => cfgUrl('HomeAssistant', 'Url'), 'Open Home Assistant'));
   } else if (node.key === 'Prometheus') {
     // Our own exporter's /metrics, on this page's hostname.
     bar.appendChild(externalLink('Open /metrics', () => {

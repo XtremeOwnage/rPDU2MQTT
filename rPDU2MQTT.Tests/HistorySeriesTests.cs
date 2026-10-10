@@ -200,8 +200,8 @@ public class HistorySeriesTests
     private static Config HassConfigured()
     {
         var cfg = new Config();
-        cfg.HASS.EnergyDashboard.Url = "http://hass.local";
-        cfg.HASS.EnergyDashboard.Token = "t";
+        cfg.HASS.Url = "http://hass.local";
+        cfg.HASS.Token = "t";
         cfg.History.Provider = "homeassistant";
         return cfg;
     }

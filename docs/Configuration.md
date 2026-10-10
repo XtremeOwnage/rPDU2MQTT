@@ -1108,7 +1108,7 @@ required. The poll runs only when a feed is bound.
 ### Live sources from Home Assistant entities
 
 - `Type: homeassistant`, entity id in `Settings.Entity`.
-- Read over the REST API using `HomeAssistant.EnergyDashboard.Url` and a long-lived access token.
+- Read over the REST API using `HomeAssistant.Url` and a long-lived access token.
 - An entity that is `unavailable` or non-numeric supplies nothing.
 
 ### Live sources from Tigo optimizers (plugin)

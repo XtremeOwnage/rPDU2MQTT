@@ -33,8 +33,8 @@ public class HomeAssistantPublisherGatingTests
         cfg.HASS.DiscoveryEnabled = true;
         cfg.HASS.EnergyDashboard.Enabled = false;
         // Credentials left over from the value source, or from having tried the dashboard once.
-        cfg.HASS.EnergyDashboard.Url = "http://homeassistant.local:8123";
-        cfg.HASS.EnergyDashboard.Token = "token";
+        cfg.HASS.Url = "http://homeassistant.local:8123";
+        cfg.HASS.Token = "token";
         return cfg;
     }
 
@@ -71,7 +71,7 @@ public class HomeAssistantPublisherGatingTests
     {
         var cfg = new Config();
         cfg.HASS.EnergyDashboard.Enabled = true;
-        cfg.HASS.EnergyDashboard.Url = "";
+        cfg.HASS.Url = "";
 
         var integration = Integration(cfg);
         Assert.False(integration.PublishingEnabled(cfg));

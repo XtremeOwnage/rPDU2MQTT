@@ -300,7 +300,7 @@ public sealed partial class GuiService
             try
             {
                 var posted = await PostedConfig(ctx);
-                var plan = await haEnergy.PlanAreasAsync(posted.EnergyFlow ?? config.EnergyFlow, config.HASS.EnergyDashboard.Url ?? "", config.HASS.EnergyDashboard.Token ?? "", cts.Token);
+                var plan = await haEnergy.PlanAreasAsync(posted.EnergyFlow ?? config.EnergyFlow, config.HASS.Url ?? "", config.HASS.Token ?? "", cts.Token);
                 return Results.Json(new { ok = true, plan }, ConfigSchema.Json);
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not read Home Assistant: {ex.Message}" }, ConfigSchema.Json); }
@@ -313,7 +313,7 @@ public sealed partial class GuiService
             try
             {
                 var posted = await PostedConfig(ctx);
-                var (plan, linked, failed) = await haEnergy.ApplyAreasAsync(posted.EnergyFlow ?? config.EnergyFlow, config.HASS.EnergyDashboard.Url ?? "", config.HASS.EnergyDashboard.Token ?? "", cts.Token);
+                var (plan, linked, failed) = await haEnergy.ApplyAreasAsync(posted.EnergyFlow ?? config.EnergyFlow, config.HASS.Url ?? "", config.HASS.Token ?? "", cts.Token);
                 return Results.Json(new { ok = failed.Count == 0, plan, linked, failed,
                     message = failed.Count == 0 ? $"Published {linked.Count} room(s) as areas." : $"{failed.Count} change(s) failed: {string.Join("; ", failed)}" }, ConfigSchema.Json);
             }
