@@ -1,0 +1,26 @@
+changelog:
+  exclude:
+    authors:
+      - github-actions[bot]
+  categories:
+    - title: Breaking Changes
+      labels:
+        - kind/major
+    - title: Features
+      labels:
+        - kind/feature
+    - title: Bug Fixes
+      labels:
+        - kind/bug
+    - title: Documentation
+      labels:
+        - kind/documentation
+    - title: Dependencies
+      labels:
+        - kind/dependency
+    - title: Chores
+      labels:
+        - kind/chore
+    - title: Other Changes
+      labels:
+        - "*"

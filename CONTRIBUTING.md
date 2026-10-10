@@ -21,7 +21,7 @@ Examples:
 [Chore] Scope CI and Docker workflows by path
 ```
 
-PRs are squash-merged, so the title becomes the commit message on `main`.
+PRs are squash-merged, so the title becomes the commit message on `main`. Generated release notes are grouped by the `kind/*` label ([`.github/release.yml`](.github/release.yml)).
 
 ## Labels
 
