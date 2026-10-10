@@ -26,12 +26,12 @@ jobs:
               Major: 'kind/major',
               Chore: 'kind/chore',
               Docs: 'kind/documentation',
-              Deps: 'kind/dependency',
+              Dependency: 'kind/dependency',
             };
             const pr = context.payload.pull_request;
             const errors = [];
 
-            // Dependabot appends a colon to its commit-message prefix, so "[Deps]: " is accepted too.
+            // Dependabot appends a colon to its commit-message prefix, so "[Dependency]: " is accepted too.
             const match = pr.title.match(/^\[([A-Za-z]+)\]:? (\S.*)$/);
             const prefix = match && kinds[match[1]] ? match[1] : null;
             if (!prefix) {

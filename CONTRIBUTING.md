@@ -11,7 +11,7 @@ Every PR title starts with one of these prefixes, then a space and a short summa
 | `[Major]` | A breaking change (config, API, MQTT topics, CRD) that needs a major version bump | `kind/major` |
 | `[Chore]` | Refactoring, tests, CI, build, release housekeeping | `kind/chore` |
 | `[Docs]` | Documentation only | `kind/documentation` |
-| `[Deps]` | Dependency updates | `kind/dependency` |
+| `[Dependency]` | Dependency updates | `kind/dependency` |
 
 Examples:
 
@@ -25,12 +25,10 @@ PRs are squash-merged, so the title becomes the commit message on `main`.
 
 ## Labels
 
-Labels are defined in [`.github/labels.yml`](.github/labels.yml); add new ones there, not in the GitHub UI.
-
 - **kind/** (required on PRs): exactly one, matching the title prefix. The PR check adds it from the prefix if none is set.
+- **kind/support**: questions and support requests (issues only).
 - **priority/high**, **priority/low**: optional. No priority label means normal.
 - **needs-triage**, **needs-info**: issue triage state.
-- **lifecycle/stale**, **lifecycle/frozen**: managed by the stale workflow; add `lifecycle/frozen` to keep something open.
 - **good first issue**, **help wanted**: for contributors.
 
 Duplicates and won't-fix are recorded by closing the issue with that reason, not with a label.

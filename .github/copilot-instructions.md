@@ -2,10 +2,10 @@
 
 ## Pull requests
 
-- Title format: `[Prefix] Summary`, where Prefix is one of `Feature`, `Bug`, `Major`, `Chore`, `Docs`, `Deps`. No conventional-commit prefixes (`feat:`, `fix(scope):`).
+- Title format: `[Prefix] Summary`, where Prefix is one of `Feature`, `Bug`, `Major`, `Chore`, `Docs`, `Dependency`. No conventional-commit prefixes (`feat:`, `fix(scope):`).
 - `[Major]` only for breaking changes to config, API, MQTT topics or the CRD.
-- Apply exactly one `kind/*` label matching the prefix: Feature `kind/feature`, Bug `kind/bug`, Major `kind/major`, Chore `kind/chore`, Docs `kind/documentation`, Deps `kind/dependency`.
-- Use only labels defined in `.github/labels.yml`. Do not create labels.
+- Apply exactly one `kind/*` label matching the prefix: Feature `kind/feature`, Bug `kind/bug`, Major `kind/major`, Chore `kind/chore`, Docs `kind/documentation`, Dependency `kind/dependency`.
+- Use only the labels listed in `CONTRIBUTING.md`. Do not create labels.
 - PR body: a short list of what changed. No narration, no restating the diff.
 
 ## Commits
