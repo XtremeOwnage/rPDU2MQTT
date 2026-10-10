@@ -44,7 +44,7 @@ public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntity
         return new(HealthLevel.Good, "Available", floors == 1 ? "1 floor" : $"{floors} floors");
     }
 
-    private readonly LocationContributor contributor = new();
+    private LocationContributor contributor => field ??= new(() => host?.LiveValues);
     public IReadOnlyList<ContributedTier> Tiers(ExportPass pass, Config cfg) => contributor.Tiers(pass, cfg);
     public IReadOnlyList<string> TierIds(Config cfg) => contributor.TierIds(cfg);
     public IReadOnlyDictionary<string, string> Areas(Config cfg, FlowTopology topology) => contributor.Areas(cfg, topology);
@@ -55,6 +55,8 @@ public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntity
             (ctx, _) => Task.FromResult<object?>(Choices(ctx.Config, null)), Listed: false),
         new("rooms", "Rooms", "Every room and area, for a picker.", ActionEffect.Read,
             (ctx, _) => Task.FromResult<object?>(Choices(ctx.Config, [LocationKind.Room, LocationKind.Area])), Listed: false),
+        new("nodes", "Nodes", "Every node, for a picker.", ActionEffect.Read,
+            (ctx, _) => Task.FromResult<object?>(Endpoints().Nodes()), Listed: false),
         new("totals", "Totals", "The location tree with each place's total, every circuit and every placement.", ActionEffect.Read,
             async (ctx, ct) => await Endpoints().TotalsAsync(Posted(ctx), Metric(ctx), Period(ctx), ct), Listed: false),
         new("series", "Series", "One place's total through a window, from history.", ActionEffect.Read,

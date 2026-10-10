@@ -3,6 +3,7 @@
 type LocPlace = {
   id: string; name: string; kind: string; site: string; floor: string | null; value: number | null; state: string;
   nodes: { id: string; label: string }[]; missing: { id: string; label: string }[]; split: { id: string; label: string }[];
+  temperature?: number | null; humidity?: number | null;
 };
 type LocNode = { id: string; label: string; kind: string; value: number | null; location: string | null; via: string | null };
 type LocLive = { places: LocPlace[]; nodes: LocNode[]; units: string; problems: string[]; message: string | null };
@@ -13,6 +14,7 @@ const LOC_KINDS = ['site', 'floor', 'room', 'area'];
 
 export default function mount(sec: any, host: any) {
   ({ api, btn, el, ensure, toast, state, refreshDirty, formatMeasure, searchSelect } = host);
+  const fmtTemp = (c: number) => host.temp?.fmt ? host.temp.fmt(c, 1) : `${c} °C`;
   sec.classList.add('loc');
   sec.appendChild(el('h2', { text: 'Locations' }));
 
@@ -195,6 +197,8 @@ export default function mount(sec: any, host: any) {
     const stats = el('div', { class: 'loc-stats' },
       el('div', {}, el('span', { text: 'Now' }), el('strong', { text: p ? fmt(p.value, live?.units) : '—' })),
       el('div', {}, el('span', { text: 'Today' }), el('strong', { text: t ? fmt(t.value, today?.units) : '—' })));
+    if (p?.temperature != null) stats.appendChild(el('div', {}, el('span', { text: 'Temperature' }), el('strong', { text: fmtTemp(p.temperature) })));
+    if (p?.humidity != null) stats.appendChild(el('div', {}, el('span', { text: 'Humidity' }), el('strong', { text: `${Math.round(p.humidity)} %` })));
     detail.appendChild(stats);
     if (p && p.value == null && LOC_STATE[p.state]) detail.appendChild(el('div', { class: 'desc', text: LOC_STATE[p.state] }));
     if (p?.missing?.length) detail.appendChild(el('div', { class: 'desc', text: 'Missing: ' + p.missing.map(n => n.label).join(', ') }));
@@ -224,6 +228,8 @@ export default function mount(sec: any, host: any) {
         '', (v: string) => { if (v) { assignTo(v, o.Id); changed(); } }, { placeholder: 'Search nodes…' }));
     }
 
+    if (r.kind === 'room' || r.kind === 'area') renderClimate(o, r.kind);
+
     detail.appendChild(el('h4', { text: 'Rules' }));
     const rules = rulesIn().filter(x => x.Location === o.Id);
     for (const rule of rules) {
@@ -236,6 +242,29 @@ export default function mount(sec: any, host: any) {
     const addRule = btn('Add rule');
     addRule.onclick = () => { rulesIn().push({ Match: '', Location: o.Id }); changed(); };
     detail.appendChild(addRule);
+  }
+
+  function renderClimate(o: any, kind: string) {
+    detail.appendChild(el('h4', { text: 'Climate' }));
+    const c = ensure(o, 'Climate', {});
+    const labelOf = (id: string) => (live?.nodes || []).find(n => n.id === id)?.label || id;
+    for (const [key, name] of [['Temperature', 'Temperature'], ['Humidity', 'Humidity']]) {
+      const list: string[] = ensure(c, key, []);
+      const box = el('div', { class: 'loc-members' });
+      for (const id of list) {
+        const rm = btn('Remove');
+        rm.onclick = () => { list.splice(list.indexOf(id), 1); changed(); };
+        box.appendChild(el('div', { class: 'loc-member' }, el('span', { text: labelOf(id) }), rm));
+      }
+      if (!list.length && kind === 'area') box.appendChild(el('div', { class: 'desc', text: 'None: uses its rooms.' }));
+      const rest = (live?.nodes || []).filter(n => !list.includes(n.id));
+      if (rest.length) box.appendChild(searchSelect([{ value: '', label: `Add a ${name.toLowerCase()} sensor…` }, ...rest.map(n => ({ value: n.id, label: n.label }))],
+        '', (v: string) => { if (v) { list.push(v); changed(); } }, { placeholder: 'Search nodes…' }));
+      detail.appendChild(field(name, box));
+    }
+    const how = el('select', {}, ...['average', 'first', 'min', 'max'].map(v => el('option', { value: v, text: v, selected: (c.Combine || 'average') === v })));
+    how.onchange = () => { c.Combine = how.value; changed(); };
+    detail.appendChild(field('Combine', how));
   }
 
   function renderAssign() {

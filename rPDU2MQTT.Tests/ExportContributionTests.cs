@@ -54,10 +54,15 @@ public class ExportContributionTests
         return cfg;
     }
 
+    private static readonly Fixed Readings = new(new()
+    {
+        ["fridge|realpower"] = 120, ["thermo|temperature"] = 21.5, ["thermo2|temperature"] = 22.5, ["thermo|percent"] = 40,
+    });
+
     private static async Task<Captured> Publish(Config cfg, ExportContributions? contributions)
     {
         var pub = new Captured();
-        var src = new Fixed(new() { ["fridge|realpower"] = 120 });
+        var src = Readings;
         var pass = ExportPass.Build([new PduSnapshot("pdu", DateTime.UtcNow, new PduData())], cfg, src);
         await new MqttIntegration(cfg, pub, src, contributions: contributions).SendAsync(pass, CancellationToken.None);
         return pub;
@@ -122,6 +127,52 @@ public class ExportContributionTests
         Assert.Equal("kitchen", room.GetProperty("location").GetString());
         Assert.Equal("Kitchen", Discovery(pub, "fridge").GetProperty("device").GetProperty("suggested_area").GetString());
     }
+
+    [Fact]
+    public async Task APlacesClimate_IsPublishedWithItsTier_EvenWithNothingMetered()
+    {
+        var cfg = Configured();
+        cfg.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "thermo", Label = "Thermo", Kind = "sensor" });
+        cfg.EnergyFlow.Nodes.Add(new EnergyFlowNode { Id = "thermo2", Label = "Thermo 2", Kind = "sensor" });
+        cfg.Plugins["locations"] = PluginConfigBinder.ToNode(new LocationSettings
+        {
+            Sites = [new SiteConfig
+            {
+                Id = "home",
+                Floors = [new FloorConfig
+                {
+                    Id = "ground",
+                    Rooms =
+                    [
+                        new RoomConfig { Id = "den", Name = "Den", Climate = new() { Temperature = ["thermo", "thermo2"], Humidity = ["thermo"] } },
+                        new RoomConfig { Id = "attic", Name = "Attic", Climate = new() { Temperature = ["missing"] } },
+                    ],
+                    Areas = [new AreaConfig { Id = "all", Name = "All", Rooms = ["den", "attic"], Climate = new() { Combine = ClimateCombine.Max } }],
+                }],
+            }],
+        });
+
+        var pub = await Publish(cfg, new ExportContributions([new LocationContributor(() => Readings)]));
+
+        var den = State(pub, LocationExport.NodeId("den"));
+        Assert.Equal(22, den.GetProperty("temperature").GetDouble());
+        Assert.Equal(40, den.GetProperty("humidity").GetDouble());
+        Assert.Equal(JsonValueKind.Null, den.GetProperty("power").ValueKind);
+        Assert.Equal(22.5, State(pub, LocationExport.NodeId("all")).GetProperty("temperature").GetDouble());
+        Assert.False(State(pub, LocationExport.NodeId("attic")).TryGetProperty("temperature", out _));
+        var components = Discovery(pub, LocationExport.NodeId("den")).GetProperty("components");
+        var id = FlowExport.DeviceId(LocationExport.NodeId("den"));
+        Assert.Equal("temperature", components.GetProperty($"{id}_temperature").GetProperty("device_class").GetString());
+        Assert.Equal("humidity", components.GetProperty($"{id}_humidity").GetProperty("device_class").GetString());
+    }
+
+    [Theory]
+    [InlineData(ClimateCombine.Average, 21)]
+    [InlineData(ClimateCombine.First, 20)]
+    [InlineData(ClimateCombine.Min, 20)]
+    [InlineData(ClimateCombine.Max, 22)]
+    public void ClimateCombines_KnownReadingsOnly(string how, double expected) =>
+        Assert.Equal(expected, LocationClimate.Combine([null, 20, 22], how));
 
     private sealed class Picks
     {

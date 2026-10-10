@@ -16,7 +16,7 @@ const config = {
   Plugins: {
     locations: {
       Sites: [{ Id: 'home', Name: 'Home', Floors: [{ Id: 'ground', Name: 'Ground', Level: 0,
-        Rooms: [{ Id: 'kitchen', Name: 'Kitchen' }, { Id: 'office', Name: 'Office' }],
+        Rooms: [{ Id: 'kitchen', Name: 'Kitchen', Climate: { Temperature: ['fridge'], Humidity: [], Combine: 'average' } }, { Id: 'office', Name: 'Office' }],
         Areas: [{ Id: 'front', Name: 'Front', Rooms: ['kitchen', 'office'] }] }] }],
       AutoLocations: [{ Match: 'outlet:rack:*', Location: 'office' }],
     },
@@ -35,7 +35,7 @@ const nodes = [
   { id: 'tv', label: 'TV', kind: 'load', value: 90, location: null, via: null },
 ];
 const totals = (q) => ({ ok: true, metric: 'realpower', units: q ? 'kWh' : 'W', problems: [], message: null, nodes, circuits: [], placements: [],
-  places: [P('home', 'site', 270), P('ground', 'floor', 270), P('kitchen', 'room', q ? 1.5 : 150), P('office', 'room', 120), P('front', 'area', 270)] });
+  places: [P('home', 'site', 270), P('ground', 'floor', 270), { ...P('kitchen', 'room', q ? 1.5 : 150), temperature: 21.5, humidity: null }, P('office', 'room', 120), P('front', 'area', 270)] });
 
 const { sandbox, getEl } = makeDom({
   bodies: (url) => {
@@ -84,6 +84,11 @@ if (!members().some(m => textOf(m).includes('Fridge') && m.classList.contains('i
 
 row('Kitchen').click();
 if (!textOf(detail()).includes('1.5')) fail('today total not shown');
+if (!textOf(query(detail(), '.loc-stats')).includes('Temperature')) fail('temperature not shown');
+const climate = query(detail(), '.loc-field', true).find(f => textOf(f).startsWith('Temperature'));
+if (!climate || !textOf(climate).includes('Fridge')) fail('temperature sensor not listed');
+button('Remove', climate).click();
+if (config.Plugins.locations.Sites[0].Floors[0].Rooms[0].Climate.Temperature.length) fail('temperature sensor not removed');
 
 // Add a room, rename it: the id follows the first name.
 row('Ground').click();

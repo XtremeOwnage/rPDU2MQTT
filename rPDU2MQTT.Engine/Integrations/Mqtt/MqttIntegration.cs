@@ -276,7 +276,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
 
             if (!publishDiscovery) continue;
             var tconfig = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(tier.Id)}/config";
-            var tdoc = FlowExport.DiscoveryDocument(tierNode, null, ttopic, energyGraph.Units, graph.Units, availability, area: tier.Area);
+            var tdoc = FlowExport.DiscoveryDocument(tierNode, null, ttopic, energyGraph.Units, graph.Units, availability, area: tier.Area, extra: tier.Sensors);
             await publisher.PublishAsync(tconfig, tdoc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
         }
 

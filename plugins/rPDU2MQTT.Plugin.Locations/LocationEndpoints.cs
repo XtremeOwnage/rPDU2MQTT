@@ -33,6 +33,14 @@ internal sealed class LocationEndpoints(IPluginHost host)
         return sums;
     }
 
+    /// <summary>Every node as [id, label].</summary>
+    public object Nodes()
+    {
+        var graph = FlowGraphBuilder.Build(Merged(), host.Config.EnergyFlow, FlowGraphBuilder.DefaultMetric, host.LiveValues);
+        return graph.Nodes.Where(n => !n.Synthetic).OrderBy(n => n.Label, StringComparer.OrdinalIgnoreCase)
+            .Select(n => new[] { n.Id, n.Label == n.Id ? n.Id : $"{n.Label} ({n.Id})" }).ToArray();
+    }
+
     /// <summary>The location tree with each place's total, every circuit, and every placement — what the floor plan page draws.</summary>
     public async Task<object> TotalsAsync(Config cfg, string metric, string? period, CancellationToken ct)
     {
@@ -73,6 +81,8 @@ internal sealed class LocationEndpoints(IPluginHost host)
             && string.Equals(p.Panel, c.Chain.Panel.Id, StringComparison.OrdinalIgnoreCase)
             && string.Equals(p.Breaker, c.Chain.Breaker.Number, StringComparison.OrdinalIgnoreCase);
         var map = PanelMap.For(flow);
+        var temperature = LocationExport.ValuesOf(FlowGraphBuilder.Build(data, flow, LocationClimate.TemperatureMetric, live));
+        var humidity = LocationExport.ValuesOf(FlowGraphBuilder.Build(data, flow, LocationClimate.HumidityMetric, live));
         return new
         {
             ok = true,
@@ -84,6 +94,7 @@ internal sealed class LocationEndpoints(IPluginHost host)
             places = index.All.Select(e =>
             {
                 var t = totals[e.Id];
+                var (temp, hum) = LocationClimate.Read(index, e, temperature, humidity);
                 return new
                 {
                     id = e.Id,
@@ -96,6 +107,8 @@ internal sealed class LocationEndpoints(IPluginHost host)
                     nodes = t.Nodes.Select(n => new { id = n, label = Label(n) }).ToArray(),
                     missing = t.Missing.Select(n => new { id = n, label = Label(n) }).ToArray(),
                     split = t.Split.Select(n => new { id = n, label = Label(n) }).ToArray(),
+                    temperature = temp,
+                    humidity = hum,
                 };
             }).ToArray(),
             nodes = graph.Nodes.Where(n => !n.Synthetic).Select(n => new

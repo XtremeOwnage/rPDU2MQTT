@@ -215,6 +215,9 @@ public class RoomConfig
 
     [Description("The Home Assistant area this room was linked to, by area id. Written when rooms are published to Home Assistant, so a rename updates the same area.")]
     public string HaArea { get; set; } = "";
+
+    [Description("Sensors for this room's temperature and humidity.")]
+    public ClimateConfig Climate { get; set; } = new();
 }
 
 /// <summary>An area on a floor: a named part of it that can span rooms (#461).</summary>
@@ -235,6 +238,34 @@ public class AreaConfig
     [DefaultValue(false)]
     [Description("Lock the area's outline: it cannot be moved, reshaped or deleted until it is unlocked.")]
     public bool Locked { get; set; }
+
+    [Description("Sensors for this area's temperature and humidity. None: its rooms' sensors.")]
+    public ClimateConfig Climate { get; set; } = new();
+}
+
+public static class ClimateCombine
+{
+    public const string First = "first";
+    public const string Average = "average";
+    public const string Min = "min";
+    public const string Max = "max";
+}
+
+/// <summary>A place's temperature and humidity sensors. Not inherited.</summary>
+public class ClimateConfig
+{
+    [ChoicesFrom("/api/integrations/locations/nodes")]
+    [Description("Nodes reporting temperature.")]
+    public List<string> Temperature { get; set; } = new();
+
+    [ChoicesFrom("/api/integrations/locations/nodes")]
+    [Description("Nodes reporting humidity.")]
+    public List<string> Humidity { get; set; } = new();
+
+    [AllowedValues(ClimateCombine.First, ClimateCombine.Average, ClimateCombine.Min, ClimateCombine.Max)]
+    [DefaultValue(ClimateCombine.Average)]
+    [Description("How several sensors combine: first, average, min or max.")]
+    public string Combine { get; set; } = ClimateCombine.Average;
 }
 
 /// <summary>A point on a floor plan, in the floor's drawing units.</summary>
