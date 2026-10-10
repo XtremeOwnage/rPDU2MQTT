@@ -43,7 +43,6 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
     /// Where the published high-water marks live. Without one they are held in memory and every restart
     /// re-baselines them, which is read downstream as a meter reset — see <see cref="Core.Flow.CumulativeExport"/>.
     /// </param>
-    /// <param name="contributions">Tiers and areas plugins add; the built-in places when none are given.</param>
     public MqttIntegration(Config cfg, IMessagePublisher publisher, IFlowValueSource? live = null,
                            Core.Flow.IEnergyStore? store = null, ExportContributions? contributions = null)
     {
@@ -256,8 +255,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             await publisher.PublishAsync(gconfig, gdoc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
         }
 
-        // Tiers plugins add beside the nodes, such as each place's total (#467). Unknown is not published,
-        // exactly as for a node.
+        // Plugin tiers.
         foreach (var tier in contributions.Tiers(pass, cfg))
         {
             var tierNode = new FlowNode(tier.Id, tier.Label, tier.Kind, tier.Power);

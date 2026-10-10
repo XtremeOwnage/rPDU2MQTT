@@ -102,7 +102,7 @@ public sealed class SchemaNode
     /// <summary>One object per plugin that keeps settings on this kind of entity, keyed by plugin id.</summary>
     public List<SchemaNode>? Extensions { get; set; }
 
-    /// <summary>The API path that answers this field's choices — see <c>ChoicesFromAttribute</c>.</summary>
+    /// <summary>See <c>ChoicesFromAttribute</c>.</summary>
     public string? ChoicesFrom { get; set; }
 
     public string[]? TemplateVars { get; set; }

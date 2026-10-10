@@ -13714,7 +13714,6 @@ function pluginPageTool(p            ) {
 // ── config-form.ts ──────────────────────────────────────────────
 // Schema-driven config form, nav, and build().
 
-/// The choices a field's server path answers, as [value, label]; none when it cannot be reached.
 async function fetchChoices(path        )                              {
   try {
     const r      = await api(path);
@@ -13730,7 +13729,6 @@ function scalarInput(node     , obj     )      {
     el = document.createElement('input'); el.type = 'checkbox'; el.className = 'switch'; el.checked = !!(obj[node.key] ?? node.default);
     el.onchange = () => { obj[node.key] = el.checked; touched(); };
   } else if (node.choicesFrom) {
-    // Choices the server answers when the field is drawn, such as the places a plugin defines.
     el = document.createElement('select');
     const current = obj[node.key] == null ? '' : String(obj[node.key]);
     const fill = (choices                    ) => {
@@ -14031,7 +14029,6 @@ function renderList(node     , arr       , path          ) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
 
-  // Picked from the choices the server answers, as boxes to tick.
   if (node.choicesFrom) {
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
     const boxes = el('div', { class: 'choice-boxes' });
