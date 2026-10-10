@@ -79,6 +79,12 @@ public static class PluginLoader
     {
         try
         {
+            if (PluginApi.Incompatible(file) is { } why)
+            {
+                log?.Invoke($"Plugin '{Path.GetFileName(file)}' could not be loaded: {why} It is being skipped; everything else starts as normal.");
+                return new LoadedPlugin(file, Array.Empty<IIntegration>(), why);
+            }
+
             var assembly = new PluginLoadContext(file).LoadFromAssemblyPath(Path.GetFullPath(file));
             var integrations = new List<IIntegration>();
 
