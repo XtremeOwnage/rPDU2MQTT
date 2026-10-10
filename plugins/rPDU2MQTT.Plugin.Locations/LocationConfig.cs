@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace rPDU2MQTT.Models.Config;
+namespace rPDU2MQTT.Plugin.Locations;
 
 /// <summary>The kinds of place a location id can name (#461).</summary>
 public static class LocationKind

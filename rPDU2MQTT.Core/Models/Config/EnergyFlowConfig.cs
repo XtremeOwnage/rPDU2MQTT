@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
+using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config;
 
@@ -87,21 +89,29 @@ public class EnergyFlowConfig
     [Description("CT clamps: which breaker's wire each one is on, the monitor channel it is plugged into, its rating, and whether it is on backwards.")]
     public List<CtClampConfig> Clamps { get; set; } = new();
 
-    /// <summary>Sites, their floors, and the rooms and areas on them (#461).</summary>
-    [Description("Where things are: sites, their floors, and the rooms and areas on each floor. Energy rolls up room → floor → site alongside the electrical hierarchy.")]
-    public List<SiteConfig> Sites { get; set; } = new();
+    /// <summary>Where Sites used to live. Moved to the Locations plugin's section on load; never written once moved.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("Sites")]
+    [YamlMember(Alias = "Sites")]
+    public object? LegacySites { get; set; }
 
-    /// <summary>Outlets, switches, fixtures and devices placed on the floor plans (#464).</summary>
-    [Description("Outlets, switches, fixtures, appliances and devices placed on the floor plans, each with its room and the circuit feeding it.")]
-    public List<PlacementConfig> Placements { get; set; } = new();
+    /// <summary>Where Placements used to live. Moved to the Locations plugin's section on load; never written once moved.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("Placements")]
+    [YamlMember(Alias = "Placements")]
+    public object? LegacyPlacements { get; set; }
 
-    /// <summary>Cable runs drawn on the floor plans (#464).</summary>
-    [Description("Cable runs drawn on the floor plans: branch circuits, feeders and the utility service, each between placed items.")]
-    public List<RunConfig> Runs { get; set; } = new();
+    /// <summary>Where Runs used to live. Moved to the Locations plugin's section on load; never written once moved.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("Runs")]
+    [YamlMember(Alias = "Runs")]
+    public object? LegacyRuns { get; set; }
 
-    /// <summary>Locations for derived nodes, which have no entry of their own to carry one (#461).</summary>
-    [Description("Locations for derived nodes (PDUs and outlets), which have no entry of their own. Matched by node id with '*' as a wildcard; the first match wins, and an exact id beats a pattern.")]
-    public List<AutoLocationRule> AutoLocations { get; set; } = new();
+    /// <summary>Where AutoLocations used to live. Moved to the Locations plugin's section on load; never written once moved.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("AutoLocations")]
+    [YamlMember(Alias = "AutoLocations")]
+    public object? LegacyAutoLocations { get; set; }
 
     /// <summary>
     /// Legacy single-feeder map (child id → parent id), superseded by <see cref="Links"/>. Still honored on
@@ -280,8 +290,11 @@ public class EnergyFlowNode : IExtensible
     [Description("Free-form tags for filtering the diagram and the energy views — e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows.")]
     public List<string> Tags { get; set; } = new();
 
-    [Description("The id of the room, area, floor or site this node is in. Its own consumption counts toward that place.")]
-    public string Location { get; set; } = "";
+    /// <summary>Where the node's place used to live. Moved to its Locations plugin settings on load; never written once moved.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("Location")]
+    [YamlMember(Alias = "Location")]
+    public string? LegacyLocation { get; set; }
 
     [Description("The circuit this node is plugged into, as the panel id and breaker number: 'main_panel/B06'. A circuit then shows it among its metered devices and reports what is left unmetered.")]
     public string Circuit { get; set; } = "";

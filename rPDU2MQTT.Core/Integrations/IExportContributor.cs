@@ -42,9 +42,6 @@ public sealed class ExportContributions
 
     public static ExportContributions None { get; } = new([]);
 
-    /// <summary>What the bridge contributes itself: places as tiers, and rooms as areas.</summary>
-    public static ExportContributions BuiltIn { get; } = new([new LocationContributor()]);
-
     public IReadOnlyList<IExportContributor> Exports { get; }
     public IReadOnlyList<IAreaProvider> AreaProviders { get; }
 

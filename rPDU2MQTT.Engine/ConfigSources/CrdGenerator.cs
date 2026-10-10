@@ -27,12 +27,12 @@ public static class CrdGenerator
     /// Quote the property names those readers would otherwise mistake for a value.
     ///
     /// <para>
-    /// The floor plan's <c>Y</c> coordinate is the case that matters: emitted bare, every one of those tools
+    /// A floor plan's <c>Y</c> coordinate was the case that mattered: emitted bare, every one of those tools
     /// installs a schema describing a property called <c>true</c>. Y is then unvalidated — and on any object
     /// that does not preserve unknown fields, the API server prunes it out of what anyone saves.
     /// </para>
     /// </summary>
-    private static string Quoted(string yaml) => System.Text.RegularExpressions.Regex.Replace(
+    internal static string Quoted(string yaml) => System.Text.RegularExpressions.Regex.Replace(
         yaml,
         $"(?m)^(\\s*)({string.Join('|', ReadAsBooleans)}):",
         m => $"{m.Groups[1].Value}\"{m.Groups[2].Value}\":");

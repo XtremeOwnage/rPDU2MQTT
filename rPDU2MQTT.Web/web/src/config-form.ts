@@ -35,7 +35,8 @@ import { featureToggle } from './sections/features.js';
 async function fetchChoices(path: string): Promise<[string, string][]> {
   try {
     const r: any = await api(path);
-    const list = Array.isArray(r?.body) ? r.body : (r?.body?.choices || []);
+    const b = r?.body;
+    const list = Array.isArray(b) ? b : Array.isArray(b?.result) ? b.result : (b?.choices || b?.result?.choices || []);
     return list.map((c: any) => Array.isArray(c) ? [String(c[0]), String(c[1] ?? c[0])] : [String(c), String(c)]);
   } catch { return []; }
 }
@@ -1045,7 +1046,7 @@ function sectionActions(node: any) {
       add('Clear discovery', clearHa, 'danger');
       // The two cleanups "Clear discovery" cannot do.
     }
-    bar.appendChild(externalLink('Open Home Assistant', () => cfgUrl('HomeAssistant', 'EnergyDashboard', 'Url'), 'Open Home Assistant'));
+    bar.appendChild(externalLink('Open Home Assistant', () => cfgUrl('HomeAssistant', 'Url'), 'Open Home Assistant'));
   } else if (node.key === 'Prometheus') {
     // Our own exporter's /metrics, on this page's hostname.
     bar.appendChild(externalLink('Open /metrics', () => {

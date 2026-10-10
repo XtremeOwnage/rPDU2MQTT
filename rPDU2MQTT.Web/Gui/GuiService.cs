@@ -98,7 +98,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         this.health = health;
         this.registry = registry;
         this.integrationStatus = integrationStatus;
-        this.contributions = contributions ?? Core.Integrations.ExportContributions.BuiltIn;
+        this.contributions = contributions ?? Core.Integrations.ExportContributions.None;
         this.restarter = restarter;
         this.snapshots = snapshots;
         this.hostRoles = hostRoles;
@@ -740,6 +740,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var reloaded = configSource.Load();
                 config.EnergyFlow = reloaded.EnergyFlow;
                 config.HASS.EnergyDashboard = reloaded.HASS.EnergyDashboard;
+                config.HASS.Url = reloaded.HASS.Url;
+                config.HASS.Token = reloaded.HASS.Token;
                 config.EmonCMS.Feeds = reloaded.EmonCMS.Feeds;
                 config.History = reloaded.History;
                 config.PlanStorage = reloaded.PlanStorage;
@@ -1149,7 +1151,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        MapLocationEndpoints(app);
+        MapPlanImageEndpoints(app);
         MapCircuitFinderEndpoints(app);
 
         // Parse a pasted panel directory for preview; writes nothing.
@@ -1787,8 +1789,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var b = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: cts.Token);
-                var url = b.RootElement.TryGetProperty("url", out var u) ? u.GetString() : config.HASS.EnergyDashboard.Url;
-                var token = b.RootElement.TryGetProperty("token", out var t) ? t.GetString() : config.HASS.EnergyDashboard.Token;
+                var url = b.RootElement.TryGetProperty("url", out var u) ? u.GetString() : config.HASS.Url;
+                var token = b.RootElement.TryGetProperty("token", out var t) ? t.GetString() : config.HASS.Token;
                 var count = await haEnergy.SyncAsync(url ?? "", token ?? "", cts.Token);
                 return Results.Json(new { ok = true, message = count == 0 ? "No tiers had an energy sensor in HA yet — enable “Export tiers to MQTT” + HA discovery and wait a poll." : $"Synced {count} device(s) into the Energy Dashboard." }, ConfigSchema.Json);
             }
@@ -1805,8 +1807,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var b = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: cts.Token);
-                var url = b.RootElement.TryGetProperty("url", out var u) ? u.GetString() : config.HASS.EnergyDashboard.Url;
-                var token = b.RootElement.TryGetProperty("token", out var t) ? t.GetString() : config.HASS.EnergyDashboard.Token;
+                var url = b.RootElement.TryGetProperty("url", out var u) ? u.GetString() : config.HASS.Url;
+                var token = b.RootElement.TryGetProperty("token", out var t) ? t.GetString() : config.HASS.Token;
                 var count = await haEnergy.ClearAsync(url ?? "", token ?? "", cts.Token);
                 return Results.Json(new { ok = true, message = $"Cleared {count} device(s) from the Energy Dashboard." }, ConfigSchema.Json);
             }
@@ -1852,7 +1854,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 enabled = i.Enabled(config),
                 fault = i.Misconfigured(config),
                 capabilities = Core.Integrations.IntegrationRegistry.Capabilities(i),
-                actions = Core.Integrations.IntegrationActions.For(i, CurrentPass).Select(a => new
+                actions = Core.Integrations.IntegrationActions.For(i, CurrentPass).Where(a => a.Listed).Select(a => new
                 {
                     name = a.Name, title = a.Title, description = a.Description, effect = a.Effect.ToString().ToLowerInvariant(),
                 }),
@@ -1877,32 +1879,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             return Results.Content(text, file.EndsWith(".css", StringComparison.Ordinal) ? "text/css" : "text/javascript");
         });
 
-        app.MapPost("/api/integrations/{id}/{action}", async (string id, string action, HttpContext ctx) =>
-        {
-            if (integrations is null) return Results.Json(new { ok = false, message = "No integration registry in this process." }, ConfigSchema.Json);
+        app.MapPost("/api/integrations/{id}/{action}", (string id, string action, HttpContext ctx) => RunAction(id, action, ctx, readOnly: false));
 
-            var integration = integrations.ById(id);
-            if (integration is null) return Results.Json(new { ok = false, message = $"No integration called '{id}'." }, ConfigSchema.Json);
-
-            var found = Core.Integrations.IntegrationActions.Find(integration, action, CurrentPass);
-            if (found is null) return Results.Json(new { ok = false, message = $"'{integration.DisplayName}' has no action called '{action}'." }, ConfigSchema.Json);
-
-            // Query string and form fields, flattened.
-            var args = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (k, v) in ctx.Request.Query) args[k] = v.ToString();
-            if (ctx.Request.HasFormContentType)
-                foreach (var (k, v) in await ctx.Request.ReadFormAsync()) args[k] = v.ToString();
-
-            try
-            {
-                var result = await found.Handler(new Core.Integrations.IntegrationActionContext(config, args), ctx.RequestAborted);
-                return Results.Json(new { ok = true, result }, ConfigSchema.Json);
-            }
-            catch (Exception ex)
-            {
-                return Results.Json(new { ok = false, message = $"{integration.DisplayName} · {found.Title} failed: {ex.Message}" }, ConfigSchema.Json);
-            }
-        });
+        // An action that only reads, for links and pickers that fetch with GET.
+        app.MapGet("/api/integrations/{id}/{action}", (string id, string action, HttpContext ctx) => RunAction(id, action, ctx, readOnly: true));
 
         // Live discovered structure for the Overrides editor.
         app.MapGet("/api/live", async (HttpContext ctx) =>
@@ -2583,4 +2563,51 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         catch { return null; }
     }
 
+    private async Task<IResult> RunAction(string id, string action, HttpContext ctx, bool readOnly)
+    {
+        if (integrations is null) return Results.Json(new { ok = false, message = "No integration registry in this process." }, ConfigSchema.Json);
+
+        var integration = integrations.ById(id);
+        if (integration is null) return Results.Json(new { ok = false, message = $"No integration called '{id}'." }, ConfigSchema.Json);
+
+        var found = Core.Integrations.IntegrationActions.Find(integration, action, CurrentPass);
+        if (found is null || (readOnly && found.Effect != Core.Integrations.ActionEffect.Read))
+            return Results.Json(new { ok = false, message = $"'{integration.DisplayName}' has no action called '{action}'." }, ConfigSchema.Json);
+
+        // Query string and form fields, flattened; a JSON body is handed over as sent, its top-level text and numbers also flattened.
+        var args = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (k, v) in ctx.Request.Query) args[k] = v.ToString();
+        string? body = null;
+        if (ctx.Request.HasFormContentType)
+            foreach (var (k, v) in await ctx.Request.ReadFormAsync()) args[k] = v.ToString();
+        else if (!readOnly)
+        {
+            using var reader = new StreamReader(ctx.Request.Body);
+            body = await reader.ReadToEndAsync(ctx.RequestAborted);
+            if (string.IsNullOrWhiteSpace(body)) body = null;
+            else
+            {
+                try
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(body);
+                    if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
+                        foreach (var p in doc.RootElement.EnumerateObject())
+                            if (p.Value.ValueKind is System.Text.Json.JsonValueKind.String) args.TryAdd(p.Name, p.Value.GetString());
+                            else if (p.Value.ValueKind is System.Text.Json.JsonValueKind.Number or System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False)
+                                args.TryAdd(p.Name, p.Value.GetRawText());
+                }
+                catch (System.Text.Json.JsonException) { }
+            }
+        }
+
+        try
+        {
+            var result = await found.Handler(new Core.Integrations.IntegrationActionContext(config, args, body), ctx.RequestAborted);
+            return Results.Json(new { ok = true, result }, ConfigSchema.Json);
+        }
+        catch (Exception ex)
+        {
+            return Results.Json(new { ok = false, message = $"{integration.DisplayName} · {found.Title} failed: {ex.Message}" }, ConfigSchema.Json);
+        }
+    }
 }

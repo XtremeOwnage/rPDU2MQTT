@@ -20,6 +20,9 @@ public interface IPluginHost
     IntegrationStatus Status { get; }
 
     IPeriodAuditor? Auditor { get; }
+
+    /// <summary>Stored history, or null when history is off.</summary>
+    IMeasurementHistory? History => null;
 }
 
 /// <summary>An integration the host hands its services to before first use.</summary>

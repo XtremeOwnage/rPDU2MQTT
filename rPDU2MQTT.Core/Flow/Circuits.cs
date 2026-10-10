@@ -16,7 +16,7 @@ public enum RemainderState
     Unknown,
 }
 
-/// <summary>A circuit: its breaker, what it reads, what is metered on it and what is placed on it (#464, #465).</summary>
+/// <summary>A circuit: its breaker, what it reads, and what is metered on it (#464, #465).</summary>
 public sealed record CircuitReport(
     BreakerChain Chain,
     string Ref,
@@ -26,9 +26,7 @@ public sealed record CircuitReport(
     IReadOnlyList<CircuitDevice> Devices,
     double? Remainder,
     RemainderState State,
-    bool Exceeded,
-    IReadOnlyList<PlacementConfig> Placements,
-    IReadOnlyList<string> Rooms);
+    bool Exceeded);
 
 /// <summary>Circuits as the floor plan sees them: a breaker, referred to as "panel/number".</summary>
 public static class Circuits
@@ -67,12 +65,13 @@ public static class Circuits
     /// Every circuit with what reads on it. A device beneath another device on the same circuit is not counted twice,
     /// and the remainder is never clamped: a device reading more than its circuit is flagged instead.
     /// </summary>
+    /// <param name="plugged">More devices and the circuit each is on, beside the nodes naming one, such as items placed on a floor plan.</param>
     public static IReadOnlyList<CircuitReport> Report(EnergyFlowConfig flow, IFlowValueSource? live, Func<string, double?> valueOf,
-        FlowTopology? topology = null, string metric = FlowGraphBuilder.DefaultMetric)
+        FlowTopology? topology = null, string metric = FlowGraphBuilder.DefaultMetric, IEnumerable<(string Node, string Circuit)>? plugged = null)
     {
         var map = PanelMap.For(flow);
         var nodeIds = PanelNodes.NodeIds(flow);
-        var placements = flow.Placements ?? new();
+        var extra = plugged?.ToList() ?? [];
         var reports = new List<CircuitReport>();
         foreach (var chain in map.Chains)
         {
@@ -84,7 +83,7 @@ public static class Circuits
             if (power is null && node is not null && valueOf(node) is { } nodeValue) { power = nodeValue; gap = PowerGap.None; }
 
             var deviceIds = flow.Nodes.Where(n => Mine(n.Circuit) && !string.IsNullOrWhiteSpace(n.Id)).Select(n => n.Id)
-                .Concat(placements.Where(p => Mine(p.Circuit) && !string.IsNullOrWhiteSpace(p.Node)).Select(p => p.Node))
+                .Concat(extra.Where(p => Mine(p.Circuit) && !string.IsNullOrWhiteSpace(p.Node)).Select(p => p.Node))
                 .Where(id => node is null || !Ids.Equals(id, node))
                 .Distinct(Ids).ToList();
             if (topology is not null)
@@ -102,9 +101,7 @@ public static class Circuits
             var known = devices.Where(d => d.Value is not null).Sum(d => d.Value!.Value);
             var exceeded = power is { } p && devices.Any(d => d.Value is not null) && known - p > Tolerance(p);
 
-            reports.Add(new CircuitReport(chain, reference, node, power, gap, devices, remainder, state, exceeded,
-                placements.Where(p => Mine(p.Circuit)).ToList(),
-                (chain.Breaker.Rooms ?? new()).Where(x => !string.IsNullOrWhiteSpace(x)).ToList()));
+            reports.Add(new CircuitReport(chain, reference, node, power, gap, devices, remainder, state, exceeded));
         }
         return reports;
     }

@@ -47,7 +47,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
     public MqttIntegration(Config cfg, IMessagePublisher publisher, IFlowValueSource? live = null,
                            Core.Flow.IEnergyStore? store = null, ExportContributions? contributions = null)
     {
-        this.contributions = contributions ?? ExportContributions.BuiltIn;
+        this.contributions = contributions ?? ExportContributions.None;
         this.cfg = cfg;
         this.publisher = publisher;
         this.live = live;

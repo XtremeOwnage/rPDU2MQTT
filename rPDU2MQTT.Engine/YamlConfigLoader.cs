@@ -150,6 +150,16 @@ internal class YamlConfigLoader
         if (config.Prometheus.EnabledAlias == true)
             config.Prometheus.Exporter = true;
 
+        // The Home Assistant URL and token used to live under EnergyDashboard; everything that talks to
+        // Home Assistant's API now shares HomeAssistant.Url and Token.
+        var dashboard = config.HASS.EnergyDashboard;
+        if (string.IsNullOrWhiteSpace(config.HASS.Url)) config.HASS.Url = dashboard.LegacyUrl;
+        if (string.IsNullOrWhiteSpace(config.HASS.Token)) config.HASS.Token = dashboard.LegacyToken;
+        dashboard.LegacyUrl = null;
+        dashboard.LegacyToken = null;
+
+        Models.Config.LegacyLocations.Migrate(config);
+
         ApplyEnvironmentOverrides(config);
 
         return config;
@@ -192,7 +202,7 @@ internal class YamlConfigLoader
         if (oidcSecret is not null) { config.Gui.Oidc.ClientSecret = oidcSecret; Log.Information("Using OIDC client secret from environment."); }
 
         var hassToken = ResolveSecret("RPDU2MQTT_HASS_TOKEN");
-        if (hassToken is not null) { config.HASS.EnergyDashboard.Token = hassToken; Log.Information("Using Home Assistant token from environment."); }
+        if (hassToken is not null) { config.HASS.Token = hassToken; Log.Information("Using Home Assistant token from environment."); }
 
         var cachePass = ResolveSecret("RPDU2MQTT_CACHE_PASSWORD");
         if (cachePass is not null) { config.Cache.Password = cachePass; Log.Information("Using cache password from environment."); }

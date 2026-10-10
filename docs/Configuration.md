@@ -1108,7 +1108,7 @@ required. The poll runs only when a feed is bound.
 ### Live sources from Home Assistant entities
 
 - `Type: homeassistant`, entity id in `Settings.Entity`.
-- Read over the REST API using `HomeAssistant.EnergyDashboard.Url` and a long-lived access token.
+- Read over the REST API using `HomeAssistant.Url` and a long-lived access token.
 - An entity that is `unavailable` or non-numeric supplies nothing.
 
 ### Live sources from Tigo optimizers (plugin)
@@ -1486,82 +1486,89 @@ configuration cannot be saved.
 Gui:
   DistanceUnits: imperial            # auto, imperial or metric
   TemperatureUnits: fahrenheit       # auto, celsius or fahrenheit
+Plugins:
+  locations:                         # the Locations plugin: places, items and wiring
+    Sites:
+      - Id: home
+        Name: Home
+        Floors:
+          - Id: ground
+            Name: Ground floor
+            Level: 0                   # -1 basement, 1 upstairs; floors are listed in this order
+            Width: 1829                # the plot, in drawing units (60 ft at 100 units a metre)
+            Height: 1219
+            Scale: 100                 # drawing units per metre
+            Image: 3f9c0e1a2b4d5e6f7a8b9c0d.png   # an uploaded plan, by id (see Plan storage below)
+            ImageOpacity: 0.85
+            Ground: grass
+            Rooms:
+              - Id: kitchen
+                Name: Kitchen
+                Surface: tile
+                Shape: [{X: 0, Y: 0}, {X: 400, Y: 0}, {X: 400, Y: 300}, {X: 0, Y: 300}]
+              - Id: back_yard
+                Name: Back yard
+                Outdoor: true
+                Surface: grass
+                Shape: [{X: 0, Y: 300}, {X: 1829, Y: 300}, {X: 1829, Y: 1219}, {X: 0, Y: 1219}]
+            Areas:
+              - Id: front
+                Name: Front of house
+                Rooms: [kitchen, office]   # an area takes in whole rooms, and may have an outline of its own
+            Openings:
+              - Id: door_1
+                Kind: door                 # door, double-door, sliding-door, garage-door, window, opening
+                X: 400
+                Y: 150
+                Angle: 90                  # the wall's direction
+                Width: 91.4
+                Swing: left
+    Placements:
+      - Id: fridge
+        Kind: appliance
+        Label: Fridge
+        Room: kitchen                  # blank when it is outdoors
+        Floor: ground
+        X: 120
+        Y: 80
+        Circuit: main_panel/B06        # panel id / breaker number; blank when nobody knows yet
+        Node: fridge_plug              # the node metering it, if one does
+      - Id: pole_1
+        Kind: pole
+        Floor: ground
+        X: 1800
+        Y: 1200
+    Runs:
+      - Id: run_1
+        Kind: circuit                  # circuit, feeder or service
+        Floor: ground
+        Circuit: main_panel/B06
+        From: fridge
+        To: outlet_2
+        Points: [{X: 300, Y: 100}]     # the bends between its ends
+    AutoLocations:                   # for derived nodes, which have no entry of their own
+      - Match: "outlet:rack_pdu_1:*"
+        Location: office
 EnergyFlow:
-  Sites:
-    - Id: home
-      Name: Home
-      Floors:
-        - Id: ground
-          Name: Ground floor
-          Level: 0                   # -1 basement, 1 upstairs; floors are listed in this order
-          Width: 1829                # the plot, in drawing units (60 ft at 100 units a metre)
-          Height: 1219
-          Scale: 100                 # drawing units per metre
-          Image: 3f9c0e1a2b4d5e6f7a8b9c0d.png   # an uploaded plan, by id (see Plan storage below)
-          ImageOpacity: 0.85
-          Ground: grass
-          Rooms:
-            - Id: kitchen
-              Name: Kitchen
-              Surface: tile
-              Shape: [{X: 0, Y: 0}, {X: 400, Y: 0}, {X: 400, Y: 300}, {X: 0, Y: 300}]
-            - Id: back_yard
-              Name: Back yard
-              Outdoor: true
-              Surface: grass
-              Shape: [{X: 0, Y: 300}, {X: 1829, Y: 300}, {X: 1829, Y: 1219}, {X: 0, Y: 1219}]
-          Areas:
-            - Id: front
-              Name: Front of house
-              Rooms: [kitchen, office]   # an area takes in whole rooms, and may have an outline of its own
-          Openings:
-            - Id: door_1
-              Kind: door                 # door, double-door, sliding-door, garage-door, window, opening
-              X: 400
-              Y: 150
-              Angle: 90                  # the wall's direction
-              Width: 91.4
-              Swing: left
-  Placements:
-    - Id: fridge
-      Kind: appliance
-      Label: Fridge
-      Room: kitchen                  # blank when it is outdoors
-      Floor: ground
-      X: 120
-      Y: 80
-      Circuit: main_panel/B06        # panel id / breaker number; blank when nobody knows yet
-      Node: fridge_plug              # the node metering it, if one does
-    - Id: pole_1
-      Kind: pole
-      Floor: ground
-      X: 1800
-      Y: 1200
-  Runs:
-    - Id: run_1
-      Kind: circuit                  # circuit, feeder or service
-      Floor: ground
-      Circuit: main_panel/B06
-      From: fridge
-      To: outlet_2
-      Points: [{X: 300, Y: 100}]     # the bends between its ends
-  AutoLocations:                     # for derived nodes, which have no entry of their own
-    - Match: "outlet:rack_pdu_1:*"
-      Location: office
   Nodes:
     - Id: fridge_plug
-      Location: kitchen              # where a node is
       Circuit: main_panel/B06        # the circuit it is plugged into
+      Ext:
+        locations: { Location: kitchen }        # where a node is
   Panels:
     - Id: main_panel
-      Location: garage               # where the panel is mounted
+      Ext:
+        locations: { Location: garage }         # where the panel is mounted
       Breakers:
         - Number: B06
-          Rooms: [kitchen, garage]   # the rooms and areas this circuit serves
           Node: ""                   # the node that is this circuit; blank uses the one channel measuring it
+          Ext:
+            locations: { Rooms: [kitchen, garage] }   # the rooms and areas this circuit serves
 ```
 
-Ids are shared by sites, floors, rooms and areas and must be unique across all of them.
+Ids are shared by sites, floors, rooms and areas and must be unique across all of them. A config that still
+has these under `EnergyFlow`, or `Location` and `Rooms` directly on nodes, panels and breakers, is moved here
+on load.
 
 **Node location**, first match:
 

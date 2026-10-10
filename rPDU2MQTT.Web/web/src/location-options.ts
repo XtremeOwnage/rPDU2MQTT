@@ -1,22 +1,6 @@
-// The places and circuits in the configuration, as picker options — for anything that says where a node is
-// or which circuit it is on (#461, #465).
+// The circuits in the configuration, as picker options — for anything that says which circuit a node is on (#465).
 import { el } from './helpers.js';
 import { state } from './state.js';
-
-/// Every site, floor, room and area as [id, label], indented by depth so the tree reads in a flat list.
-export function locationChoices(): [string, string][] {
-  const out: [string, string][] = [];
-  const sites: any[] = state.data?.EnergyFlow?.Sites || [];
-  sites.forEach(s => {
-    out.push([s.Id, s.Name || s.Id]);
-    (s.Floors || []).slice().sort((a: any, b: any) => (a.Level || 0) - (b.Level || 0)).forEach((f: any) => {
-      out.push([f.Id, `  ${f.Name || f.Id}`]);
-      (f.Rooms || []).forEach((r: any) => out.push([r.Id, `    ${r.Name || r.Id}`]));
-      (f.Areas || []).forEach((a: any) => out.push([a.Id, `    ${a.Name || a.Id} (area)`]));
-    });
-  });
-  return out;
-}
 
 /// Every breaker in use in every panel as ["panel/number", label]; an unused slot is not a circuit anything is on.
 export function circuitChoices(): [string, string][] {

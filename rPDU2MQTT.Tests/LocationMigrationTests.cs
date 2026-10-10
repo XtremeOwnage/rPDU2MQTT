@@ -1,3 +1,4 @@
+using rPDU2MQTT.Plugin.Locations;
 using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Models.Config;
 using Xunit;
@@ -7,15 +8,19 @@ namespace rPDU2MQTT.Tests;
 /// <summary>Room and area tags turned into locations (#461), planned and shown before anything is written.</summary>
 public class LocationMigrationTests
 {
-    private static EnergyFlowConfig Tagged() => new()
+    private static readonly LocationSettings Places = new()
     {
         Sites = { new SiteConfig { Id = "home", Floors = { new FloorConfig { Id = "ground", Rooms = { new RoomConfig { Id = "office" } } } } } },
+    };
+
+    private static EnergyFlowConfig Tagged() => new()
+    {
         Nodes =
         {
             new EnergyFlowNode { Id = "fridge", Tags = { "kitchen", "critical" } },
             new EnergyFlowNode { Id = "b06", Tags = { "kitchen", "garage" } },
             new EnergyFlowNode { Id = "desk", Tags = { "office" } },
-            new EnergyFlowNode { Id = "placed", Tags = { "garage" }, Location = "office" },
+            new EnergyFlowNode { Id = "placed", Tags = { "garage" }, Ext = new() { ["locations"] = new Dictionary<string, object?> { ["Location"] = "office" } } },
         },
         AutoTags = { new AutoTagRule { Match = "outlet:rack:*", Tags = { "office" } } },
     };
@@ -31,7 +36,7 @@ public class LocationMigrationTests
     [Fact]
     public void ThePlan_CreatesPlaces_PlacesNodes_AndSaysWhatItLeftAlone()
     {
-        var plan = LocationMigration.Plan(Tagged(),
+        var plan = LocationMigration.Plan(Places, Tagged(),
         [
             new TagMapping { Tag = "kitchen", As = "room", Floor = "ground" },
             new TagMapping { Tag = "garage", As = "room", Floor = "ground", RemoveTag = true },
@@ -59,7 +64,7 @@ public class LocationMigrationTests
     [Fact]
     public void ANewPlaceNeedsAFloor()
     {
-        var plan = LocationMigration.Plan(Tagged(), [new TagMapping { Tag = "kitchen", As = "room" }]);
+        var plan = LocationMigration.Plan(Places, Tagged(), [new TagMapping { Tag = "kitchen", As = "room" }]);
 
         Assert.Empty(plan.Creates);
         Assert.Empty(plan.Nodes);

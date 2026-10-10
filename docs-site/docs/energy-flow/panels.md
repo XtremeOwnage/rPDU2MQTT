@@ -20,7 +20,8 @@ title: Panels and circuits
 | Import… | Paste a paper directory |
 | Trace… | Identify an unknown breaker |
 | Print… | Printable schedule for the panel door (fits one Letter or A4 page at 42 slots) |
-| Name, Slots, This panel is, Fed by, Mounted in | Panel settings |
+| Name, Slots, This panel is, Fed by | Panel settings |
+| Plugin settings › Locations › Location | Where it is mounted: `Ext.locations.Location` |
 
 === "Amps"
 
@@ -45,8 +46,8 @@ Click a breaker, or an empty slot, to edit it.
 | State | `State`: `identified`, `unknown`, `unused` |
 | Channel (per leg) | Writes a clamp: `Clamps[].Channel` |
 | One CT measures the whole circuit | `Clamps[].Whole` (double-pole) |
-| Serves | `Rooms` |
-| Placed on it | Floor-plan items on this circuit |
+| Plugin settings › Locations › Rooms | `Ext.locations.Rooms`: the rooms and areas it serves |
+| Placed on it | Floor-plan items on this circuit (with the Locations plugin) |
 
 **Trace it…** opens Trace for that breaker.
 
@@ -109,10 +110,10 @@ EnergyFlow:
       Name: Main Panel
       Slots: 24
       Node: main_panel
-      Location: garage
+      Ext: { locations: { Location: garage } }
       Breakers:
-        - { Slot: 1, Number: "1", Poles: 2, Amps: 40, Wire: W1, Gauge: 8 AWG, Conductor: copper, Description: "HVAC, East", Rooms: [garage], Node: hvac, State: identified }
-        - { Slot: 2, Number: "2", Amps: 20, Wire: W2, Gauge: 12 AWG, Description: Kitchen counters, Rooms: [kitchen], State: identified }
+        - { Slot: 1, Number: "1", Poles: 2, Amps: 40, Wire: W1, Gauge: 8 AWG, Conductor: copper, Description: "HVAC, East", Ext: { locations: { Rooms: [garage] } }, Node: hvac, State: identified }
+        - { Slot: 2, Number: "2", Amps: 20, Wire: W2, Gauge: 12 AWG, Description: Kitchen counters, Ext: { locations: { Rooms: [kitchen] } }, State: identified }
         - { Slot: 7, Number: "7", Amps: 15, State: unknown }
         - { Slot: 10, Number: "10", State: unused }
   Clamps:

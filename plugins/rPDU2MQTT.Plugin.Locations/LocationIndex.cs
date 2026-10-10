@@ -1,6 +1,5 @@
-using rPDU2MQTT.Models.Config;
 
-namespace rPDU2MQTT.Core.Flow;
+namespace rPDU2MQTT.Plugin.Locations;
 
 /// <summary>One place in the location tree: a site, floor, room or area (#461).</summary>
 public sealed record LocationEntry(string Id, string Name, string Kind, SiteConfig Site, FloorConfig? Floor = null,
@@ -21,17 +20,28 @@ public sealed class LocationIndex
     private readonly List<LocationEntry> all = new();
     private readonly Dictionary<string, HashSet<string>> containers = new(Ids);
     private readonly List<string> problems = new();
+    private readonly LocationSettings settings;
     private readonly EnergyFlowConfig flow;
     private readonly Dictionary<string, string> circuitLocation = new(Ids);
+    private readonly Dictionary<string, string> nodeLocation = new(Ids);
 
-    private LocationIndex(EnergyFlowConfig flow) => this.flow = flow;
+    private LocationIndex(LocationSettings settings, EnergyFlowConfig flow) => (this.settings, this.flow) = (settings, flow);
 
-    public static LocationIndex For(EnergyFlowConfig? flow)
+    public static LocationIndex For(Config cfg) => For(LocationSettings.Of(cfg), cfg.EnergyFlow);
+
+    public static LocationIndex For(LocationSettings? settings, EnergyFlowConfig? flow)
     {
-        var index = new LocationIndex(flow ?? new EnergyFlowConfig());
+        var index = new LocationIndex(settings ?? new LocationSettings(), flow ?? new EnergyFlowConfig());
         index.Build();
         return index;
     }
+
+    /// <summary>The place a node names as its own, as written; blank when it names none.</summary>
+    public static string OwnLocation(EnergyFlowNode node) => EntityExtensions.Read<NodeLocation>(node, LocationSettings.PluginId).Location?.Trim() ?? "";
+
+    /// <summary>The rooms and areas a breaker's circuit serves, as written.</summary>
+    public static List<string> ServedRooms(BreakerConfig breaker) =>
+        (EntityExtensions.Read<BreakerRooms>(breaker, LocationSettings.PluginId).Rooms ?? new()).Where(r => !string.IsNullOrWhiteSpace(r)).ToList();
 
     /// <summary>Every place, sites first, then each site's floors by level with their rooms and areas.</summary>
     public IReadOnlyList<LocationEntry> All => all;
@@ -83,15 +93,14 @@ public sealed class LocationIndex
     {
         if (string.IsNullOrWhiteSpace(nodeId)) return null;
 
-        var node = flow.Nodes.FirstOrDefault(n => Ids.Equals(n.Id, nodeId));
-        if (Contains(node?.Location)) return this[node!.Location]!.Id;
+        if (nodeLocation.TryGetValue(nodeId, out var own) && Contains(own)) return this[own]!.Id;
 
-        var rules = flow.AutoLocations ?? new();
+        var rules = settings.AutoLocations ?? new();
         var exact = rules.FirstOrDefault(r => !r.Match.Contains('*') && Ids.Equals(r.Match.Trim(), nodeId) && Contains(r.Location));
         if (exact is not null) return this[exact.Location]!.Id;
 
         // An item outside every room is on its floor: outdoors, or anywhere not drawn as a room.
-        var placed = (flow.Placements ?? new()).FirstOrDefault(p => Ids.Equals(p.Node, nodeId) && (Contains(p.Room) || Contains(p.Floor)));
+        var placed = (settings.Placements ?? new()).FirstOrDefault(p => Ids.Equals(p.Node, nodeId) && (Contains(p.Room) || Contains(p.Floor)));
         if (placed is not null) return this[Contains(placed.Room) ? placed.Room : placed.Floor]!.Id;
 
         var pattern = rules.FirstOrDefault(r => r.Match.Contains('*') && AutoTags.Matches(r.Match.Trim(), nodeId) && Contains(r.Location));
@@ -111,7 +120,10 @@ public sealed class LocationIndex
             containers[e.Id] = new HashSet<string>(countsToward.Prepend(e.Id), Ids);
         }
 
-        foreach (var site in flow.Sites ?? new())
+        foreach (var n in flow.Nodes.Where(n => !string.IsNullOrWhiteSpace(n.Id) && n.Ext is not null))
+            if (OwnLocation(n) is { Length: > 0 } own) nodeLocation.TryAdd(n.Id.Trim(), own);
+
+        foreach (var site in settings.Sites ?? new())
         {
             var siteId = site.Id?.Trim() ?? "";
             Add(new LocationEntry(siteId, site.Name, LocationKind.Site, site), []);
@@ -146,7 +158,7 @@ public sealed class LocationIndex
         {
             var node = Circuits.NodeOf(chain, known);
             if (node is null) continue;
-            var served = Common(chain.Breaker.Rooms ?? new());
+            var served = Common(ServedRooms(chain.Breaker));
             if (served is not null && !circuitLocation.ContainsKey(node)) circuitLocation[node] = served;
         }
     }

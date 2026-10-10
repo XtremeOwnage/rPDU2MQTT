@@ -1,7 +1,6 @@
 using System.Text.RegularExpressions;
-using rPDU2MQTT.Models.Config;
 
-namespace rPDU2MQTT.Core.Flow;
+namespace rPDU2MQTT.Plugin.Locations;
 
 /// <summary>What one tag should become: a room or area on a floor, an existing place, or nothing.</summary>
 public sealed class TagMapping
@@ -81,9 +80,9 @@ public static partial class LocationMigration
             .OrderBy(x => x.Key, Ids)
             .ToList();
 
-    public static MigrationPlan Plan(EnergyFlowConfig flow, IEnumerable<TagMapping> mappings)
+    public static MigrationPlan Plan(LocationSettings settings, EnergyFlowConfig flow, IEnumerable<TagMapping> mappings)
     {
-        var index = LocationIndex.For(flow);
+        var index = LocationIndex.For(settings, flow);
         var creates = new List<MigrationCreate>();
         var skipped = new List<MigrationSkip>();
         var target = new Dictionary<string, string>(Ids);     // tag -> location id
@@ -127,9 +126,9 @@ public static partial class LocationMigration
         {
             var tags = (n.Tags ?? []).Where(t => target.ContainsKey(t)).ToList();
             if (tags.Count == 0) continue;
-            if (!string.IsNullOrWhiteSpace(n.Location))
+            if (LocationIndex.OwnLocation(n) is { Length: > 0 } own)
             {
-                skipped.Add(new($"node '{n.Id}'", $"Already in '{n.Location}'; left there."));
+                skipped.Add(new($"node '{n.Id}'", $"Already in '{own}'; left there."));
                 continue;
             }
             var where = Where(tags);
@@ -142,7 +141,7 @@ public static partial class LocationMigration
         {
             var tags = (r.Tags ?? []).Where(t => target.ContainsKey(t)).ToList();
             if (tags.Count == 0 || string.IsNullOrWhiteSpace(r.Match)) continue;
-            if ((flow.AutoLocations ?? []).Any(a => Ids.Equals(a.Match, r.Match)))
+            if ((settings.AutoLocations ?? []).Any(a => Ids.Equals(a.Match, r.Match)))
             {
                 skipped.Add(new($"rule '{r.Match}'", "Already has a location rule; left as it is."));
                 continue;
