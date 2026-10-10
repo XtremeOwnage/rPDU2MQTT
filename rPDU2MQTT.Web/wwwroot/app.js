@@ -13660,7 +13660,19 @@ function renderNode(node     , obj     , container     , path           = []) {
     const fs = document.createElement('fieldset');
     const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-    renderObjectBody(node.properties, target, fs, here);
+    const body = node.resettable ? document.createElement('div') : fs;
+    renderObjectBody(node.properties, target, body, here);
+    if (node.resettable) {
+      fs.appendChild(body);
+      const reset = btn('Reset to defaults');
+      reset.onclick = () => {
+        for (const p of node.properties || []) if (p.default !== undefined && p.default !== null) target[p.key] = p.default;
+        body.innerHTML = '';
+        renderObjectBody(node.properties, target, body, here);
+        refreshDirty();
+      };
+      fs.appendChild(reset);
+    }
     container.appendChild(fs);
   } else if (node.type === 'dictionary') {
     container.appendChild(renderMap(node, ensure(obj, node.key, {}), here));
@@ -14443,7 +14455,7 @@ function sectionActions(node     ) {
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
   else if (node.key === 'Modbus') { add('Test connections', testModbus); add('Explore registers', async () => openRegisterExplorer()); }
   else if (node.key === 'EmonCMS') {
-    add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds);
+    add('Test EmonCMS connection', testEmonCms); add('Show feed plan', showEmonCmsPlan); add('Provision feeds now', provisionEmonCmsFeeds);
     add('Delete old inputs', cleanupEmonCmsInputs); add('Delete old feeds', cleanupEmonCmsFeeds, 'danger'); add('Delete all feeds', deleteEmonCmsFeeds, 'danger');
     bar.appendChild(externalLink('Open EmonCMS', () => cfgUrl('EmonCMS', 'Url'), 'Open the EmonCMS server this bridge feeds'));
   } else if (node.key === 'HomeAssistant') {
@@ -14611,6 +14623,36 @@ async function integrationActionBar(id        )               {
     bar.appendChild(b);
   });
   return bar;
+}
+
+async function showEmonCmsPlan() {
+  const r = await api('/api/integrations/emoncms/plan', { method: 'POST' });
+  const result = r.body?.result || {};
+  const inputs        = result.inputs || [];
+  const list = el('div', { class: 'emon-plan' });
+  const filter = el('input', { type: 'search', placeholder: 'Filter inputs or feeds', class: 'emon-plan-filter' })                    ;
+  const render = () => {
+    list.innerHTML = '';
+    const q = filter.value.trim().toLowerCase();
+    const shown = inputs.filter(i => !q || i.input.toLowerCase().includes(q) || i.steps.some((s     ) => s.target.toLowerCase().includes(q)));
+    for (const i of shown) {
+      const row = el('div', { class: 'emon-plan-row' }, el('span', { class: 'emon-plan-input', text: i.input }));
+      for (const s of i.steps) {
+        const calc = s.process !== 'Log to feed';
+        row.append(el('span', { class: 'emon-plan-arrow', text: '→' }),
+          el('span', { class: 'emon-plan-step' + (calc ? ' calc' : ''), text: s.process + (s.input ? ' ' + s.target : '') }));
+        if (!s.input) row.append(el('span', { class: 'emon-plan-arrow', text: '→' }), el('span', { class: 'emon-plan-feed', text: s.target }));
+      }
+      list.appendChild(row);
+    }
+    if (!shown.length) list.appendChild(el('div', { class: 'desc', text: result.message || (q ? 'Nothing matches.' : 'Nothing to provision yet.') }));
+  };
+  filter.oninput = render;
+  render();
+  const body = el('div', {},
+    el('div', { class: 'desc', text: `${inputs.length} input(s), ${result.feeds ?? 0} feed(s). Highlighted steps are calculated by EmonCMS; switch them under Feeds → Calculations.` }),
+    filter, list);
+  openSheet({ title: 'EmonCMS feed plan', body, wide: true });
 }
 
 // ── main.ts ─────────────────────────────────────────────────────

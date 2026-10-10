@@ -215,6 +215,24 @@ public sealed class EmonCmsIntegration
                     feeds = plan.Feeds.Select(f => $"{f.Tag}/{f.Name}").ToList(),
                 };
             }),
+        new("plan", "Show feed plan",
+            "Each input's processlist as provisioning would set it now: what is logged, and what EmonCMS calculates from it.",
+            ActionEffect.Read,
+            (_, _) =>
+            {
+                var plan = Feeds.Plan(Feeds.Merged());
+                return Task.FromResult<object?>(new
+                {
+                    ok = true,
+                    message = plan.Inputs.Count == 0 ? "Nothing to provision yet: no readings, or every feed type is off." : null,
+                    inputs = plan.Inputs.Select(i => new
+                    {
+                        input = i.InputName,
+                        steps = i.Steps.Select(st => new { process = ProcessSlot.Label(st.Process), target = st.Feed, input = st.InputArg }),
+                    }),
+                    feeds = plan.Feeds.Count,
+                });
+            }),
         new("sweep-inputs", "Delete old inputs",
             "Delete the inputs under this bridge's node that it no longer sends. No feed data is stored on an input.",
             ActionEffect.Write,

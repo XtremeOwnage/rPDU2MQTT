@@ -93,7 +93,8 @@ public sealed class EmonCmsFeedSync
             if (!feedByName.ContainsKey(link.StorageFeed)) continue;   // its feed failed to create
 
             var wanted = EmonCmsFeedPlanner.BuildInputProcessList(link.Steps,
-                name => feedByName.TryGetValue(name, out var fd) ? fd.Id : null);
+                name => feedByName.TryGetValue(name, out var fd) ? fd.Id : null,
+                name => inputs.TryGetValue(name, out var other) ? other.Id : null);
             if (wanted.Length == 0) continue;
             if (!string.Equals(input.ProcessList?.Trim(), wanted, StringComparison.Ordinal))
                 try
@@ -167,6 +168,10 @@ public sealed class EmonCmsFeedSync
         if (errors.Count > 0) msg += $" {errors.Count} failed: {string.Join(" | ", errors.Take(3))}";
         return new(errors.Count == 0, msg, deleted);
     }
+
+    public EmonDesiredState Plan(PduData merged)
+        => EmonCmsFeedPlanner.BuildDesired(merged, config,
+            config.EmonCMS.ExportFlowNodes ? Core.Flow.FlowTiers.Graphs(merged, config, live) : null, Instances());
 
     /// <summary>The inputs under this bridge's node(s) it no longer sends, and the feeds under its tags it no longer provisions.</summary>
     public async Task<EmonStalePlan> FindStaleAsync(PduData merged, CancellationToken ct)

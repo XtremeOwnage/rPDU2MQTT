@@ -76,6 +76,9 @@ public sealed class SchemaNode
     /// <summary>Show the choices as radios rather than a dropdown.</summary>
     public bool Radio { get; set; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Resettable { get; set; }
+
     /// <summary>
     /// This section belongs to an externally loaded plugin, so it is stored under <c>Config.Plugins</c>
     /// rather than as a property of its own. The GUI reads and writes it there.
@@ -340,6 +343,7 @@ public static class ConfigSchema
         node.Type = ClassifyAndPopulate(type, prop.Name, node);
 
         if (prop.GetCustomAttribute<FixedListAttribute>() is { } fixedList) node.FixedListKey = fixedList.KeyProperty;
+        if (prop.GetCustomAttribute<ResettableAttribute>() is not null) node.Resettable = true;
 
         if (prop.GetCustomAttribute<RadioChoicesAttribute>() is not null)
         {

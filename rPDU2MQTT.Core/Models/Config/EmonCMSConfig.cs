@@ -179,6 +179,10 @@ public class EmonCmsFeedsConfig
     [TemplateVariables("device", "source", "name", "number", "units")]
     public string StorageNameTemplate { get; set; } = "{device}_{source}";
 
+    [Description("Which values EmonCMS calculates from others when a feed has no reading of its own. Each runs on EmonCMS, as a step on the input's processlist.")]
+    [Resettable]
+    public EmonCmsCalculationsConfig Calculations { get; set; } = new();
+
     /// <summary>Optional friendly-named feeds that source their data from the stable storage feeds (#163).</summary>
     [Description("Optionally create friendly-named virtual feeds that source from the stable storage feeds — so dashboards get nice names while the underlying feeds stay idempotent.")]
     public EmonCmsVirtualFeedsConfig Virtual { get; set; } = new();
@@ -253,6 +257,37 @@ public class EmonCmsFeedTypeConfig
         "frequency" => "Hz",
         _ => "",
     };
+}
+
+public class EmonCmsCalculationsConfig
+{
+    [DefaultValue(true)]
+    [Description("Energy = ∫ Power dt. Power to kWh, on a power input, when there is no energy reading.")]
+    public bool EnergyFromPower { get; set; } = true;
+
+    [DefaultValue(true)]
+    [Description("Energy today = ∫ Power dt since the day began. Power to kWh/d, on a power input, when there is no energy reading.")]
+    public bool DailyFromPower { get; set; } = true;
+
+    [DefaultValue(true)]
+    [Description("Energy today = Energy − Energy at the start of the day. kWh to kWh/d, on an energy input.")]
+    public bool DailyFromEnergy { get; set; } = true;
+
+    [DefaultValue(true)]
+    [Description("Power = ΔEnergy / Δt. kWh to Power, on an energy input, when there is no power reading.")]
+    public bool PowerFromEnergy { get; set; } = true;
+
+    [DefaultValue(false)]
+    [Description("Power = Voltage × Current. × input, on a current input, when there is no power reading.")]
+    public bool PowerFromVoltageAndCurrent { get; set; }
+
+    [DefaultValue(false)]
+    [Description("Voltage = Power ÷ Current. ÷ input, on a power input, when there is no voltage reading.")]
+    public bool VoltageFromPowerAndCurrent { get; set; }
+
+    [DefaultValue(false)]
+    [Description("Current = Power ÷ Voltage. ÷ input, on a power input, when there is no current reading.")]
+    public bool CurrentFromPowerAndVoltage { get; set; }
 }
 
 /// <summary>Friendly virtual feeds that source from the stable storage feeds.</summary>

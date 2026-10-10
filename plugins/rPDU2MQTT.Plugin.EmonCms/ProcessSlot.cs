@@ -23,4 +23,24 @@ public static class ProcessSlot
 
     /// <summary>kWh to Power (21): feed-id arg; reads cumulative kWh, writes watts, passes the watts on, so it is ordered last; needs Redis.</summary>
     public const string KwhToPower = "process__kwh_to_power";
+
+    /// <summary>x input (3): input-id arg; multiplies by that input.</summary>
+    public const string TimesInput = "process__times_input";
+
+    /// <summary>/ input (14): input-id arg; divides by that input.</summary>
+    public const string DivideInput = "process__divide_input";
+
+    public static string Label(string process) => process switch
+    {
+        LogToFeed => "Log to feed",
+        KwhToKwhd => "kWh to kWh/d",
+        SourceFeed => "Source feed",
+        PowerToKwh => "Power to kWh",
+        PowerToKwhd => "Power to kWh/d",
+        KwhAccumulator => "kWh Accumulator",
+        KwhToPower => "kWh to Power",
+        TimesInput => "x input",
+        DivideInput => "/ input",
+        _ => process,
+    };
 }

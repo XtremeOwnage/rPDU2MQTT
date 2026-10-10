@@ -99,3 +99,8 @@ public sealed class FixedListAttribute : Attribute
 public sealed class RadioChoicesAttribute : Attribute
 {
 }
+
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class ResettableAttribute : Attribute
+{
+}

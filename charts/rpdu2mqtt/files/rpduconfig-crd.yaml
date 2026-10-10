@@ -688,6 +688,32 @@ spec:
                       StorageNameTemplate:
                         type: string
                         description: 'Template for the storage-feed name, without the type — each type appends its own suffix. Use only stable placeholders ({device}, {source}, {number}) so the name never changes on a rename. Placeholders: {device}, {source}, {name}, {number}, {units}.'
+                      Calculations:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                        properties:
+                          EnergyFromPower:
+                            type: boolean
+                            description: Energy = ∫ Power dt. Power to kWh, on a power input, when there is no energy reading.
+                          DailyFromPower:
+                            type: boolean
+                            description: Energy today = ∫ Power dt since the day began. Power to kWh/d, on a power input, when there is no energy reading.
+                          DailyFromEnergy:
+                            type: boolean
+                            description: Energy today = Energy − Energy at the start of the day. kWh to kWh/d, on an energy input.
+                          PowerFromEnergy:
+                            type: boolean
+                            description: Power = ΔEnergy / Δt. kWh to Power, on an energy input, when there is no power reading.
+                          PowerFromVoltageAndCurrent:
+                            type: boolean
+                            description: Power = Voltage × Current. × input, on a current input, when there is no power reading.
+                          VoltageFromPowerAndCurrent:
+                            type: boolean
+                            description: Voltage = Power ÷ Current. ÷ input, on a power input, when there is no voltage reading.
+                          CurrentFromPowerAndVoltage:
+                            type: boolean
+                            description: Current = Power ÷ Voltage. ÷ input, on a power input, when there is no current reading.
+                        description: Which values EmonCMS calculates from others when a feed has no reading of its own. Each runs on EmonCMS, as a step on the input's processlist.
                       Virtual:
                         type: object
                         x-kubernetes-preserve-unknown-fields: true
