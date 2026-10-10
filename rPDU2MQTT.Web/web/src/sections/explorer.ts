@@ -223,7 +223,7 @@ function mountMqttExplorer(body: any, close: () => void, showing: () => boolean)
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(el('div', { style: { overflowX: 'auto' } }, tbl));
+  body.appendChild(el('div', { class: 'explorer-scroll' }, tbl));
 
   const picked = new Map<string, PickedBinding>();
   const pick = (t: any) => {

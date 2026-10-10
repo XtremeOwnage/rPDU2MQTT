@@ -8475,7 +8475,7 @@ function mountMqttExplorer(body     , close            , showing               )
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(el('div', { style: { overflowX: 'auto' } }, tbl));
+  body.appendChild(el('div', { class: 'explorer-scroll' }, tbl));
 
   const picked = new Map                       ();
   const pick = (t     ) => {
