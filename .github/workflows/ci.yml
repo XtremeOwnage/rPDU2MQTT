@@ -36,6 +36,44 @@ jobs:
           dotnet-version: '10.0.x'
       - run: dotnet test --configuration Release
 
+  browser:
+    name: Browser smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Broker
+        run: sudo apt-get update -q && sudo apt-get install -y -q mosquitto && sudo systemctl start mosquitto
+      - name: Start the bridge
+        run: |
+          dotnet publish rPDU2MQTT/rPDU2MQTT.csproj -c Release -o "$RUNNER_TEMP/app"
+          mkdir -p "$RUNNER_TEMP/run" && cp rPDU2MQTT.Web/e2e/config.yaml "$RUNNER_TEMP/run/"
+          cd "$RUNNER_TEMP/run" && nohup dotnet "$RUNNER_TEMP/app/rPDU2MQTT.dll" > bridge.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null -u admin:smoke http://127.0.0.1:18080/ && exit 0
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/run/bridge.log"; exit 1
+      - name: Smoke
+        working-directory: rPDU2MQTT.Web/e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          node smoke.mjs
+      - if: failure()
+        run: cat "$RUNNER_TEMP/run/bridge.log" || true
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-smoke
+          path: rPDU2MQTT.Web/e2e/out/
+          if-no-files-found: ignore
+
   chart:
     name: Helm chart smoke
     runs-on: ubuntu-latest
