@@ -23,6 +23,18 @@ Examples:
 
 PRs are squash-merged, so the title becomes the commit message on `main`. Generated release notes are grouped by the `kind/*` label ([`.github/release.yml`](.github/release.yml)).
 
+## Issue types
+
+Every issue has a GitHub issue type that agrees with its `kind/*` label:
+
+| Issue type | Label |
+|---|---|
+| Bug | `kind/bug` |
+| Feature | `kind/feature` |
+| Task | `kind/chore`, `kind/documentation`, `kind/dependency` or `kind/support` |
+
+The **Issue Standards** workflow sets the type from the label, or adds the label from the type when there is none.
+
 ## Labels
 
 - **kind/** (required on PRs): exactly one, matching the title prefix. The PR check adds it from the prefix if none is set.
