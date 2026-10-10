@@ -1,3 +1,4 @@
+using rPDU2MQTT.Plugin.Locations;
 using rPDU2MQTT.Core.HomeAssistant;
 using Xunit;
 

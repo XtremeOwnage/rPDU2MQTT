@@ -44,7 +44,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "rPDU2MQTT.Plugin.Vertiv", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "rPDU2MQTT.Plugin.EmonCms", "plugins\rPDU2MQTT.Plugin.EmonCms\rPDU2MQTT.Plugin.EmonCms.csproj", "{B0142B91-6640-44C2-8410-4A0045DC5E0D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "rPDU2MQTT.Plugin.FloorPlan", "plugins\rPDU2MQTT.Plugin.FloorPlan\rPDU2MQTT.Plugin.FloorPlan.csproj", "{CA81AF90-B254-43B8-8FA4-6DB352A89EAA}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "rPDU2MQTT.Plugin.Locations", "plugins\rPDU2MQTT.Plugin.Locations\rPDU2MQTT.Plugin.Locations.csproj", "{CA81AF90-B254-43B8-8FA4-6DB352A89EAA}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

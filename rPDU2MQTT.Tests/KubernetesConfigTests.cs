@@ -108,7 +108,7 @@ public class KubernetesConfigTests
     {
         var crd = CrdGenerator.ToYaml();
 
-        Assert.Contains("\"Y\":", crd);
+        Assert.Contains("\n  \"Y\":", CrdGenerator.Quoted("properties:\n  Y:\n    type: number\n"));
         Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"(?m)^\s*(y|Y|n|N|yes|no|on|off|true|false):", System.Text.RegularExpressions.RegexOptions.IgnoreCase), crd);
     }
 

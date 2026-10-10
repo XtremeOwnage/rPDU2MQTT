@@ -29,7 +29,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
     public HomeAssistantDiscoveryService(MQTTServiceDependencies deps, DiscoveryCoordinator coordinator,
         Core.Integrations.ExportContributions? contributions = null) : base(deps)
     {
-        this.contributions = contributions ?? Core.Integrations.ExportContributions.BuiltIn;
+        this.contributions = contributions ?? Core.Integrations.ExportContributions.None;
         // Allow the "Rediscover" diagnostic button to trigger an on-demand republish.
         coordinator.PublishedDevices = () => (HasPublished, PublishedDeviceIds);
         coordinator.RediscoverRequested += Execute;

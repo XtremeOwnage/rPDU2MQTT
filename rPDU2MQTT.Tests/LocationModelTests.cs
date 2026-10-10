@@ -1,4 +1,6 @@
+using rPDU2MQTT.Plugin.Locations;
 using rPDU2MQTT.Core.Flow;
+using rPDU2MQTT.Core.Integrations;
 using rPDU2MQTT.Models.Config;
 using Xunit;
 
@@ -13,7 +15,7 @@ public class LocationModelTests
     }
 
     /// <summary>A house: kitchen, office and garage downstairs with a "front" area over kitchen and office; a bedroom upstairs.</summary>
-    private static EnergyFlowConfig House() => new()
+    private static (LocationSettings Places, EnergyFlowConfig Flow) House() => (new LocationSettings
     {
         Sites =
         {
@@ -32,14 +34,28 @@ public class LocationModelTests
                 },
             },
         },
-    };
+    }, new EnergyFlowConfig());
+
+    /// <summary>A node in a place, as the Locations plugin keeps it on the node.</summary>
+    private static EnergyFlowNode In(string place, EnergyFlowNode node)
+    {
+        EntityExtensions.Write(node, LocationSettings.PluginId, new NodeLocation { Location = place });
+        return node;
+    }
+
+    private static BreakerConfig Served(BreakerConfig breaker, params string[] rooms)
+    {
+        EntityExtensions.Write(breaker, LocationSettings.PluginId, new BreakerRooms { Rooms = [.. rooms] });
+        return breaker;
+    }
 
     private static Func<string, double?> Values(Dictionary<string, double?> v) => id => v.TryGetValue(id, out var x) ? x : null;
 
     [Fact]
     public void ARoomCountsTowardItsAreasFloorAndSite()
     {
-        var index = LocationIndex.For(House());
+        var (places, flow) = House();
+        var index = LocationIndex.For(places, flow);
 
         Assert.True(index.Containers("kitchen").SetEquals(["kitchen", "front", "ground", "home"]));
         Assert.True(index.Within("office", "front"));
@@ -51,7 +67,8 @@ public class LocationModelTests
     [Fact]
     public void TheCommonPlace_IsTheSmallestHoldingThemAll()
     {
-        var index = LocationIndex.For(House());
+        var (places, flow) = House();
+        var index = LocationIndex.For(places, flow);
 
         Assert.Equal("kitchen", index.Common(["kitchen"]));
         Assert.Equal("front", index.Common(["kitchen", "office"]));
@@ -63,11 +80,11 @@ public class LocationModelTests
     [Fact]
     public void DuplicateIds_AndAreasReachingAcrossFloors_AreReported()
     {
-        var flow = House();
-        flow.Sites[0].Floors[1].Rooms.Add(new RoomConfig { Id = "kitchen" });
-        flow.Sites[0].Floors[1].Areas.Add(new AreaConfig { Id = "stairs", Rooms = { "garage" } });
+        var (places, flow) = House();
+        places.Sites[0].Floors[1].Rooms.Add(new RoomConfig { Id = "kitchen" });
+        places.Sites[0].Floors[1].Areas.Add(new AreaConfig { Id = "stairs", Rooms = { "garage" } });
 
-        var problems = LocationIndex.For(flow).Problems;
+        var problems = LocationIndex.For(places, flow).Problems;
 
         Assert.Contains(problems, p => p.Contains("'kitchen' is used twice"));
         Assert.Contains(problems, p => p.Contains("on another floor"));
@@ -76,16 +93,16 @@ public class LocationModelTests
     [Fact]
     public void WhereANodeIs_ItsOwnLocationFirst_ThenRules_ThenPlacements_ThenItsCircuit()
     {
-        var flow = House();
-        flow.Nodes.Add(new EnergyFlowNode { Id = "fridge", Location = "kitchen" });
-        flow.AutoLocations.Add(new AutoLocationRule { Match = "outlet:rack:*", Location = "office" });
-        flow.AutoLocations.Add(new AutoLocationRule { Match = "outlet:rack:3", Location = "garage" });
-        flow.Placements.Add(new PlacementConfig { Id = "p1", Room = "bedroom", Node = "outlet:rack:4" });
-        flow.Placements.Add(new PlacementConfig { Id = "p2", Floor = "ground", Kind = PlacementKind.Fixture, Node = "porch_light" });
-        flow.Panels.Add(new PanelConfig { Id = "main", Breakers = { new BreakerConfig { Slot = 6, Number = "B06", Rooms = { "kitchen", "garage" } } } });
+        var (places, flow) = House();
+        flow.Nodes.Add(In("kitchen", new EnergyFlowNode { Id = "fridge" }));
+        places.AutoLocations.Add(new AutoLocationRule { Match = "outlet:rack:*", Location = "office" });
+        places.AutoLocations.Add(new AutoLocationRule { Match = "outlet:rack:3", Location = "garage" });
+        places.Placements.Add(new PlacementConfig { Id = "p1", Room = "bedroom", Node = "outlet:rack:4" });
+        places.Placements.Add(new PlacementConfig { Id = "p2", Floor = "ground", Kind = PlacementKind.Fixture, Node = "porch_light" });
+        flow.Panels.Add(new PanelConfig { Id = "main", Breakers = { Served(new BreakerConfig { Slot = 6, Number = "B06" }, "kitchen", "garage") } });
         flow.Clamps.Add(new CtClampConfig { Panel = "main", Breaker = "B06", Channel = "ch5" });
 
-        var index = LocationIndex.For(flow);
+        var index = LocationIndex.For(places, flow);
 
         Assert.Equal("kitchen", index.LocationOf("fridge"));
         Assert.Equal("garage", index.LocationOf("outlet:rack:3"));     // exact id beats the pattern above it
@@ -99,14 +116,14 @@ public class LocationModelTests
     [Fact]
     public void ARoom_IsWhatEntersItLessWhatLeaves()
     {
-        var flow = House();
-        flow.Nodes.Add(new EnergyFlowNode { Id = "circuit", Location = "kitchen" });
+        var (places, flow) = House();
+        flow.Nodes.Add(In("kitchen", new EnergyFlowNode { Id = "circuit" }));
         flow.Nodes.Add(new EnergyFlowNode { Id = "kettle" });
-        flow.Nodes.Add(new EnergyFlowNode { Id = "printer", Location = "office" });
+        flow.Nodes.Add(In("office", new EnergyFlowNode { Id = "printer" }));
         flow.Links.Add(new EnergyFlowLink { From = "circuit", To = "kettle" });
         flow.Links.Add(new EnergyFlowLink { From = "circuit", To = "printer" });
 
-        var totals = LocationRollup.Compute(LocationIndex.For(flow), FlowTopology.For(null, flow),
+        var totals = LocationRollup.Compute(LocationIndex.For(places, flow), FlowTopology.For(null, flow),
             Values(new() { ["circuit"] = 500, ["printer"] = 200 }));
 
         // The kettle is unmetered but sits between the circuit and nothing else in the kitchen, so it is not needed.
@@ -121,13 +138,13 @@ public class LocationModelTests
     [Fact]
     public void AMissingReading_LeavesThePlaceUnknown_NeverAPartialSum()
     {
-        var flow = House();
-        flow.Nodes.Add(new EnergyFlowNode { Id = "circuit", Location = "kitchen" });
-        flow.Nodes.Add(new EnergyFlowNode { Id = "printer", Location = "office" });
-        flow.Nodes.Add(new EnergyFlowNode { Id = "lamp", Location = "office" });
+        var (places, flow) = House();
+        flow.Nodes.Add(In("kitchen", new EnergyFlowNode { Id = "circuit" }));
+        flow.Nodes.Add(In("office", new EnergyFlowNode { Id = "printer" }));
+        flow.Nodes.Add(In("office", new EnergyFlowNode { Id = "lamp" }));
         flow.Links.Add(new EnergyFlowLink { From = "circuit", To = "printer" });
 
-        var totals = LocationRollup.Compute(LocationIndex.For(flow), FlowTopology.For(null, flow),
+        var totals = LocationRollup.Compute(LocationIndex.For(places, flow), FlowTopology.For(null, flow),
             Values(new() { ["circuit"] = 500, ["lamp"] = 40 }));
 
         // The printer leaves the kitchen unread, so the kitchen cannot be said; nor can the office it is in.
@@ -142,14 +159,14 @@ public class LocationModelTests
     [Fact]
     public void ANodeFedFromInsideAndOutside_IsNotSplitByGuesswork()
     {
-        var flow = House();
-        flow.Nodes.Add(new EnergyFlowNode { Id = "a", Location = "kitchen" });
-        flow.Nodes.Add(new EnergyFlowNode { Id = "b", Location = "garage" });
-        flow.Nodes.Add(new EnergyFlowNode { Id = "shared", Location = "office" });
+        var (places, flow) = House();
+        flow.Nodes.Add(In("kitchen", new EnergyFlowNode { Id = "a" }));
+        flow.Nodes.Add(In("garage", new EnergyFlowNode { Id = "b" }));
+        flow.Nodes.Add(In("office", new EnergyFlowNode { Id = "shared" }));
         flow.Links.Add(new EnergyFlowLink { From = "a", To = "shared" });
         flow.Links.Add(new EnergyFlowLink { From = "b", To = "shared" });
 
-        var totals = LocationRollup.Compute(LocationIndex.For(flow), FlowTopology.For(null, flow),
+        var totals = LocationRollup.Compute(LocationIndex.For(places, flow), FlowTopology.For(null, flow),
             Values(new() { ["a"] = 300, ["b"] = 300, ["shared"] = 400 }));
 
         Assert.Null(totals["kitchen"].Value);
@@ -160,8 +177,8 @@ public class LocationModelTests
     [Fact]
     public void ANodeTheGraphDidNotValue_IsUnknown_EvenWhereItsLinksCarryZero()
     {
-        var flow = House();
-        flow.Nodes.Add(new EnergyFlowNode { Id = "circuit", Location = "kitchen", Mode = "static", Value = 500 });
+        var (places, flow) = House();
+        flow.Nodes.Add(In("kitchen", new EnergyFlowNode { Id = "circuit", Mode = "static", Value = 500 }));
         flow.Nodes.Add(new EnergyFlowNode { Id = "fridge", Mode = "static", Value = 150 });
         flow.Nodes.Add(new EnergyFlowNode { Id = "grid", Kind = "grid", Mode = "none" });
         flow.Links.Add(new EnergyFlowLink { From = "grid", To = "circuit" });
@@ -169,7 +186,7 @@ public class LocationModelTests
 
         // A static value is a power figure: the daily-energy graph has nothing for either node.
         var today = FlowGraphBuilder.Build(new rPDU2MQTT.Models.PDU.PduData(), flow, EnergyPeriod.Metric, null);
-        var totals = LocationRollup.Compute(LocationIndex.For(flow), FlowTopology.For(null, flow), LocationExport.ValuesOf(today));
+        var totals = LocationRollup.Compute(LocationIndex.For(places, flow), FlowTopology.For(null, flow), LocationExport.ValuesOf(today));
 
         Assert.Equal(LocationState.Unknown, totals["kitchen"].State);
         Assert.Null(totals["kitchen"].Value);
@@ -178,32 +195,32 @@ public class LocationModelTests
     [Fact]
     public void AnUnplacedChild_IsWhereItsFeederIs()
     {
-        var flow = House();
-        flow.Nodes.Add(new EnergyFlowNode { Id = "circuit", Location = "garage" });
+        var (places, flow) = House();
+        flow.Nodes.Add(In("garage", new EnergyFlowNode { Id = "circuit" }));
         flow.Nodes.Add(new EnergyFlowNode { Id = "freezer" });
         flow.Links.Add(new EnergyFlowLink { From = "circuit", To = "freezer" });
 
-        var placed = LocationRollup.Placed(LocationIndex.For(flow), FlowTopology.For(null, flow));
+        var placed = LocationRollup.Placed(LocationIndex.For(places, flow), FlowTopology.For(null, flow));
 
         Assert.Equal("garage", placed["freezer"]);
     }
 
-    private static EnergyFlowConfig Circuit()
+    private static (LocationSettings Places, EnergyFlowConfig Flow) Circuit()
     {
-        var flow = House();
+        var (places, flow) = House();
         flow.Panels.Add(new PanelConfig { Id = "main", Breakers = { new BreakerConfig { Slot = 6, Number = "B06" } } });
         flow.Clamps.Add(new CtClampConfig { Panel = "main", Breaker = "B06", Channel = "ch5" });
         flow.Nodes.Add(new EnergyFlowNode { Id = "fridge", Circuit = "main/B06" });
-        flow.Placements.Add(new PlacementConfig { Id = "k", Kind = PlacementKind.Appliance, Room = "kitchen", Circuit = "main/B06", Node = "kettle" });
-        return flow;
+        places.Placements.Add(new PlacementConfig { Id = "k", Kind = PlacementKind.Appliance, Room = "kitchen", Circuit = "main/B06", Node = "kettle" });
+        return (places, flow);
     }
 
     private static CircuitReport Report(double? fridge, double? kettle, double channel)
     {
-        var flow = Circuit();
+        var (places, flow) = Circuit();
         var live = new Fixed(new() { ["ch5|realpower"] = channel });
         var values = new Dictionary<string, double?> { ["fridge"] = fridge, ["kettle"] = kettle };
-        return Assert.Single(Circuits.Report(flow, live, Values(values)));
+        return Assert.Single(Circuits.Report(flow, live, Values(values), plugged: places.Placements.Select(p => (p.Node, p.Circuit))));
     }
 
     [Fact]
@@ -215,7 +232,6 @@ public class LocationModelTests
         Assert.Equal(RemainderState.Known, r.State);
         Assert.Equal(150, r.Remainder);
         Assert.False(r.Exceeded);
-        Assert.Single(r.Placements);
     }
 
     [Fact]

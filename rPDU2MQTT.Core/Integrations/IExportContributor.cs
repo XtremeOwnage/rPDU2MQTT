@@ -36,9 +36,6 @@ public sealed class ExportContributions
 
     public static ExportContributions None { get; } = new([]);
 
-    /// <summary>Built-in places and room areas.</summary>
-    public static ExportContributions BuiltIn { get; } = new([new LocationContributor()]);
-
     public IReadOnlyList<IExportContributor> Exports { get; }
     public IReadOnlyList<IAreaProvider> AreaProviders { get; }
 

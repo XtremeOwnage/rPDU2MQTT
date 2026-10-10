@@ -21,4 +21,5 @@ public sealed class PluginHost(Config cfg) : IPluginHost
     public IMessagePublisher? Publisher => Services.GetService<IMessagePublisher>();
     public IntegrationStatus Status => Services.GetRequiredService<IntegrationStatus>();
     public IPeriodAuditor? Auditor => Services.GetService<IPeriodAuditor>();
+    public IMeasurementHistory? History => cfg.History.Enabled ? Services.GetService<IMeasurementHistory>() : null;
 }

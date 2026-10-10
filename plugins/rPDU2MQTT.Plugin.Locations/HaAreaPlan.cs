@@ -1,4 +1,4 @@
-namespace rPDU2MQTT.Core.HomeAssistant;
+namespace rPDU2MQTT.Plugin.Locations;
 
 /// <summary>A room as the area plan sees it: its id, name, and the area it was linked to before.</summary>
 public sealed record HaRoom(string Id, string Name, string? LinkedArea);

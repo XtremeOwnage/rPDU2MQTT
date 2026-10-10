@@ -20,7 +20,7 @@ Every setting in `config.yaml`, one page per top-level section, generated from `
 | [GUI](gui.md) | 17 |
 | [Health](health.md) | 3 |
 | [API](api.md) | 4 |
-| [Energy Flow](energyflow.md) | 199 |
+| [Energy Flow](energyflow.md) | 114 |
 | [Plan Storage](planstorage.md) | 11 |
 | [Modbus](modbus.md) | 11 |
 | [Plugins](plugins.md) | 1 |

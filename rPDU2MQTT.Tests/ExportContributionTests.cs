@@ -1,3 +1,4 @@
+using rPDU2MQTT.Plugin.Locations;
 using System.Text.Json;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core;
@@ -101,17 +102,20 @@ public class ExportContributionTests
     }
 
     [Fact]
-    public async Task TheBuiltInPlaces_StillPublishAsTiers()
+    public async Task TheLocationsPlugin_PublishesItsPlacesAsTiers()
     {
         var cfg = Configured();
-        cfg.EnergyFlow.Sites.Add(new SiteConfig
+        cfg.Plugins["locations"] = PluginConfigBinder.ToNode(new LocationSettings
         {
-            Id = "home", Name = "Home",
-            Floors = [new FloorConfig { Id = "ground", Name = "Ground", Rooms = [new RoomConfig { Id = "kitchen", Name = "Kitchen" }] }],
+            Sites = [new SiteConfig
+            {
+                Id = "home", Name = "Home",
+                Floors = [new FloorConfig { Id = "ground", Name = "Ground", Rooms = [new RoomConfig { Id = "kitchen", Name = "Kitchen" }] }],
+            }],
         });
-        cfg.EnergyFlow.Nodes[0].Location = "kitchen";
+        EntityExtensions.Write(cfg.EnergyFlow.Nodes[0], "locations", new NodeLocation { Location = "kitchen" });
 
-        var pub = await Publish(cfg, null);
+        var pub = await Publish(cfg, new ExportContributions([new LocationsPlugin()]));
 
         var room = State(pub, LocationExport.NodeId("kitchen"));
         Assert.Equal(120, room.GetProperty("power").GetDouble());

@@ -21,6 +21,7 @@ public static class PluginConfigBinder
         PropertyNameCaseInsensitive = true,
         WriteIndented = false,
         NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
+        Converters = { new LenientStringConverter() },
     };
 
     /// <summary>Binds the plugin's section, falling back to defaults when missing or unreadable.</summary>

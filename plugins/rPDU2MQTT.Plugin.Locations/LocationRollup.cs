@@ -1,6 +1,5 @@
-using rPDU2MQTT.Models.Config;
 
-namespace rPDU2MQTT.Core.Flow;
+namespace rPDU2MQTT.Plugin.Locations;
 
 /// <summary>What a place's total is (#461, #466).</summary>
 public static class LocationState

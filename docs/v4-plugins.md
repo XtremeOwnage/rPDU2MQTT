@@ -56,7 +56,7 @@ history, configuration publisher), Prometheus, Home Assistant (discovery, Energy
 |--------|---------|---------------|
 | Vertiv rPDU | `plugins/rPDU2MQTT.Plugin.Vertiv` | `bundled-plugins/vertiv/` |
 | EmonCMS | `plugins/rPDU2MQTT.Plugin.EmonCms` | `bundled-plugins/emoncms/` |
-| Floor Plans | `plugins/rPDU2MQTT.Plugin.FloorPlan` | `bundled-plugins/floorplan/` |
+| Locations | `plugins/rPDU2MQTT.Plugin.Locations` | `bundled-plugins/locations/` |
 | Tigo TAP | `plugins/rPDU2MQTT.Plugin.Tigo` | `bundled-plugins/tigo/` |
 
 - Each references only `rPDU2MQTT.Core`.
@@ -66,5 +66,4 @@ history, configuration publisher), Prometheus, Home Assistant (discovery, Energy
 - `DisabledPlugins` lists folder or DLL names to skip; a skipped plugin is never loaded. GUI: **System › Plugins**.
 - Vertiv is off when no PDU has a host.
 - EmonCMS keeps its `EmonCMS` config section in Core, so existing configs, the CRD and `RPDU2MQTT_EMONCMS_APIKEY` are unchanged.
-- Floor Plans is the page only. Locations, placements and runs (`EnergyFlow`), `/api/locations`, plan image storage
-  (`PlanStorage`, `/api/plans`) and the Home Assistant area sync stay in the host.
+- Locations: `Plugins.locations`, `Ext.locations`, place totals, Floor Plans, area sync. Plan images stay in the host.

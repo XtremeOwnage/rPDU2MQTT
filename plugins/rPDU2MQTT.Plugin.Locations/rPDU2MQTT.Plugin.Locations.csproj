@@ -4,8 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>rPDU2MQTT.Plugin.FloorPlan</AssemblyName>
-    <RootNamespace>rPDU2MQTT.Plugin.FloorPlan</RootNamespace>
+    <AssemblyName>rPDU2MQTT.Plugin.Locations</AssemblyName>
+    <RootNamespace>rPDU2MQTT.Plugin.Locations</RootNamespace>
     <AssemblyTitle>Floor Plans</AssemblyTitle>
     <Description>Floor Plans page: rooms, placed items and cable runs drawn to scale, shaded by live power.</Description>
   </PropertyGroup>
