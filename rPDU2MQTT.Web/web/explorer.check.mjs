@@ -22,8 +22,8 @@ const { sandbox, getEl } = makeDom({
     : url.includes('/api/instances') ? { ok: true, instances: [] }
     : url.includes('/api/config') ? config
     : url.includes('/api/mqtt/topics') ? { ok: true, listening: true, indexed: 2, capacity: 1000, filter: '#', topics: [
-        { topic: 'solar/pv/power', value: 4200, unit: 'W', metric: 'realpower', trend: [4100, 4150, 4200] },
-        { topic: 'solar/pv/energy', value: 12.5, unit: 'kWh', metric: 'energy' },
+        { topic: 'solar/pv/power', value: 4200, unit: 'W', metric: 'realpower', trend: [4100, 4150, 4200], messages: 7, seenUtc: new Date(Date.now() - 30000).toISOString() },
+        { topic: 'solar/pv/energy', value: 12.5, unit: 'kWh', metric: 'energy', messages: 2, seenUtc: new Date(Date.now() - 5000).toISOString() },
         { topic: 'solar/inverter/temperature/state', value: 41, unit: '°C' },
         // A JSON payload: the topic list reports its numeric fields as dotted paths, not objects.
         { topic: 'shelly/em/status', payload: '{"volts":230.5,"amps":4.25,"watts":975.6,"hertz":60.01}', isJson: true,
@@ -91,6 +91,9 @@ if (!treeRow('solar')) fail('pressing Browse on the current filter emptied the t
 await wait(20);
 if (asked.length === before) fail('pressing Browse on the current filter did not refresh');
 await wait(50);
+// When each topic was last heard from, and how often; a branch shows its freshest and its total.
+if (!/30s ago/.test(treeRow('power').textContent) || !/7/.test(treeRow('power').textContent)) fail(`a topic does not say when it was last seen and how many messages: ${treeRow('power').textContent}`);
+if (!/5s ago/.test(treeRow('pv').textContent) || !/9/.test(treeRow('pv').textContent)) fail(`a branch does not sum its messages or show its freshest topic: ${treeRow('pv').textContent}`);
 // A numeric topic draws its recent readings.
 if (!query(treeRow('power'), 'svg', true).length) fail('a numeric topic with readings has no sparkline');
 if (query(treeRow('energy'), 'svg', true).length) fail('a topic with no readings drew a sparkline');

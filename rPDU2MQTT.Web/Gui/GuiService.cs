@@ -1525,6 +1525,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                         topic = t.Topic,
                         payload = t.Payload,
                         seenUtc = t.SeenUtc,
+                        messages = t.Messages,
                         metric = hint.Metric,
                         unit = hint.Unit,
                         value = hint.Value,

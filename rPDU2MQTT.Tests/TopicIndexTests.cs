@@ -368,4 +368,15 @@ public class TopicIndexLeaseTests
         Assert.Equal(TopicIndex.TrendLength + 4, trend[^1]);
         Assert.Empty(index.Trend("tele/plug/SENSOR"));
     }
+
+    [Fact]
+    public void Messages_AddUpAcrossFlushes()
+    {
+        var index = new TopicIndex();
+        index.Renew(null);
+        index.Observe([Sample("a/1") with { Messages = 3 }]);
+        index.Observe([Sample("a/1")]);
+
+        Assert.Equal(4, index.Get("a/1")!.Messages);
+    }
 }

@@ -170,6 +170,13 @@ function lastFilter() {
   try { return localStorage.getItem(RECENT_FILTERS_KEY + '-last') || '#'; } catch { return '#'; }
 }
 
+/// How long ago, in the fewest words that still say it.
+function seenAgo(iso: string) {
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  if (!Number.isFinite(s)) return '';
+  return s < 2 ? 'just now' : s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
+}
+
 /// The MQTT explorer in a sheet.
 export function openMqttExplorer() {
   const { body, close } = overlay('MQTT explorer');
@@ -212,7 +219,7 @@ function mountMqttExplorer(body: any, close: () => void, showing: () => boolean)
 
   const tbl = el('table', { class: 'ld' });
   const head = el('tr');
-  ['', 'Topic', 'Last value', 'Trend', 'Looks like'].forEach(h => head.appendChild(el('th', { text: h })));
+  ['', 'Topic', 'Last value', 'Trend', 'Last seen', 'Messages', 'Looks like'].forEach(h => head.appendChild(el('th', { text: h })));
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
@@ -244,7 +251,7 @@ function mountMqttExplorer(body: any, close: () => void, showing: () => boolean)
   /// What a topic actually published, under its row: the payload in full, and the fields worth binding.
   const payloadRow = (t: any) => {
     const cell = el('td');
-    cell.setAttribute('colspan', '5');
+    cell.setAttribute('colspan', '7');
     const bar = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', margin: '0 0 6px' } });
     bar.append(el('code', { class: 'desc', style: { margin: '0' }, text: t.topic }),
                copyButton(`Copy the topic ${t.topic}`, 'topic', () => t.topic),
@@ -327,11 +334,18 @@ function mountMqttExplorer(body: any, close: () => void, showing: () => boolean)
     const trend = el('td', { style: { width: '140px' } });
     if (t && Array.isArray(t.trend) && t.trend.length > 1)
       trend.appendChild(sparkline({ values: t.trend, color: '#4f8ff7', units: t.unit || '', width: 132, height: 22, fromZero: false }));
+    // A branch reports its freshest topic and the messages under it.
+    const newest = topics.reduce((m: string, x: any) => (x.seenUtc && x.seenUtc > m ? x.seenUtc : m), '');
+    const seen = el('td', { class: 'desc', style: { whiteSpace: 'nowrap', margin: '0' }, text: newest ? seenAgo(newest) : '' });
+    if (newest) { seen.title = new Date(newest).toLocaleString(); ages.push({ cell: seen, at: newest }); }
+    const count = topics.reduce((n: number, x: any) => n + (Number(x.messages) || 0), 0);
     tbody.appendChild(el('tr', {},
       el('td', {}, box),
       name,
       value,
       trend,
+      seen,
+      el('td', { class: 'num', text: count ? formatNum(count) : '' }),
       el('td', { text: t ? (t.isJson ? `JSON · ${fieldNames(t.fields).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—')) : '' })));
     if (t && opened.has(t.topic)) tbody.appendChild(payloadRow(t));
 
@@ -344,13 +358,15 @@ function mountMqttExplorer(body: any, close: () => void, showing: () => boolean)
     const all = [...known.values()];
     return q ? all.filter(t => String(t.topic).toLowerCase().includes(q)) : all;
   };
+  let ages: { cell: any, at: string }[] = [];
   const draw = () => {
     tbody.innerHTML = '';
+    ages = [];
     const rows = shown();
     const searching = !!search.value.trim();
     if (!rows.length) {
       const cell = el('td', { class: 'desc', text: searching && known.size ? 'No topic matches that.' : 'Nothing yet — topics show up here as they arrive.' });
-      cell.setAttribute('colspan', '5');
+      cell.setAttribute('colspan', '7');
       tbody.appendChild(el('tr', {}, cell));
       return;
     }
@@ -407,13 +423,14 @@ function mountMqttExplorer(body: any, close: () => void, showing: () => boolean)
       if (b.reset) known.clear();
       (b.topics || []).forEach((t: any) => {
         const had = known.get(t.topic);
-        if (!had || had.payload !== t.payload || had.value !== t.value) changed = true;
+        if (!had || had.payload !== t.payload || had.value !== t.value || had.messages !== t.messages) changed = true;
         known.set(t.topic, t);
       });
       if (typeof b.cursor === 'number') cursor = b.cursor;
       if (b.epoch != null) epoch = String(b.epoch);
       showStatus(b);
       if (changed || !tbody.children.length) draw();
+      else ages.forEach(a => { a.cell.textContent = seenAgo(a.at); });
     } finally { busy = false; }
   };
 
@@ -505,8 +522,10 @@ export function openRegisterExplorer() {
     td.append(box, ' ', formatNum(row[type]));
     return td;
   };
+  let ages: { cell: any, at: string }[] = [];
   const draw = () => {
     tbody.innerHTML = '';
+    ages = [];
     rows.forEach((row: any) => {
       const tr = el('tr');
       tr.appendChild(el('td', {}, el('code', { text: String(row.register) })));

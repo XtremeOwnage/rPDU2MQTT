@@ -137,6 +137,9 @@ public sealed class MqttTopicIndexService : BackgroundService
         var payload = e.PublishMessage.PayloadAsString ?? "";
         if (payload.Length > MaxPayloadChars) payload = payload[..MaxPayloadChars];
 
-        buffer[topic] = new TopicSample { Topic = topic, Payload = payload, SeenUtc = DateTime.UtcNow };
+        var now = DateTime.UtcNow;
+        buffer.AddOrUpdate(topic,
+            _ => new TopicSample { Topic = topic, Payload = payload, SeenUtc = now },
+            (_, held) => new TopicSample { Topic = topic, Payload = payload, SeenUtc = now, Messages = held.Messages + 1 });
     }
 }

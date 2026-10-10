@@ -123,7 +123,8 @@ public sealed class TopicIndex
             foreach (var sample in samples)
                 if (!string.IsNullOrEmpty(sample.Topic))
                 {
-                    topics[sample.Topic] = sample;
+                    var total = (topics.TryGetValue(sample.Topic, out var prev) ? prev.Messages : 0) + Math.Max(1, sample.Messages);
+                    topics[sample.Topic] = sample with { Messages = total };
                     changedAt[sample.Topic] = sequence;
                     if (Flow.TopicSampleAnalyzer.Analyze(sample.Topic, sample.Payload).Value is double v && double.IsFinite(v))
                     {

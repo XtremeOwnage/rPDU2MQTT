@@ -6,6 +6,9 @@ public sealed record TopicSample
     public string Topic { get; init; } = "";
     public string? Payload { get; init; }
     public DateTime SeenUtc { get; init; }
+
+    /// <summary>How many messages this carries: one as received, a running total once in the index.</summary>
+    public int Messages { get; init; } = 1;
 }
 
 /// <summary>What the index is currently doing — shown to whoever asked for it.</summary>
