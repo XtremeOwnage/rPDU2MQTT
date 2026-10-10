@@ -38,6 +38,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     private readonly HealthState health;
     private readonly Core.Integrations.IPduInstances registry;
     private readonly Core.Integrations.IntegrationStatus? integrationStatus;
+    private readonly Core.Integrations.ExportContributions contributions;
     private readonly Core.IProcessRestarter? restarter;
     private readonly Core.ISnapshotCache snapshots;
     private readonly Core.HostRole hostRoles;
@@ -72,7 +73,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     // Last outcome per Modbus device, for diagnostics.
     private readonly Core.Modbus.ModbusDevices? modbusDevices;
 
-    public GuiService(Config config, IHiveMQClient mqtt, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, Core.Integrations.IPduInstances registry, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null, rPDU2MQTT.Plugins.PluginCatalog? pluginCatalog = null, Core.Integrations.IntegrationStatus? integrationStatus = null)
+    public GuiService(Config config, IHiveMQClient mqtt, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, Core.Integrations.IPduInstances registry, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null, rPDU2MQTT.Plugins.PluginCatalog? pluginCatalog = null, Core.Integrations.IntegrationStatus? integrationStatus = null, Core.Integrations.ExportContributions? contributions = null)
     {
         this.pluginCatalog = pluginCatalog;
         this.live = live;
@@ -97,6 +98,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         this.health = health;
         this.registry = registry;
         this.integrationStatus = integrationStatus;
+        this.contributions = contributions ?? Core.Integrations.ExportContributions.BuiltIn;
         this.restarter = restarter;
         this.snapshots = snapshots;
         this.hostRoles = hostRoles;
@@ -360,7 +362,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         var native = Core.Flow.FlowExport.NativeEnergyUniqueIds(merged, energyMetric);
 
         var current = Core.Flow.FlowExport.ExportedDeviceIds(graph, config.EnergyFlow.MqttExportTags, native)
-            .Concat(Core.Flow.LocationExport.DeviceIds(config.EnergyFlow)).ToList();
+            .Concat(contributions.TierIds(config).Select(Core.Flow.FlowExport.DeviceId)).ToList();
 
         var orphans = Core.Flow.FlowExport.OrphanedDiscoveryTopics(retained, current, prefix).ToList();
 

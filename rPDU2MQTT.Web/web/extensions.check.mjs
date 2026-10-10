@@ -17,6 +17,8 @@ nodeSchema.properties.push({
   key: 'Ext', label: 'Ext', type: 'dictionary', extensionOf: 'node',
   extensions: [{ key: 'where', label: 'Where', type: 'object', isPlugin: true, properties: [
     { key: 'Room', label: 'Room', type: 'string', description: 'The room it is in.' },
+    { key: 'Place', label: 'Place', type: 'string', choicesFrom: '/api/plugins/where/choices' },
+    { key: 'Serves', label: 'Serves', type: 'list', choicesFrom: '/api/plugins/where/choices', valueSchema: { key: '', label: '', type: 'string' } },
   ] }],
 });
 
@@ -28,6 +30,7 @@ const posts = [];
 const { sandbox, getEl } = makeDom({
   bodies: (url, opts) => {
     if (url.includes('/api/config') && opts?.method === 'POST') { posts.push(JSON.parse(opts.body)); return { ok: true, message: 'Saved.' }; }
+    if (url.includes('/api/plugins/where/choices')) return [['kitchen', 'Kitchen'], ['garage', 'Garage']];
     return url.includes('/api/schema') ? schema
       : url.includes('/api/config') ? config
       : url.includes('/api/status') ? { ok: true, configWritable: true }
@@ -60,11 +63,26 @@ room.dispatch('change', {});
 await new Promise(r => setTimeout(r, 20));
 if (save.disabled) fail('editing a plugin setting is not an unsaved change');
 
+// A field whose choices the server answers: a dropdown, and a list of boxes to tick.
+const place = query(section, 'select', false);
+if (!place) fail('a field with server choices is not a dropdown');
+const opts = query(place, 'option', true).map(o => o.value);
+if (!opts.includes('garage')) fail(`the dropdown did not get the server's choices: ${JSON.stringify(opts)}`);
+place.value = 'garage';
+place.dispatch('change', {});
+const boxes = query(section, '.choice-box', true);
+if (boxes.length !== 2) fail(`a list with server choices drew ${boxes.length} boxes, not 2`);
+const tick = query(boxes[0], 'input', false);
+tick.checked = true;
+tick.dispatch('change', {});
+
 save.click();
 await new Promise(r => setTimeout(r, 60));
 const ext = posts[0]?.EnergyFlow?.Nodes?.[0]?.Ext;
 if (ext?.where?.Room !== 'kitchen') fail(`the setting was not saved under the plugin's id: ${JSON.stringify(ext)}`);
+if (ext?.where?.Place !== 'garage') fail(`the dropdown's pick was not saved: ${JSON.stringify(ext)}`);
+if (JSON.stringify(ext?.where?.Serves) !== '["kitchen"]') fail(`the ticked box was not saved: ${JSON.stringify(ext)}`);
 if (ext?.other?.Keep !== 1) fail('another plugin\'s settings on the node were lost');
 
-console.log('extensions: a plugin\'s node settings render in the node editor, save under Ext by plugin id, '
+console.log('extensions: a plugin\'s node settings render in the node editor, save under Ext by plugin id, draw server-answered choices as a dropdown or boxes, '
   + 'leave other plugins\' entries alone, and opening the editor is not an edit');

@@ -60,6 +60,8 @@ Implement any combination.
 | `IConfigurablePlugin` | Carry your own settings section. |
 | `IGuiPageProvider` | Ship your own GUI pages. |
 | `IEntityExtensionProvider` | Keep your own settings on nodes, panels and breakers. |
+| `IExportContributor` | Publish your own tiers. |
+| `IAreaProvider` | Set each node's Home Assistant area. |
 | `IPluginStoreUser` | Keep named hashes across restarts (Valkey/Redis when the cache is on). |
 
 ### Receiving data
@@ -134,6 +136,8 @@ EnergyFlow:
 ```
 
 Read and write them with `EntityExtensions.Read<MyNodeSettings>(node, Id)` and `EntityExtensions.Write(node, Id, settings)`.
+
+`[ChoicesFrom("/api/...")]`: choices as `[value, label]` pairs from that path.
 
 ## Your actions
 
