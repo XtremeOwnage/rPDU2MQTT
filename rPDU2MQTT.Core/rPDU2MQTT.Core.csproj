@@ -5,7 +5,7 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<InvariantGlobalization>true</InvariantGlobalization>
-		<!-- The plugin API version. Bump the major on a breaking contract change, the minor on an addition. -->
+		<!-- Plugin API version: major = breaking, minor = additive. -->
 		<AssemblyVersion>1.0.0.0</AssemblyVersion>
 	</PropertyGroup>
 

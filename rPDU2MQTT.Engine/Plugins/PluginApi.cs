@@ -4,19 +4,14 @@ using System.Reflection.PortableExecutable;
 
 namespace rPDU2MQTT.Plugins;
 
-/// <summary>Which plugins this host can load: a plugin is built against one version of <c>rPDU2MQTT.Core</c>.</summary>
-/// <remarks>
-/// Core's assembly version is the plugin API version. Same major, and a minor no newer than the host's.
-/// Without this the host's Core is handed to any plugin, and a mismatch surfaces later as a missing method.
-/// </remarks>
+/// <summary>Plugin API compatibility: same Core major, minor no newer than the host's.</summary>
 public static class PluginApi
 {
     private const string CoreName = "rPDU2MQTT.Core";
 
-    /// <summary>The API version this host provides.</summary>
     public static Version Host { get; } = typeof(Core.Integrations.IIntegration).Assembly.GetName().Version!;
 
-    /// <summary>The Core version <paramref name="file"/> was built against, or null when it does not reference Core.</summary>
+    /// <summary>Referenced Core version, or null.</summary>
     public static Version? BuiltAgainst(string file)
     {
         using var stream = File.OpenRead(file);
@@ -31,7 +26,7 @@ public static class PluginApi
         return null;
     }
 
-    /// <summary>Null when a plugin built against <paramref name="built"/> can load here, otherwise why not.</summary>
+    /// <summary>Null if compatible, otherwise the reason.</summary>
     public static string? Incompatible(Version built, Version host)
     {
         if (built.Major != host.Major)
@@ -41,7 +36,6 @@ public static class PluginApi
         return null;
     }
 
-    /// <summary><see cref="Incompatible(Version, Version)"/> for a file, against this host.</summary>
     public static string? Incompatible(string file)
         => BuiltAgainst(file) is { } built ? Incompatible(built, Host) : null;
 
