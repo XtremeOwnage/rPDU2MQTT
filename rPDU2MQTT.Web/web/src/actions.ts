@@ -1,5 +1,5 @@
 // Section-level connection tests + Home Assistant discovery actions (wired from sectionActions()).
-import { api, toast, el, btn } from './helpers.js';
+import { api, toast, el, btn, openSheet } from './helpers.js';
 import { state } from './state.js';
 import { refreshStatus } from './main.js';
 
@@ -135,4 +135,36 @@ export async function integrationActionBar(id: string): Promise<any> {
     bar.appendChild(b);
   });
   return bar;
+}
+
+/// Each EmonCMS input's processlist as provisioning would set it: the input, then each step and the feed
+/// (or, for × / ÷ input, the other input) it uses. A calculated step is highlighted.
+export async function showEmonCmsPlan() {
+  const r = await api('/api/integrations/emoncms/plan', { method: 'POST' });
+  const result = r.body?.result || {};
+  const inputs: any[] = result.inputs || [];
+  const list = el('div', { class: 'emon-plan' });
+  const filter = el('input', { type: 'search', placeholder: 'Filter inputs or feeds', class: 'emon-plan-filter' }) as HTMLInputElement;
+  const render = () => {
+    list.innerHTML = '';
+    const q = filter.value.trim().toLowerCase();
+    const shown = inputs.filter(i => !q || i.input.toLowerCase().includes(q) || i.steps.some((s: any) => s.target.toLowerCase().includes(q)));
+    for (const i of shown) {
+      const row = el('div', { class: 'emon-plan-row' }, el('span', { class: 'emon-plan-input', text: i.input }));
+      for (const s of i.steps) {
+        const calc = s.process !== 'Log to feed';
+        row.append(el('span', { class: 'emon-plan-arrow', text: '→' }),
+          el('span', { class: 'emon-plan-step' + (calc ? ' calc' : ''), text: s.process + (s.input ? ' ' + s.target : '') }));
+        if (!s.input) row.append(el('span', { class: 'emon-plan-arrow', text: '→' }), el('span', { class: 'emon-plan-feed', text: s.target }));
+      }
+      list.appendChild(row);
+    }
+    if (!shown.length) list.appendChild(el('div', { class: 'desc', text: result.message || (q ? 'Nothing matches.' : 'Nothing to provision yet.') }));
+  };
+  filter.oninput = render;
+  render();
+  const body = el('div', {},
+    el('div', { class: 'desc', text: `${inputs.length} input(s), ${result.feeds ?? 0} feed(s). Highlighted steps are calculated by EmonCMS; switch them under Feeds → Calculations.` }),
+    filter, list);
+  openSheet({ title: 'EmonCMS feed plan', body, wide: true });
 }

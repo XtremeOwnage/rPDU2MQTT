@@ -6,7 +6,7 @@ import { expectRestart } from './realtime.js';
 import { registerField, clearFieldRegistry, refreshDirty, onDirty, changeCountFor } from './dirty.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
 import { tagInput } from './tags.js';
-import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, cleanupEmonCmsInputs, cleanupEmonCmsFeeds, rediscoverHa, clearHa, testModbus, testHistory, integrationActionBar } from './actions.js';
+import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, cleanupEmonCmsInputs, cleanupEmonCmsFeeds, showEmonCmsPlan, rediscoverHa, clearHa, testModbus, testHistory, integrationActionBar } from './actions.js';
 import { addPathsSection } from './sections/paths.js';
 import { addDiagnosticsSection } from './sections/diagnostics.js';
 import { addControlSection } from './sections/control.js';
@@ -188,7 +188,20 @@ export function renderNode(node: any, obj: any, container: any, path: string[] =
     const fs = document.createElement('fieldset');
     const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-    renderObjectBody(node.properties, target, fs, here);
+    // A resettable section keeps its fields in one box, so a reset can redraw them in place.
+    const body = node.resettable ? document.createElement('div') : fs;
+    renderObjectBody(node.properties, target, body, here);
+    if (node.resettable) {
+      fs.appendChild(body);
+      const reset = btn('Reset to defaults');
+      reset.onclick = () => {
+        for (const p of node.properties || []) if (p.default !== undefined && p.default !== null) target[p.key] = p.default;
+        body.innerHTML = '';
+        renderObjectBody(node.properties, target, body, here);
+        refreshDirty();
+      };
+      fs.appendChild(reset);
+    }
     container.appendChild(fs);
   } else if (node.type === 'dictionary') {
     container.appendChild(renderMap(node, ensure(obj, node.key, {}), here));
@@ -973,7 +986,7 @@ function sectionActions(node: any) {
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
   else if (node.key === 'Modbus') { add('Test connections', testModbus); add('Explore registers', async () => openRegisterExplorer()); }
   else if (node.key === 'EmonCMS') {
-    add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds);
+    add('Test EmonCMS connection', testEmonCms); add('Show feed plan', showEmonCmsPlan); add('Provision feeds now', provisionEmonCmsFeeds);
     add('Delete old inputs', cleanupEmonCmsInputs); add('Delete old feeds', cleanupEmonCmsFeeds, 'danger'); add('Delete all feeds', deleteEmonCmsFeeds, 'danger');
     bar.appendChild(externalLink('Open EmonCMS', () => cfgUrl('EmonCMS', 'Url'), 'Open the EmonCMS server this bridge feeds'));
   } else if (node.key === 'HomeAssistant') {

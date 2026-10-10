@@ -99,3 +99,9 @@ public sealed class FixedListAttribute : Attribute
 public sealed class RadioChoicesAttribute : Attribute
 {
 }
+
+/// <summary>The GUI offers to put every setting in this section back to its default.</summary>
+[AttributeUsage(AttributeTargets.Property)]
+public sealed class ResettableAttribute : Attribute
+{
+}

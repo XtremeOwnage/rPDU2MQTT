@@ -71,6 +71,20 @@ Per type (`realpower`, `energy`, `energy_d`, `apparentpower`, `current`, `voltag
 | Force Local | The bridge's reading only. |
 | Force EmonCMS | EmonCMS works it out. Default for `energy_d`. |
 
+**Calculations** (`EmonCMS.Feeds.Calculations`): which values EmonCMS works out from others when a feed has no reading of its own. **Reset to defaults** restores the shipped set. **Show feed plan** lists each input's processlist as provisioning would set it.
+
+| Setting | Formula | Process | Default |
+| --- | --- | --- | --- |
+| Energy From Power | Energy = ∫ Power dt | Power to kWh | on |
+| Daily From Power | Energy today = ∫ Power dt | Power to kWh/d | on |
+| Daily From Energy | Energy today = Energy − Energy at day start | kWh to kWh/d | on |
+| Power From Energy | Power = ΔEnergy / Δt | kWh to Power | on |
+| Power From Voltage And Current | Power = V × I | x input, on the current input | off |
+| Voltage From Power And Current | V = P ÷ I | / input, on the power input | off |
+| Current From Power And Voltage | I = P ÷ V | / input, on the power input | off |
+
+A calculation runs only where its type is enabled and its **Calculation** lets EmonCMS supply it.
+
 **Virtual** (`EmonCMS.Feeds.Virtual`): optional friendly-named virtual feeds. Name Template default `{name} {type}`.
 
 ## Reading feeds back

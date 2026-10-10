@@ -13,8 +13,8 @@ public sealed record EmonFeed(int Id, string Name, string? Tag, string? ProcessL
 /// <summary>A feed we want to exist. DataType 1 = realtime, 2 = daily (kWh/d).</summary>
 public sealed record DesiredFeed(string Name, string Tag, int Engine, int IntervalSeconds, int DataType);
 
-/// <summary>One step of an input's processlist: the process, and the feed it writes.</summary>
-public sealed record DesiredProcess(string Process, string Feed);
+/// <summary>One step of an input's processlist: the process, and the feed it writes or, for an input-arg step, the input it reads.</summary>
+public sealed record DesiredProcess(string Process, string Feed, bool InputArg = false);
 
 /// <summary>An input and the ordered processlist we want on it; order matters, as some steps rewrite the value passed on.</summary>
 public sealed record DesiredInputLog(string InputName, IReadOnlyList<DesiredProcess> Steps)
@@ -55,6 +55,8 @@ public static class EmonCmsFeedPlanner
     };
 
     private const string PowerMetric = Core.Flow.FlowGraphBuilder.DefaultMetric;
+    private const string VoltageMetric = "voltage";
+    private const string CurrentMetric = "current";
     private const string EnergyMetric = "energy";
     private const string DailyMetric = Core.Flow.EnergyPeriod.Metric;
 
@@ -68,6 +70,7 @@ public static class EmonCmsFeedPlanner
         IReadOnlyDictionary<string, string>? instances = null)
     {
         var f = config.EmonCMS.Feeds;
+        var calc = f.Calculations ?? new Models.Config.EmonCmsCalculationsConfig();
         var defaultTag = string.IsNullOrWhiteSpace(f.Tag) ? config.EmonCMS.Node : f.Tag!;
         // The PDU instance each device was polled from; with one PDU configured it can only be that one.
         string? InstanceOf(string device) => instances is not null && instances.TryGetValue(device, out var i) ? i
@@ -112,6 +115,9 @@ public static class EmonCmsFeedPlanner
             var reported = g.Select(r => r.Type).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var hasPower = reported.Contains(PowerMetric);
             var hasEnergy = reported.Contains(EnergyMetric);
+            // The input another reading of this group arrives on, for a step that reads it.
+            string? InputOf(string metric) => g.FirstOrDefault(x => string.Equals(x.Type, metric, StringComparison.OrdinalIgnoreCase))
+                is { } other ? MetricsHelper.EmonCmsInputName(other, config) : null;
 
             foreach (var r in g)
             {
@@ -144,9 +150,9 @@ public static class EmonCmsFeedPlanner
                     steps.Add(mine == Producer.EmonCms
                         ? new(ProcessSlot.KwhAccumulator, storageName)
                         : new(ProcessSlot.LogToFeed, storageName));
-                    if (Who(DailyMetric, local: false, emon: true) == Producer.EmonCms && Derived(DailyMetric, 2) is { } daily)
+                    if (calc.DailyFromEnergy && Who(DailyMetric, local: false, emon: true) == Producer.EmonCms && Derived(DailyMetric, 2) is { } daily)
                         steps.Add(new(ProcessSlot.KwhToKwhd, daily));
-                    if (!hasPower && Who(PowerMetric, local: false, emon: true) == Producer.EmonCms && Derived(PowerMetric, 1) is { } power)
+                    if (calc.PowerFromEnergy && !hasPower && Who(PowerMetric, local: false, emon: true) == Producer.EmonCms && Derived(PowerMetric, 1) is { } power)
                         steps.Add(new(ProcessSlot.KwhToPower, power));
                 }
                 else if (string.Equals(r.Type, PowerMetric, StringComparison.OrdinalIgnoreCase))
@@ -155,15 +161,27 @@ public static class EmonCmsFeedPlanner
                         steps.Add(new(ProcessSlot.LogToFeed, storageName));
                     if (!hasEnergy)
                     {
-                        if (Who(EnergyMetric, local: false, emon: true) == Producer.EmonCms && Derived(EnergyMetric, 1) is { } energy)
+                        if (calc.EnergyFromPower && Who(EnergyMetric, local: false, emon: true) == Producer.EmonCms && Derived(EnergyMetric, 1) is { } energy)
                             steps.Add(new(ProcessSlot.PowerToKwh, energy));
-                        if (Who(DailyMetric, local: false, emon: true) == Producer.EmonCms && Derived(DailyMetric, 2) is { } daily)
+                        if (calc.DailyFromPower && Who(DailyMetric, local: false, emon: true) == Producer.EmonCms && Derived(DailyMetric, 2) is { } daily)
                             steps.Add(new(ProcessSlot.PowerToKwhd, daily));
                     }
+                    // Division rewrites the value passed on, so it comes after every step that needs watts.
+                    if (calc.VoltageFromPowerAndCurrent && !reported.Contains(VoltageMetric) && InputOf(CurrentMetric) is { } amps
+                        && Who(VoltageMetric, local: false, emon: true) == Producer.EmonCms && Derived(VoltageMetric, 1) is { } volts)
+                        steps.AddRange([new(ProcessSlot.DivideInput, amps, InputArg: true), new(ProcessSlot.LogToFeed, volts)]);
+                    else if (calc.CurrentFromPowerAndVoltage && !reported.Contains(CurrentMetric) && InputOf(VoltageMetric) is { } v
+                        && Who(CurrentMetric, local: false, emon: true) == Producer.EmonCms && Derived(CurrentMetric, 1) is { } current)
+                        steps.AddRange([new(ProcessSlot.DivideInput, v, InputArg: true), new(ProcessSlot.LogToFeed, current)]);
                 }
                 else
                 {
                     steps.Add(new(ProcessSlot.LogToFeed, storageName));
+                    // Power from V × I, unless an energy counter already supplies it.
+                    if (string.Equals(r.Type, CurrentMetric, StringComparison.OrdinalIgnoreCase) && calc.PowerFromVoltageAndCurrent
+                        && !hasPower && !(hasEnergy && calc.PowerFromEnergy) && InputOf(VoltageMetric) is { } volts
+                        && Who(PowerMetric, local: false, emon: true) == Producer.EmonCms && Derived(PowerMetric, 1) is { } power)
+                        steps.AddRange([new(ProcessSlot.TimesInput, volts, InputArg: true), new(ProcessSlot.LogToFeed, power)]);
                 }
                 if (steps.Count == 0) continue;
                 inputs.Add(new DesiredInputLog(inputName, steps));
@@ -224,11 +242,11 @@ public static class EmonCmsFeedPlanner
                     => byType.TryGetValue(metric, out var c) && c.Enabled ? Resolve(c.Calculation, local, emon) : Producer.None;
 
                 // Power is read, never calculated from watts; only an energy counter can stand in for it.
-                var power = Who(powerMetric, hasPower, hasEnergy);
+                var power = Who(powerMetric, hasPower, hasEnergy && calc.PowerFromEnergy);
                 // Energy is the counter logged as it arrives, or EmonCMS accumulating it / integrating watts.
-                var energy = energyMetric is null ? Producer.None : Who(energyMetric, hasEnergy, hasEnergy || hasPower);
+                var energy = energyMetric is null ? Producer.None : Who(energyMetric, hasEnergy, hasEnergy || (hasPower && calc.EnergyFromPower));
                 // The daily total has no local reading on a flow node — this pass never sends one.
-                var daily = Who(DailyMetric, false, hasEnergy || hasPower);
+                var daily = Who(DailyMetric, false, (hasEnergy && calc.DailyFromEnergy) || (!hasEnergy && hasPower && calc.DailyFromPower));
 
                 // kWh-to-Power is last: it hands watts to whatever follows it.
                 if (hasEnergy && energyFeed is not null)
@@ -317,12 +335,26 @@ public static class EmonCmsFeedPlanner
         return null;
     }
 
-    /// <summary>Join the steps into <c>&lt;process&gt;:&lt;feedid&gt;</c> pairs, dropping any whose feed does not exist.</summary>
-    public static string BuildInputProcessList(IReadOnlyList<DesiredProcess> steps, Func<string, int?> feedId)
-        => string.Join(",", steps
-            .Select(st => (st.Process, Feed: feedId(st.Feed)))
-            .Where(st => st.Feed is not null)
-            .Select(st => $"{st.Process}:{st.Feed}"));
+    /// <summary>
+    /// Join the steps into <c>&lt;process&gt;:&lt;id&gt;</c> pairs, dropping any whose feed does not exist. An
+    /// input-arg step whose input does not exist ends the list: it rewrites the value, so what follows it
+    /// would log the wrong thing.
+    /// </summary>
+    public static string BuildInputProcessList(IReadOnlyList<DesiredProcess> steps, Func<string, int?> feedId, Func<string, int?>? inputId = null)
+    {
+        var pairs = new List<string>();
+        foreach (var st in steps)
+        {
+            var id = st.InputArg ? inputId?.Invoke(st.Feed) : feedId(st.Feed);
+            if (id is null)
+            {
+                if (st.InputArg) break;
+                continue;
+            }
+            pairs.Add($"{st.Process}:{id}");
+        }
+        return string.Join(",", pairs);
+    }
 
     /// <summary>
     /// What is stale: an input under one of <paramref name="inputNodes"/> that is not in <paramref name="postedInputs"/>,
