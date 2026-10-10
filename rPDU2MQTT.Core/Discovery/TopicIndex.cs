@@ -30,6 +30,10 @@ public sealed class TopicIndex
 
     private readonly Dictionary<string, TopicSample> topics = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> changedAt = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<double>> trends = new(StringComparer.Ordinal);
+
+    /// <summary>Most numeric readings kept per topic for its trend.</summary>
+    public const int TrendLength = 60;
     private readonly object gate = new();
     private readonly SemaphoreSlim demand = new(0, 1);
     private long sequence;
@@ -77,6 +81,7 @@ public sealed class TopicIndex
     {
         topics.Clear();
         changedAt.Clear();
+        trends.Clear();
         granted = null;
         lastObservedUtc = DateTime.MinValue;
         epoch++;
@@ -120,6 +125,12 @@ public sealed class TopicIndex
                 {
                     topics[sample.Topic] = sample;
                     changedAt[sample.Topic] = sequence;
+                    if (Flow.TopicSampleAnalyzer.Analyze(sample.Topic, sample.Payload).Value is double v && double.IsFinite(v))
+                    {
+                        if (!trends.TryGetValue(sample.Topic, out var trend)) trends[sample.Topic] = trend = new List<double>();
+                        trend.Add(v);
+                        if (trend.Count > TrendLength) trend.RemoveRange(0, trend.Count - TrendLength);
+                    }
                 }
 
             Trim();
@@ -194,6 +205,12 @@ public sealed class TopicIndex
         }
     }
 
+    /// <summary>The numeric readings seen on a topic while browsing, oldest first.</summary>
+    public double[] Trend(string topic)
+    {
+        lock (gate) return trends.TryGetValue(topic ?? "", out var trend) ? trend.ToArray() : [];
+    }
+
     public TopicSample? Get(string topic)
     {
         lock (gate) return topics.TryGetValue(topic ?? "", out var sample) ? sample : null;
@@ -217,6 +234,7 @@ public sealed class TopicIndex
         {
             topics.Remove(stale.Topic);
             changedAt.Remove(stale.Topic);
+            trends.Remove(stale.Topic);
         }
     }
 

@@ -1977,7 +1977,7 @@ function sparkline(opts
     return empty;
   }
 
-  const lo = Math.min(...known, 0), hi = Math.max(...known);
+  const lo = opts.fromZero === false ? Math.min(...known) : Math.min(...known, 0), hi = Math.max(...known);
   const span = hi - lo || 1;
   const x = (i        ) => padL + (values.length === 1 ? 0 : (i * (w - padL - pad)) / (values.length - 1));
   const y = (v        ) => h - padB - ((v - lo) / span) * (h - padB - pad);
@@ -8422,9 +8422,27 @@ function lastFilter() {
   try { return localStorage.getItem(RECENT_FILTERS_KEY + '-last') || '#'; } catch { return '#'; }
 }
 
-/// The MQTT explorer: the broker's live topics as a tree that fills in as they arrive; tick the ones to create a node from.
+/// The MQTT explorer in a sheet.
 function openMqttExplorer() {
   const { body, close } = overlay('MQTT explorer');
+  mountMqttExplorer(body, close, () => true);
+}
+
+/// The MQTT explorer as its own page under MQTT. It only polls while the page is showing.
+function addMqttExplorerSection(nav     , sections     ) {
+  const link = navLink(nav, 'MQTT Explorer', '⌕');
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'MQTT Explorer' }));
+  let mounted = false;
+  link.onclick = () => {
+    activate(link, sec);
+    if (!mounted) { mounted = true; mountMqttExplorer(sec, () => {}, () => sec.classList.contains('active')); }
+  };
+  return { link, sec };
+}
+
+/// The broker's live topics as a tree that fills in as they arrive; tick the ones to create a node from.
+function mountMqttExplorer(body     , close            , showing               ) {
   body.appendChild(el('div', { class: 'desc', text: 'Topics appear as the broker sends them: retained ones at once, the rest when they next publish. Open a branch to drill in, ⌖ to browse only that branch, and tick readings to create a node from them.' }));
 
   let current = lastFilter();
@@ -8446,7 +8464,7 @@ function openMqttExplorer() {
 
   const tbl = el('table', { class: 'ld' });
   const head = el('tr');
-  ['', 'Topic', 'Last value', 'Looks like'].forEach(h => head.appendChild(el('th', { text: h })));
+  ['', 'Topic', 'Last value', 'Trend', 'Looks like'].forEach(h => head.appendChild(el('th', { text: h })));
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
@@ -8472,13 +8490,13 @@ function openMqttExplorer() {
   let cursor = 0;
   let epoch = '';
   let startedAt = Date.now();
-  const showing = new Set        ();   // topics showing their whole payload
+  const opened = new Set        ();    // topics showing their whole payload
   const open = new Set        ();      // branches showing their children
 
   /// What a topic actually published, under its row: the payload in full, and the fields worth binding.
   const payloadRow = (t     ) => {
     const cell = el('td');
-    cell.setAttribute('colspan', '4');
+    cell.setAttribute('colspan', '5');
     const bar = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', margin: '0 0 6px' } });
     bar.append(el('code', { class: 'desc', style: { margin: '0' }, text: t.topic }),
                copyButton(`Copy the topic ${t.topic}`, 'topic', () => t.topic),
@@ -8554,16 +8572,20 @@ function openMqttExplorer() {
     if (t && (t.payload || t.value != null)) {
       value.title = t.payload || '';
       value.style.cursor = 'pointer';
-      value.onclick = () => { showing.has(t.topic) ? showing.delete(t.topic) : showing.add(t.topic); draw(); };
+      value.onclick = () => { opened.has(t.topic) ? opened.delete(t.topic) : opened.add(t.topic); draw(); };
       // What it last published, in full — not the 48 characters the cell has room for.
       value.append(' ', copyButton('Copy the last value', 'value', () => t.payload || String(t.value ?? '')));
     }
+    const trend = el('td', { style: { width: '140px' } });
+    if (t && Array.isArray(t.trend) && t.trend.length > 1)
+      trend.appendChild(sparkline({ values: t.trend, color: '#4f8ff7', units: t.unit || '', width: 132, height: 22, fromZero: false }));
     tbody.appendChild(el('tr', {},
       el('td', {}, box),
       name,
       value,
+      trend,
       el('td', { text: t ? (t.isJson ? `JSON · ${fieldNames(t.fields).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—')) : '' })));
-    if (t && showing.has(t.topic)) tbody.appendChild(payloadRow(t));
+    if (t && opened.has(t.topic)) tbody.appendChild(payloadRow(t));
 
     if (branch && isOpen) [...n.children.values()].sort(byName).forEach(c => drawBranch(c, depth + 1, searching));
   };
@@ -8580,7 +8602,7 @@ function openMqttExplorer() {
     const searching = !!search.value.trim();
     if (!rows.length) {
       const cell = el('td', { class: 'desc', text: searching && known.size ? 'No topic matches that.' : 'Nothing yet — topics show up here as they arrive.' });
-      cell.setAttribute('colspan', '4');
+      cell.setAttribute('colspan', '5');
       tbody.appendChild(el('tr', {}, cell));
       return;
     }
@@ -8612,7 +8634,9 @@ function openMqttExplorer() {
     if (!b) { status.style.color = 'var(--bad)'; status.textContent = 'Could not reach the topic index.'; return; }
     if (b.granted === false) {
       status.style.color = 'var(--bad)';
-      status.textContent = `The broker denied the subscription to “${b.filter || current}”. Grant this MQTT account read permission on it, or browse a narrower branch.`;
+      status.textContent = known.size
+        ? `The broker denied “${b.filter || current}”, so only the topics this app already subscribes to are shown. Grant this MQTT account read permission on it, or browse a branch (⌖).`
+        : `The broker denied the subscription to “${b.filter || current}”. Grant this MQTT account read permission on it, or browse a narrower branch.`;
       return;
     }
     if (!b.listening && !known.size) { status.textContent = `Subscribing to “${current}”…`; return; }
@@ -8646,10 +8670,13 @@ function openMqttExplorer() {
   };
 
   const browse = (filter        ) => {
-    current = (filter || '').trim() || '#';
+    const next = (filter || '').trim() || '#';
+    // Already browsing it: refresh, rather than start over.
+    if (next === current && known.size) { poll(); return; }
+    current = next;
     filterIn.value = current;
     rememberFilter(current);
-    known.clear(); open.clear(); decided.clear(); showing.clear();
+    known.clear(); open.clear(); decided.clear(); opened.clear();
     cursor = 0; epoch = ''; startedAt = Date.now();
     status.style.color = 'var(--muted)';
     status.textContent = `Subscribing to “${current}”…`;
@@ -8667,6 +8694,7 @@ function openMqttExplorer() {
   let lastPoll = Date.now();
   const timer = setInterval(() => {
     if (!document.body.contains(tbl)) { clearInterval(timer); return; }
+    if (!showing()) { startedAt = Date.now(); return; }
     const delay = !known.size || Date.now() - startedAt < 15000 ? 1000 : 3000;
     if (Date.now() - lastPoll < delay - 100) return;
     lastPoll = Date.now();
@@ -13942,7 +13970,7 @@ const NAV_GROUPS                                        = [
   // Sources: the PDU tabs are children of the Vertiv rPDU page.
   { title: 'Sources', items: [{ tool: addLiveDataSection, child: true, after: PDU_BLOCK }, { tool: addControlSection, child: true, after: PDU_BLOCK }, { tool: addPathsSection, child: true, after: PDU_BLOCK }] },
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addBalanceSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { page: 'floor-plans' }, { tool: addNodeDataSection }] },
-  { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
+  { title: 'Integrations', items: [{ tool: addMqttExplorerSection, child: true, after: 'MQTT' }, { tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   { title: 'System', items: [{ tool: addHomeSection }, { tool: addPluginsSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];

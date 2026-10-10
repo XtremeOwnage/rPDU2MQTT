@@ -22,7 +22,7 @@ const { sandbox, getEl } = makeDom({
     : url.includes('/api/instances') ? { ok: true, instances: [] }
     : url.includes('/api/config') ? config
     : url.includes('/api/mqtt/topics') ? { ok: true, listening: true, indexed: 2, capacity: 1000, filter: '#', topics: [
-        { topic: 'solar/pv/power', value: 4200, unit: 'W', metric: 'realpower' },
+        { topic: 'solar/pv/power', value: 4200, unit: 'W', metric: 'realpower', trend: [4100, 4150, 4200] },
         { topic: 'solar/pv/energy', value: 12.5, unit: 'kWh', metric: 'energy' },
         { topic: 'solar/inverter/temperature/state', value: 41, unit: '°C' },
         // A JSON payload: the topic list reports its numeric fields as dotted paths, not objects.
@@ -84,6 +84,16 @@ if (!asked.some(u => u.includes('filter=' + encodeURIComponent('solar/#')))) fai
 if (!button(explorer, 'solar/#')) fail('the branch was not offered as a recent filter');
 button(explorer, 'Everything').onclick();
 await wait(50);
+// Browsing what is already browsed refreshes in place rather than emptying the tree first.
+const before = asked.length;
+button(explorer, 'Browse').onclick();
+if (!treeRow('solar')) fail('pressing Browse on the current filter emptied the tree');
+await wait(20);
+if (asked.length === before) fail('pressing Browse on the current filter did not refresh');
+await wait(50);
+// A numeric topic draws its recent readings.
+if (!query(treeRow('power'), 'svg', true).length) fail('a numeric topic with readings has no sparkline');
+if (query(treeRow('energy'), 'svg', true).length) fail('a topic with no readings drew a sparkline');
 
 // A JSON payload is readable in full: 48 truncated characters say nothing, and there is nowhere else to look.
 const jsonRow = treeRow('shelly/em/status');
@@ -169,6 +179,12 @@ if (sheet('MQTT explorer') || sheet('Create node')) fail('the explorer or dialog
 sec = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
 if (!query(sec, 'h2', true).some(h => h.textContent === 'Energy Nodes')) fail('creating a node did not go to the Nodes page');
 if (!sheet('Edit node — pv_array')) fail('the new node did not open in the node editor');
+
+// The explorer is also a page of its own under MQTT.
+sec = await navTo('MQTT Explorer');
+if (!query(sec, 'h2', true).some(h => h.textContent === 'MQTT Explorer')) fail('the MQTT Explorer page did not open');
+await wait(50);
+if (!query(sec, 'tr', true).some(r => query(r, 'code', true).some(c => c.textContent === 'solar'))) fail('the MQTT Explorer page shows no topic tree');
 
 // Modbus: tick one decoded register and create a node from it.
 sec = await navTo('Modbus TCP');

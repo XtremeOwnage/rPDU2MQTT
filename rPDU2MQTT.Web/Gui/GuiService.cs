@@ -1509,15 +1509,15 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     {
                         ok = true, listening = st.Listening, indexed = st.Topics, capacity = st.Capacity, filter = st.Filter, granted = st.Granted,
                         cursor = changes.Cursor, epoch = changes.Epoch, reset = changes.Reset,
-                        topics = changes.Topics.Select(Describe).ToArray(),
+                        topics = changes.Topics.Select(t => Describe(index, t)).ToArray(),
                     }, ConfigSchema.Json);
                 }
 
-                var topics = (index.Search(q, limit)).Select(Describe).ToArray();
+                var topics = (index.Search(q, limit)).Select(t => Describe(index, t)).ToArray();
 
                 return Results.Json(new { ok = true, listening = state.Listening, indexed = state.Topics, capacity = state.Capacity, filter = state.Filter, granted = state.Granted, topics }, ConfigSchema.Json);
 
-                static object Describe(Core.Discovery.TopicSample t)
+                static object Describe(Core.Discovery.TopicIndex index, Core.Discovery.TopicSample t)
                 {
                     var hint = Core.Flow.TopicSampleAnalyzer.Analyze(t.Topic, t.Payload);
                     return new
@@ -1530,6 +1530,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                         value = hint.Value,
                         isJson = hint.IsJson,
                         fields = hint.Fields,
+                        trend = index.Trend(t.Topic),
                     };
                 }
             }

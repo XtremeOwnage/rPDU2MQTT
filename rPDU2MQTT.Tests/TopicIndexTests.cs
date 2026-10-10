@@ -354,4 +354,18 @@ public class TopicIndexLeaseTests
     [InlineData("tele/plug", "tele/plug/SENSOR", false)]
     public void FilterMatches_FollowsMqttWildcards(string filter, string topic, bool matches)
         => Assert.Equal(matches, TopicIndex.FilterMatches(filter, topic));
+
+    [Fact]
+    public void Trend_KeepsTheNumericReadings_UpToItsLength()
+    {
+        var index = new TopicIndex();
+        index.Renew(null);
+        for (var i = 0; i < TopicIndex.TrendLength + 5; i++) index.Observe([Sample("solar/pv/power", i.ToString())]);
+        index.Observe([Sample("tele/plug/SENSOR", "{\"Power\":12}")]);
+
+        var trend = index.Trend("solar/pv/power");
+        Assert.Equal(TopicIndex.TrendLength, trend.Length);
+        Assert.Equal(TopicIndex.TrendLength + 4, trend[^1]);
+        Assert.Empty(index.Trend("tele/plug/SENSOR"));
+    }
 }
