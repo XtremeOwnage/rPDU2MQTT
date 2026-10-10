@@ -1,0 +1,40 @@
+# Contributing
+
+## Pull request titles
+
+Every PR title starts with one of these prefixes, then a space and a short summary in the imperative:
+
+| Prefix | Use for | Label |
+|---|---|---|
+| `[Feature]` | New functionality or an enhancement | `kind/feature` |
+| `[Bug]` | A fix for something not working as intended | `kind/bug` |
+| `[Major]` | A breaking change (config, API, MQTT topics, CRD) that needs a major version bump | `kind/major` |
+| `[Chore]` | Refactoring, tests, CI, build, release housekeeping | `kind/chore` |
+| `[Docs]` | Documentation only | `kind/documentation` |
+| `[Deps]` | Dependency updates | `kind/dependency` |
+
+Examples:
+
+```
+[Feature] Add hour windows to the Trends pages
+[Bug] Re-subscribe to MQTT topics after a reconnect
+[Chore] Scope CI and Docker workflows by path
+```
+
+PRs are squash-merged, so the title becomes the commit message on `main`.
+
+## Labels
+
+Labels are defined in [`.github/labels.yml`](.github/labels.yml); add new ones there, not in the GitHub UI.
+
+- **kind/** (required on PRs): exactly one, matching the title prefix. The PR check adds it from the prefix if none is set.
+- **priority/high**, **priority/low**: optional. No priority label means normal.
+- **needs-triage**, **needs-info**: issue triage state.
+- **lifecycle/stale**, **lifecycle/frozen**: managed by the stale workflow; add `lifecycle/frozen` to keep something open.
+- **good first issue**, **help wanted**: for contributors.
+
+Duplicates and won't-fix are recorded by closing the issue with that reason, not with a label.
+
+## Checks
+
+The **PR Standards** workflow fails a PR whose title has no valid prefix, or whose `kind/*` label is missing, duplicated, or does not match the prefix.

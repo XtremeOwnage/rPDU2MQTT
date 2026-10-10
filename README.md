@@ -229,6 +229,8 @@ Full documentation: **[xtremeownage.github.io/rPDU2MQTT](https://xtremeownage.gi
 
 This is a small project without heavy process. If you want to work on an issue or feature, comment on the issue so others know, then open a [pull request](https://github.com/XtremeOwnage/rPDU2MQTT/compare) — we'll polish it together.
 
+PR titles and labels follow [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## 🧭 Q&A
 
 **Why not a native Home Assistant integration?**

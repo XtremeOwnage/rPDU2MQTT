@@ -1,0 +1,63 @@
+name: PR Standards
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+
+concurrency:
+  group: pr-standards-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  validate:
+    name: Title and labels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const kinds = {
+              Feature: 'kind/feature',
+              Bug: 'kind/bug',
+              Major: 'kind/major',
+              Chore: 'kind/chore',
+              Docs: 'kind/documentation',
+              Deps: 'kind/dependency',
+            };
+            const pr = context.payload.pull_request;
+            const errors = [];
+
+            // Dependabot appends a colon to its commit-message prefix, so "[Deps]: " is accepted too.
+            const match = pr.title.match(/^\[([A-Za-z]+)\]:? (\S.*)$/);
+            const prefix = match && kinds[match[1]] ? match[1] : null;
+            if (!prefix) {
+              errors.push(`Title must start with one of ${Object.keys(kinds).map(k => `[${k}]`).join(', ')} followed by a space and a summary.`);
+            }
+
+            let labels = pr.labels.map(l => l.name);
+            let kindLabels = labels.filter(l => l.startsWith('kind/'));
+
+            if (prefix && kindLabels.length === 0) {
+              try {
+                await github.rest.issues.addLabels({ ...context.repo, issue_number: pr.number, labels: [kinds[prefix]] });
+                kindLabels = [kinds[prefix]];
+                core.info(`Added ${kinds[prefix]} from the title prefix.`);
+              } catch (e) {
+                core.warning(`Could not add ${kinds[prefix]}: ${e.message}`);
+              }
+            }
+
+            if (kindLabels.length !== 1) {
+              errors.push(`Exactly one kind/* label is required; found ${kindLabels.length ? kindLabels.join(', ') : 'none'}.`);
+            } else if (prefix && kindLabels[0] !== kinds[prefix]) {
+              errors.push(`Title prefix [${prefix}] requires label ${kinds[prefix]}, but the PR has ${kindLabels[0]}.`);
+            }
+
+            if (errors.length) {
+              errors.forEach(e => core.error(e));
+              core.setFailed('PR does not follow the standards in CONTRIBUTING.md.');
+            }

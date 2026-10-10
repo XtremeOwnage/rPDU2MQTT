@@ -2,7 +2,7 @@
 name: Report Issue
 about: Report a bug, or issue with functionality.
 title: ''
-labels: kind/bug, lifecycle/active, needs-triage, priority/awaiting-more-evidence
+labels: kind/bug, needs-triage
 assignees: ''
 
 ---
