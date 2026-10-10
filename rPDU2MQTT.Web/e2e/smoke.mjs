@@ -1,9 +1,5 @@
-// Every GUI page in a real browser, against a running bridge: no script errors, no failed requests, no
-// empty page, and nothing wider than a phone screen. The *.check.mjs files cover the pages against a DOM
-// stub; this is what they cannot see.
-//
-//   BASE_URL     the bridge's GUI (default http://127.0.0.1:18080)
-//   PW_CHROMIUM  a Chromium to use instead of Playwright's own
+// Opens every GUI page in Chromium against a running bridge.
+// BASE_URL (default http://127.0.0.1:18080), PW_CHROMIUM (optional browser path).
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
@@ -30,7 +26,6 @@ for (const [name, viewport] of [['desktop', { width: 1280, height: 900 }], ['pho
 
   for (const label of labels) {
     errors = [];
-    // The nav is a drawer on a phone; open the page the way the app does, not by finding the link.
     await page.$eval(`#nav a[data-label="${label}"]`, a => a.click());
     await page.waitForTimeout(600);
     const text = await page.$eval('#sections', s => s.innerText.trim().length);
