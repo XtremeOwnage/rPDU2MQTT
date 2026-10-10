@@ -33,32 +33,32 @@ public sealed class HomeAssistantHistory : IMeasurementHistory
 
     public async Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct)
     {
-        var ed = cfg.HASS.EnergyDashboard;
-        if (string.IsNullOrWhiteSpace(ed.Url)) return (false, "no Home Assistant URL set");
-        if (string.IsNullOrWhiteSpace(ed.Token)) return (false, "no long-lived access token set");
+        var ha = cfg.HASS;
+        if (string.IsNullOrWhiteSpace(ha.Url)) return (false, "no Home Assistant URL set");
+        if (string.IsNullOrWhiteSpace(ha.Token)) return (false, "no long-lived access token set");
 
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{ed.Url!.TrimEnd('/')}/api/");
-            request.Headers.Authorization = new("Bearer", ed.Token);
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{ha.Url!.TrimEnd('/')}/api/");
+            request.Headers.Authorization = new("Bearer", ha.Token);
             var response = await http.SendAsync(request, ct);
             return response.IsSuccessStatusCode
-                ? (true, ed.Url!)
-                : (false, $"{ed.Url} answered {(int)response.StatusCode}");
+                ? (true, ha.Url!)
+                : (false, $"{ha.Url} answered {(int)response.StatusCode}");
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return (false, $"{ed.Url}: no answer within {http.Timeout.TotalSeconds:0}s");
+            return (false, $"{ha.Url}: no answer within {http.Timeout.TotalSeconds:0}s");
         }
-        catch (Exception ex) { return (false, $"{ed.Url}: {ex.Message}"); }
+        catch (Exception ex) { return (false, $"{ha.Url}: {ex.Message}"); }
     }
 
     public async Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(
         IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct)
     {
         var found = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        var ed = cfg.HASS.EnergyDashboard;
-        if (string.IsNullOrWhiteSpace(ed.Url) || string.IsNullOrWhiteSpace(ed.Token) || nodeIds.Count == 0)
+        var ha = cfg.HASS;
+        if (string.IsNullOrWhiteSpace(ha.Url) || string.IsNullOrWhiteSpace(ha.Token) || nodeIds.Count == 0)
             return found;
 
         // The entity each node publishes under, so the lookup is exact rather than a guess at a display
@@ -71,7 +71,7 @@ public sealed class HomeAssistantHistory : IMeasurementHistory
         // One request for the whole set: HA takes a comma-separated filter, and a request per node is what
         // made the EmonCMS reader slow enough to notice on a hierarchy of any size.
         var from = atUtc.AddMinutes(-Math.Max(1, cfg.History.ToleranceSeconds / 60.0)).ToString("o", CultureInfo.InvariantCulture);
-        var url = $"{ed.Url!.TrimEnd('/')}/api/history/period/{Uri.EscapeDataString(from)}"
+        var url = $"{ha.Url!.TrimEnd('/')}/api/history/period/{Uri.EscapeDataString(from)}"
                 + $"?filter_entity_id={Uri.EscapeDataString(string.Join(',', entityOf.Keys))}"
                 + $"&end_time={Uri.EscapeDataString(atUtc.ToString("o", CultureInfo.InvariantCulture))}"
                 + "&minimal_response&no_attributes";
@@ -79,7 +79,7 @@ public sealed class HomeAssistantHistory : IMeasurementHistory
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Authorization = new("Bearer", ed.Token);
+            request.Headers.Authorization = new("Bearer", ha.Token);
             var response = await http.SendAsync(request, ct);
             if (!response.IsSuccessStatusCode)
             {
@@ -108,7 +108,7 @@ public sealed class HomeAssistantHistory : IMeasurementHistory
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Log.Warning($"Flow history: could not reach Home Assistant at {ed.Url} ({ex.Message}).");
+            Log.Warning($"Flow history: could not reach Home Assistant at {ha.Url} ({ex.Message}).");
         }
         return found;
     }
@@ -133,8 +133,8 @@ public sealed class HomeAssistantHistory : IMeasurementHistory
         var perStep = steps.Select(_ => new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)).ToList();
         var result = perStep.Cast<IReadOnlyDictionary<string, double>>().ToList();
 
-        var ed = cfg.HASS.EnergyDashboard;
-        if (string.IsNullOrWhiteSpace(ed.Url) || string.IsNullOrWhiteSpace(ed.Token) || nodeIds.Count == 0 || steps.Count == 0)
+        var ha = cfg.HASS;
+        if (string.IsNullOrWhiteSpace(ha.Url) || string.IsNullOrWhiteSpace(ha.Token) || nodeIds.Count == 0 || steps.Count == 0)
             return result;
 
         var entityOf = nodeIds.ToDictionary(id => EntityFor(id, metric), id => id, StringComparer.OrdinalIgnoreCase);
@@ -147,7 +147,7 @@ public sealed class HomeAssistantHistory : IMeasurementHistory
         var from = ordered.Min() - lead;
         var to = ordered.Max();
 
-        var url = $"{ed.Url!.TrimEnd('/')}/api/history/period/{Uri.EscapeDataString(from.ToString("o", CultureInfo.InvariantCulture))}"
+        var url = $"{ha.Url!.TrimEnd('/')}/api/history/period/{Uri.EscapeDataString(from.ToString("o", CultureInfo.InvariantCulture))}"
                 + $"?filter_entity_id={Uri.EscapeDataString(string.Join(',', entityOf.Keys))}"
                 + $"&end_time={Uri.EscapeDataString(to.ToString("o", CultureInfo.InvariantCulture))}"
                 + "&minimal_response&no_attributes";
@@ -155,7 +155,7 @@ public sealed class HomeAssistantHistory : IMeasurementHistory
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Authorization = new("Bearer", ed.Token);
+            request.Headers.Authorization = new("Bearer", ha.Token);
             var response = await http.SendAsync(request, ct);
             if (!response.IsSuccessStatusCode)
             {
@@ -200,7 +200,7 @@ public sealed class HomeAssistantHistory : IMeasurementHistory
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            Log.Warning($"Flow history: could not reach Home Assistant at {ed.Url} ({ex.Message}).");
+            Log.Warning($"Flow history: could not reach Home Assistant at {ha.Url} ({ex.Message}).");
         }
         return result;
     }

@@ -37,7 +37,18 @@ Availability follows the MQTT Last Will ([MQTT](../integrations/mqtt.md)).
 | Republish discovery | Reloads the saved config, re-reads the PDU and republishes. Applies name, override and template edits without a restart. |
 | Clear discovery | Removes the retained discovery messages. Entities disappear until discovery runs again. |
 | Find orphaned configs / Clear them | Lists retained discovery configs under this bridge's prefix that the current setup no longer publishes, and retracts them. |
-| Find stale devices / Delete them | Lists this bridge's Home Assistant devices with no entities left, or only entities no longer provided, and deletes them through Home Assistant's API. Needs the Energy Dashboard URL and token. |
+| Find stale devices / Delete them | Lists this bridge's Home Assistant devices with no entities left, or only entities no longer provided, and deletes them through Home Assistant's API. Needs the Home Assistant URL and token. |
+
+## Connection
+
+The Energy Dashboard sync, rooms as areas, entity bindings, history and device cleanup all use one URL and token:
+
+| Field | Setting | Notes |
+| --- | --- | --- |
+| URL | `HomeAssistant.Url` | e.g. `http://homeassistant.local:8123` |
+| Token | `HomeAssistant.Token` | Long-lived access token. Or `RPDU2MQTT_HASS_TOKEN`. |
+
+`HomeAssistant.EnergyDashboard.Url` and `Token` from older configs are moved here on load.
 
 ## Energy Dashboard
 
@@ -46,8 +57,6 @@ Fields on the same page, under **Energy Dashboard**:
 | Field | Setting | Notes |
 | --- | --- | --- |
 | Enabled | `HomeAssistant.EnergyDashboard.Enabled` | Default off. |
-| URL | `HomeAssistant.EnergyDashboard.Url` | e.g. `http://homeassistant.local:8123` |
-| Token | `HomeAssistant.EnergyDashboard.Token` | Long-lived access token. Or `RPDU2MQTT_HASS_TOKEN`. |
 | Energy Measurement Type | `HomeAssistant.EnergyDashboard.EnergyMeasurementType` | Default `energy`. |
 | Node Tags › Include / Exclude | `HomeAssistant.EnergyDashboard.NodeTags` | Limit the sync to tagged nodes. Empty = all. |
 | Exclude Device Kinds | `HomeAssistant.EnergyDashboard.ExcludeDeviceKinds` | Kinds left out of the individual devices list. Default `grid`, `solar`, `battery`, `inverter`. |

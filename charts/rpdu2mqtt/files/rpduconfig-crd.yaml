@@ -228,6 +228,12 @@ spec:
                   DiscoveryEnabled:
                     type: boolean
                     description: Indicates whether Home Assistant discovery is enabled.
+                  Url:
+                    type: string
+                    description: "Home Assistant base URL, e.g. http://homeassistant.local:8123 . Used by everything that talks to Home Assistant's API: the Energy Dashboard sync, rooms as areas, entity bindings and history."
+                  Token:
+                    type: string
+                    description: Home Assistant long-lived access token (or set RPDU2MQTT_HASS_TOKEN).
                   DiscoveryTopic:
                     type: string
                     description: The discovery topic for Home Assistant.
@@ -252,7 +258,7 @@ spec:
                     properties:
                       Enabled:
                         type: boolean
-                        description: Sync the energy-flow hierarchy into HA's Energy Dashboard via its API. Requires Url + a long-lived access token.
+                        description: Sync the energy-flow hierarchy into HA's Energy Dashboard via its API. Requires HomeAssistant.Url and Token.
                       NodeTags:
                         type: object
                         x-kubernetes-preserve-unknown-fields: true
@@ -268,12 +274,6 @@ spec:
                               type: string
                             description: Never send nodes carrying any of these tags. Takes precedence over Include.
                         description: Limit the Energy Dashboard sync to nodes with particular tags. Empty syncs every node. Filtering changes only what is sent — never a value, and never any other destination.
-                      Url:
-                        type: string
-                        description: Home Assistant base URL, e.g. http://homeassistant.local:8123 .
-                      Token:
-                        type: string
-                        description: Home Assistant long-lived access token (or set RPDU2MQTT_HASS_TOKEN).
                       EnergyMeasurementType:
                         type: string
                         description: Measurement type holding each entity's cumulative energy (kWh) — used to find the Energy Dashboard stat for each tier.

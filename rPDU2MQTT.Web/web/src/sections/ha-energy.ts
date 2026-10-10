@@ -11,19 +11,21 @@ export function addHaEnergySection(nav: any, sections: any) {
   d.textContent = 'Map the energy-flow hierarchy into Home Assistant’s Energy Dashboard (individual devices + their upstream device). Each tier is published to HA as an Energy sensor by the flow export, so enable “Export tiers to MQTT” (Energy Flow → Settings) and HA discovery for the full Grid → Panel → Circuit → PDU → outlet chain to appear. Settings persist with the main Save button; the buttons act immediately using the values below.';
   sec.appendChild(d);
 
-  const ha = ensure(ensure(state.data, 'HomeAssistant', {}), 'EnergyDashboard', {});
+  // The URL and token are Home Assistant's own, shared with everything else that talks to its API.
+  const conn = ensure(state.data, 'HomeAssistant', {});
+  const ha = ensure(conn, 'EnergyDashboard', {});
 
-  const field = (label: string, key: string, type = 'text', placeholder = '') => {
+  const field = (label: string, key: string, type = 'text', placeholder = '', holder: any = ha) => {
     const f = el('div', { class: 'field' });
     f.appendChild(el('label', { text: label }));
     const inp: any = el('input', { type, placeholder });
-    if (ha[key] != null) inp.value = ha[key];
-    inp.onchange = () => { ha[key] = inp.value === '' ? null : inp.value; };
+    if (holder[key] != null) inp.value = holder[key];
+    inp.onchange = () => { holder[key] = inp.value === '' ? null : inp.value; };
     f.appendChild(inp);
     return { f, inp };
   };
-  const url = field('Home Assistant URL', 'Url', 'text', 'http://homeassistant.local:8123');
-  const token = field('Long-lived access token', 'Token', 'password', '');
+  const url = field('Home Assistant URL', 'Url', 'text', 'http://homeassistant.local:8123', conn);
+  const token = field('Long-lived access token', 'Token', 'password', '', conn);
   const etype = field('Energy measurement type', 'EnergyMeasurementType', 'text', 'energy');
 
   const chkF = el('div', { class: 'field' });
