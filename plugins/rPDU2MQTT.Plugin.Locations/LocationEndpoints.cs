@@ -5,7 +5,7 @@ using rPDU2MQTT.Services.Gui;
 namespace rPDU2MQTT.Plugin.Locations;
 
 /// <summary>Floor Plans page actions.</summary>
-internal sealed class LocationEndpoints(IPluginHost host)
+internal sealed class LocationEndpoints(IPluginHost host, IPluginStore? store = null)
 {
     private PduData Merged()
     {
@@ -200,29 +200,33 @@ internal sealed class LocationEndpoints(IPluginHost host)
     }
 
     /// <summary>Rooms as Home Assistant areas (#467).</summary>
-    public async Task<object> AreasAsync(Config cfg, bool apply, CancellationToken ct)
+    public async Task<object> AreasAsync(Config cfg, bool apply, CancellationToken ct) => (await SyncAsync(cfg, apply, ct)).Body;
+
+    private const string Links = "ha-links";
+
+    public async Task<(bool Ok, string Message, object Body)> SyncAsync(Config cfg, bool apply, CancellationToken ct)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(apply ? 60 : 20));
         try
         {
             using var session = await HomeAssistantSocket.OpenAsync(host.Config.HASS.Url, host.Config.HASS.Token, cts.Token);
-            var sync = new HaAreaSync(session);
+            var sync = new HaAreaSync(session) { Remembered = store?.Read(Links) ?? new Dictionary<string, string>() };
             var index = LocationIndex.For(cfg);
             var modes = LocationSettings.Of(cfg).HomeAssistant ?? new();
             var deviceRooms = HaAreaSync.DeviceRooms(index, Merged(), cfg.EnergyFlow);
-            if (!apply) return new { ok = true, plan = await sync.PlanAsync(index, deviceRooms, modes) };
+            if (!apply) return (true, "", new { ok = true, plan = await sync.PlanAsync(index, deviceRooms, modes) });
 
             var (plan, linked, linkedFloors, failed) = await sync.ApplyAsync(index, deviceRooms, modes);
-            return new
-            {
-                ok = failed.Count == 0, plan, linked, linkedFloors, failed,
-                message = failed.Count == 0 ? $"Published {linked.Count} room(s) as areas." : $"{failed.Count} change(s) failed: {string.Join("; ", failed)}",
-            };
+            store?.Write(Links, linked.ToDictionary(kv => "room:" + kv.Key, kv => kv.Value)
+                .Concat(linkedFloors.ToDictionary(kv => "floor:" + kv.Key, kv => kv.Value)).ToDictionary());
+            var message = failed.Count == 0 ? $"Published {linked.Count} room(s) as areas." : $"{failed.Count} change(s) failed: {string.Join("; ", failed)}";
+            return (failed.Count == 0, message, new { ok = failed.Count == 0, plan, linked, linkedFloors, failed, message });
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            return new { ok = false, message = apply ? $"Could not update Home Assistant: {ex.Message}" : $"Could not read Home Assistant: {ex.Message}" };
+            var message = apply ? $"Could not update Home Assistant: {ex.Message}" : $"Could not read Home Assistant: {ex.Message}";
+            return (false, message, new { ok = false, message });
         }
     }
 }

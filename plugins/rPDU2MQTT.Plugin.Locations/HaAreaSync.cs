@@ -26,17 +26,23 @@ internal sealed class HaAreaSync(HomeAssistantSocket session)
         return rooms;
     }
 
-    private static List<HaRoom> Rooms(LocationIndex index, IReadOnlyDictionary<string, string> entities)
+    /// <summary>Links from earlier scheduled publishes: "room:id" or "floor:id" → HA id. Config links win.</summary>
+    public IReadOnlyDictionary<string, string> Remembered { get; init; } = new Dictionary<string, string>();
+
+    private string? Linked(string configured, string key) =>
+        !string.IsNullOrWhiteSpace(configured) ? configured : Remembered.GetValueOrDefault(key);
+
+    private List<HaRoom> Rooms(LocationIndex index, IReadOnlyDictionary<string, string> entities)
     {
         string? Entity(LocationEntry e, string key) =>
             entities.GetValueOrDefault($"{FlowExport.DeviceId(LocationExport.NodeId(e.Id))}_{key}");
-        return [.. index.All.Where(e => e.Kind == LocationKind.Room).Select(e => new HaRoom(e.Id, e.Label, e.Room!.HaArea, e.Floor?.Id,
+        return [.. index.All.Where(e => e.Kind == LocationKind.Room).Select(e => new HaRoom(e.Id, e.Label, Linked(e.Room!.HaArea, "room:" + e.Id), e.Floor?.Id,
             LocationClimate.SensorIds(index, e, c => c.Temperature).Count > 0 ? Entity(e, "temperature") : null,
             LocationClimate.SensorIds(index, e, c => c.Humidity).Count > 0 ? Entity(e, "humidity") : null))];
     }
 
-    private static List<HaFloorIn> Floors(LocationIndex index) =>
-        [.. index.All.Where(e => e.Kind == LocationKind.Floor).Select(e => new HaFloorIn(e.Id, e.Label, e.Floor!.Level, e.Floor.HaFloor))];
+    private List<HaFloorIn> Floors(LocationIndex index) =>
+        [.. index.All.Where(e => e.Kind == LocationKind.Floor).Select(e => new HaFloorIn(e.Id, e.Label, e.Floor!.Level, Linked(e.Floor.HaFloor, "floor:" + e.Id)))];
 
     private static JsonArray List(JsonNode? reply) => reply?["result"]?.AsArray() ?? new JsonArray();
 

@@ -58,6 +58,9 @@ public static class HaSyncMode
     public const string UnsetOnly = "unset-only";
     public const string Fill = "fill";
     public const string Always = "always";
+    public const string Manual = "manual";
+    public const string OnChange = "on-change";
+    public const string Interval = "interval";
 }
 
 /// <summary>Home Assistant sync modes.</summary>
@@ -82,6 +85,16 @@ public sealed class HaSyncConfig
     [DefaultValue(HaSyncMode.Off)]
     [Description("Set each area's temperature and humidity sensors to its room's. fill: only when unset.")]
     public string AreaSensors { get; set; } = HaSyncMode.Off;
+
+    [AllowedValues(HaSyncMode.Manual, HaSyncMode.OnChange, HaSyncMode.Interval)]
+    [DefaultValue(HaSyncMode.Manual)]
+    [Description("When to publish. manual: from the Publish button. on-change: after the config changes. interval: every IntervalMinutes.")]
+    public string Schedule { get; set; } = HaSyncMode.Manual;
+
+    [Range(5, 10080, ErrorMessage = "IntervalMinutes must be between 5 and 10080.")]
+    [DefaultValue(60)]
+    [Description("Minutes between publishes when Schedule is interval.")]
+    public int IntervalMinutes { get; set; } = 60;
 
     internal static readonly HaSyncConfig Today = new();
 }

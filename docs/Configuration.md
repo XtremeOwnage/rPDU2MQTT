@@ -1642,10 +1642,13 @@ PlanStorage:
   | `Floors` | `create`, `update`, `off` | `off` |
   | `DeviceAreas` | `unset-only`, `off` | `unset-only` |
   | `AreaSensors` | `fill`, `always`, `off` | `off` |
+  | `Schedule` | `manual`, `on-change`, `interval` | `manual` |
+  | `IntervalMinutes` | 5–10080 | 60 |
 
   - Previews first. Areas are never deleted.
   - Uses **Home Assistant** `Url` and `Token`.
-  - Save afterwards to keep the links (`HaArea`, `HaFloor`).
+  - Save afterwards to keep the links (`HaArea`, `HaFloor`). Scheduled publishes keep them in the cache.
+  - Scheduled publishes run on the lease owner only; the result shows on the Status board.
 
 ## Example Configurations
 
