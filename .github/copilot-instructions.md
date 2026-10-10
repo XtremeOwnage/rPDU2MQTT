@@ -5,6 +5,7 @@
 - Title format: `[Prefix] Summary`, where Prefix is one of `Feature`, `Bug`, `Major`, `Chore`, `Docs`, `Dependency`, `Workflow`. No conventional-commit prefixes (`feat:`, `fix(scope):`).
 - `[Major]` only for breaking changes to config, API, MQTT topics or the CRD.
 - Apply exactly one `kind/*` label matching the prefix: Feature `kind/feature`, Bug `kind/bug`, Major `kind/major`, Chore `kind/chore`, Docs `kind/documentation`, Dependency `kind/dependency`, Workflow `kind/workflow`.
+- Add `impact/*` labels where they apply: `impact/breaking` (only with `[Major]`), `impact/config`, `impact/migration`, `impact/helm`, `impact/mqtt`, `impact/api`.
 - Use only the labels listed in `CONTRIBUTING.md`. Do not create labels.
 - PR body: a short list of what changed. No narration, no restating the diff.
 
