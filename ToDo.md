@@ -474,8 +474,10 @@ Notes
         broker degrades under sustained QoS1 traffic and the bridge correctly noticed and said so.
 
     NOT run, and worth saying plainly:
-    [ ] The GUI in a browser. There is none in this environment, so the pages are covered by the DOM checks
+    [x] The GUI in a browser. There is none in this environment, so the pages are covered by the DOM checks
         only — the original "looks like ass in Chrome" report can only be confirmed by the maintainer.
+        Now covered by `rPDU2MQTT.Web/e2e/smoke.mjs` in CI: every page in Chromium against a running bridge,
+        desktop and phone, failing on a script error, a failed request, an empty page or sideways scroll.
     [x] OneView (multi-PDU aggregation) and group control. A stub cluster (`run/oneview.mjs`: a master on
         9098 proxying two members on 9101/9102, both carrying a group called "Rack 1") shows both members
         polled and exported through the master, both groups published with their control topics, and a
@@ -669,11 +671,13 @@ Notes
         with a message saying where it belongs. The config model is exempt by design — the schema, the GUI
         form and the CRD are all generated from Core's types, and naming a vendor's SETTINGS is not knowing
         its protocol.
-    [ ] Two exceptions are listed rather than moved: `EmonCmsHealth` and `EmonCmsReport`, the EmonCMS
+    [x] Two exceptions are listed rather than moved: `EmonCmsHealth` and `EmonCmsReport`, the EmonCMS
         outcome a process carries on its heartbeat and in the process registry. They know nothing about the
         protocol, but a generic process registry should not name one integration either — that is the
         pre-plugin world showing through, from before `IntegrationStatus` existed. Generalising them changes
         the diagnostics payload the GUI reads, so it is its own change rather than a rider on this one.
+        Done: both deleted. A process carries `Integrations` (one `IntegrationReport` per id), and the
+        diagnostics payload lists every enabled integration instead of an `emoncms` block.
 
 28. Two credentials were being written out in plain text
     Found by a guard written while adding a new config section, not by looking for it. `RedactSecrets` is a

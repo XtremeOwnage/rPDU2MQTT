@@ -28,16 +28,6 @@ public class CoreKnowsNoVendorTests
 {
     private static readonly string[] Vendors = ["Prometheus", "EmonCms", "EmonCMS", "HomeAssistant", "Vertiv", "Influx"];
 
-    /// <summary>
-    /// Two status DTOs that name EmonCMS without knowing anything about how to talk to it: the outcome a
-    /// process carries on its heartbeat and in the process registry. They are the pre-plugin world showing
-    /// through — before <c>IntegrationStatus</c> existed, EmonCMS was the one integration a process
-    /// reported by name — and generalising them means changing the diagnostics payload the GUI reads, which
-    /// is its own change rather than a rider on this one. Listed here so they are a decision on the record
-    /// and not an omission (ToDo item 27).
-    /// </summary>
-    private static readonly string[] KnownExceptions = ["rPDU2MQTT.Core.EmonCmsHealth", "rPDU2MQTT.Core.Diagnostics.EmonCmsReport"];
-
     [Fact]
     public void NoVendorNamedTypeLivesInCore_OutsideTheConfigModel()
     {
@@ -48,7 +38,6 @@ public class CoreKnowsNoVendorTests
             .Where(t => (t.Name.StartsWith('<') || t.DeclaringType is not null) == false)   // compiler-generated
             .Where(t => Vendors.Any(v => t.Name.Contains(v, StringComparison.Ordinal)))
             .Select(t => $"{t.Namespace}.{t.Name}")
-            .Where(name => !KnownExceptions.Contains(name, StringComparer.Ordinal))
             .OrderBy(x => x, StringComparer.Ordinal)
             .ToList();
 
