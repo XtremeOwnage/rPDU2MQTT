@@ -15,8 +15,9 @@ const config = {
   Modbus: { Connections: [{ Id: 'meter_gw', Name: 'Meter gateway', Host: '10.0.0.5', Port: 502, UnitId: 1 }] },
   EnergyFlow: { Nodes: [{ Id: 'taken', Label: 'Taken', Mode: 'none' }], Links: [] },
 };
+const asked = [];
 const { sandbox, getEl } = makeDom({
-  bodies: (url) =>
+  bodies: (url) => (asked.push(url), 0) ||
     url.includes('/api/schema') ? schema
     : url.includes('/api/instances') ? { ok: true, instances: [] }
     : url.includes('/api/config') ? config
@@ -66,6 +67,23 @@ if (!/3 topic\(s\)/.test(treeRow('solar').textContent)) fail(`a branch does not 
 if (!treeRow('inverter/temperature/state')) fail(`a single-child chain was not condensed into one row; rows: ${query(explorer, 'tr', true).map(r => query(r, 'code')?.textContent).join(', ')}`);
 if (treeRow('inverter') || treeRow('temperature')) fail('a condensed chain still has a row per segment');
 if (!button(explorer, 'Create node').disabled) fail('Create node is enabled with nothing ticked');
+
+// It browses on open, asking for what changed since its cursor, not a capped search.
+if (!asked.some(u => u.includes('/api/mqtt/topics?since=0'))) fail(`the explorer did not ask for the topics incrementally: ${asked.filter(u => u.includes('mqtt')).join(', ')}`);
+// Finding a topic narrows the tree in place, with every match on show.
+const find = query(explorer, 'input', true).find(i => (i.attrs.placeholder || i.placeholder) === 'find a topic…');
+find.value = 'temperature'; find.oninput();
+if (!treeRow('solar/inverter/temperature/state') || treeRow('pv')) fail('finding a topic did not narrow the tree to it');
+find.value = ''; find.oninput();
+// ⌖ on a branch browses only that branch, and it is remembered as a recent filter.
+const focus = query(treeRow('solar'), 'button', true).find(b => b.textContent === '⌖');
+if (!focus) fail('a branch has no way to browse only it');
+focus.onclick();
+await wait(50);
+if (!asked.some(u => u.includes('filter=' + encodeURIComponent('solar/#')))) fail('browsing a branch did not subscribe to it');
+if (!button(explorer, 'solar/#')) fail('the branch was not offered as a recent filter');
+button(explorer, 'Everything').onclick();
+await wait(50);
 
 // A JSON payload is readable in full: 48 truncated characters say nothing, and there is nowhere else to look.
 const jsonRow = treeRow('shelly/em/status');

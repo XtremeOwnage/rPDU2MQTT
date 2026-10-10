@@ -30,3 +30,20 @@ public sealed record TopicIndexState
     /// </summary>
     public bool? Granted { get; init; }
 }
+
+/// <summary>The topics that changed since a reader's cursor.</summary>
+public sealed record TopicChanges
+{
+    public List<TopicSample> Topics { get; init; } = new();
+
+    /// <summary>Pass back as <c>since</c> to get only what changes after this.</summary>
+    public long Cursor { get; init; }
+
+    /// <summary>Changes whenever the index is cleared; a reader holding another epoch starts over.</summary>
+    public string Epoch { get; init; } = "";
+
+    /// <summary>This is everything held, not a delta: the reader should drop what it had.</summary>
+    public bool Reset { get; init; }
+
+    public TopicIndexState State { get; init; } = new();
+}

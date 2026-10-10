@@ -308,4 +308,50 @@ public class TopicIndexLeaseTests
 
         Assert.True(index.Search(null, int.MaxValue).Count <= TopicIndex.Capacity);
     }
+
+    [Fact]
+    public void Changes_HandsOverEverythingOnce_ThenOnlyWhatChanged()
+    {
+        var index = new TopicIndex();
+        index.Renew(null);
+        index.Observe([Sample("a/1"), Sample("a/2")]);
+
+        var first = index.Changes(0);
+        Assert.True(first.Reset);
+        Assert.Equal(2, first.Topics.Count);
+
+        index.Observe([Sample("a/2", "2")]);
+        var next = index.Changes(first.Cursor, first.Epoch);
+        Assert.False(next.Reset);
+        Assert.Equal("a/2", Assert.Single(next.Topics).Topic);
+
+        Assert.Empty(index.Changes(next.Cursor, next.Epoch).Topics);
+    }
+
+    [Fact]
+    public void Changes_StartsOver_WhenTheFilterChanges()
+    {
+        var index = new TopicIndex();
+        index.Renew("a/#");
+        index.Observe([Sample("a/1")]);
+        var seen = index.Changes(0);
+
+        index.Renew("b/#");
+        index.Observe([Sample("b/1")]);
+        var after = index.Changes(seen.Cursor, seen.Epoch);
+
+        Assert.True(after.Reset);
+        Assert.Equal("b/1", Assert.Single(after.Topics).Topic);
+    }
+
+    [Theory]
+    [InlineData("#", "anything/at/all", true)]
+    [InlineData("solar_assistant/#", "solar_assistant/inverter_1/pv_power/state", true)]
+    [InlineData("solar_assistant/#", "solar_assistant", true)]
+    [InlineData("solar_assistant/#", "tele/plug/SENSOR", false)]
+    [InlineData("tele/+/SENSOR", "tele/plug/SENSOR", true)]
+    [InlineData("tele/+/SENSOR", "tele/plug/STATE", false)]
+    [InlineData("tele/plug", "tele/plug/SENSOR", false)]
+    public void FilterMatches_FollowsMqttWildcards(string filter, string topic, bool matches)
+        => Assert.Equal(matches, TopicIndex.FilterMatches(filter, topic));
 }

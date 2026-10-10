@@ -43,13 +43,13 @@ public sealed class MqttTopicIndexService : BackgroundService
     {
         try { await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken); } catch (OperationCanceledException) { return; }
 
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
-        do
+        // A new browse wakes this at once; otherwise what arrived is handed over every second.
+        while (!stoppingToken.IsCancellationRequested)
         {
             try { await PumpAsync(); }
             catch (Exception ex) { Serilog.Log.Debug($"Topic index: {ex.Message}"); }
+            await index.WaitForDemandAsync(TimeSpan.FromSeconds(1), stoppingToken);
         }
-        while (await Core.Ticks.Next(timer, stoppingToken));
 
         if (subscribedFilter is not null) await StopListening();
     }
@@ -84,9 +84,10 @@ public sealed class MqttTopicIndexService : BackgroundService
     {
         try
         {
+            // Set first: the broker sends retained messages before the SUBACK returns.
+            subscribedFilter = filter;
             mqtt.OnMessageReceived += OnMessageReceived;
             var result = await MqttSubscriptions.SubscribeAsync(mqtt, filter, QualityOfService.AtMostOnceDelivery);
-            subscribedFilter = filter;
 
             // A broker can *deny* the subscription (an ACL that forbids the wildcard) and report it in the
             // SUBACK, not as an exception. Unchecked, that's a silently-empty browser on a working broker.
@@ -125,6 +126,10 @@ public sealed class MqttTopicIndexService : BackgroundService
     {
         var topic = e.PublishMessage.Topic;
         if (string.IsNullOrEmpty(topic) || topic.StartsWith("$SYS", StringComparison.Ordinal)) return;
+
+        // The client is shared, so this also sees the app's own subscriptions.
+        var filter = subscribedFilter;
+        if (filter is null || !TopicIndex.FilterMatches(filter, topic)) return;
 
         // Bounded: once the buffer is full, keep refreshing what we already track and let the rest go.
         if (buffer.Count >= MaxBuffered && !buffer.ContainsKey(topic)) return;

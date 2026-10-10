@@ -1500,7 +1500,24 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var q = ctx.Request.Query["q"].FirstOrDefault();
                 var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var n) ? n : 50;
 
-                var topics = (index.Search(q, limit)).Select(t =>
+                // The explorer asks for everything once, then only what changed after its cursor.
+                if (long.TryParse(ctx.Request.Query["since"].FirstOrDefault(), out var since))
+                {
+                    var changes = index.Changes(since, ctx.Request.Query["epoch"].FirstOrDefault());
+                    var st = changes.State;
+                    return Results.Json(new
+                    {
+                        ok = true, listening = st.Listening, indexed = st.Topics, capacity = st.Capacity, filter = st.Filter, granted = st.Granted,
+                        cursor = changes.Cursor, epoch = changes.Epoch, reset = changes.Reset,
+                        topics = changes.Topics.Select(Describe).ToArray(),
+                    }, ConfigSchema.Json);
+                }
+
+                var topics = (index.Search(q, limit)).Select(Describe).ToArray();
+
+                return Results.Json(new { ok = true, listening = state.Listening, indexed = state.Topics, capacity = state.Capacity, filter = state.Filter, granted = state.Granted, topics }, ConfigSchema.Json);
+
+                static object Describe(Core.Discovery.TopicSample t)
                 {
                     var hint = Core.Flow.TopicSampleAnalyzer.Analyze(t.Topic, t.Payload);
                     return new
@@ -1514,9 +1531,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                         isJson = hint.IsJson,
                         fields = hint.Fields,
                     };
-                }).ToArray();
-
-                return Results.Json(new { ok = true, listening = state.Listening, indexed = state.Topics, capacity = state.Capacity, filter = state.Filter, granted = state.Granted, topics }, ConfigSchema.Json);
+                }
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
