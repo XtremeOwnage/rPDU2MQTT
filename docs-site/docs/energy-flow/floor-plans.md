@@ -132,35 +132,52 @@ A banner shows when no persistent storage is configured.
 ```yaml
 Gui:
   DistanceUnits: imperial
-EnergyFlow:
-  Sites:
-    - Id: home
-      Name: Home
-      Floors:
-        - Id: ground
-          Name: Ground floor
-          Level: 0
-          Width: 1000
-          Height: 700
-          Scale: 100
-          Ground: grass
-          Rooms:
-            - { Id: garage, Name: Garage, Surface: concrete, Shape: [ {X: 40, Y: 40}, {X: 380, Y: 40}, {X: 380, Y: 360}, {X: 40, Y: 360} ] }
-            - { Id: patio, Name: Patio, Outdoor: true, Surface: pavers, Shape: [ {X: 680, Y: 300}, {X: 940, Y: 300}, {X: 940, Y: 560}, {X: 680, Y: 560} ] }
-          Openings:
-            - { Id: o_front, Kind: door, X: 470, Y: 560, Angle: 0, Width: 90 }
-            - { Id: o_gdoor, Kind: garage-door, X: 190, Y: 40, Angle: 0, Width: 220 }
-  Placements:
-    - { Id: p_panel, Kind: panel, Label: Main Panel, Room: garage, Floor: ground, X: 48, Y: 200, Facing: 0, Panel: main }
-    - { Id: p_fridge, Kind: appliance, Label: Fridge, Room: kitchen, Floor: ground, X: 430, Y: 82, Width: 85, Depth: 75, Footprint: fridge, Circuit: main/12, Node: fridge }
-    - { Id: p_ko1, Kind: outlet, Label: Counter left, Room: kitchen, Floor: ground, X: 388, Y: 180, Facing: 0, Gfci: true, Circuit: main/2 }
-  Runs:
-    - { Id: r_fridge, Kind: circuit, Floor: ground, Circuit: main/12, From: p_panel, To: p_fridge, Points: [ {X: 76, Y: 180}, {X: 430, Y: 180} ] }
-  AutoLocations:
-    - { Match: "outlet:rack_pdu_1:*", Location: garage }
+Plugins:
+  locations:
+    Sites:
+      - Id: home
+        Name: Home
+        Floors:
+          - Id: ground
+            Name: Ground floor
+            Level: 0
+            Width: 1000
+            Height: 700
+            Scale: 100
+            Ground: grass
+            Rooms:
+              - { Id: garage, Name: Garage, Surface: concrete, Shape: [ {X: 40, Y: 40}, {X: 380, Y: 40}, {X: 380, Y: 360}, {X: 40, Y: 360} ] }
+              - { Id: patio, Name: Patio, Outdoor: true, Surface: pavers, Shape: [ {X: 680, Y: 300}, {X: 940, Y: 300}, {X: 940, Y: 560}, {X: 680, Y: 560} ] }
+            Openings:
+              - { Id: o_front, Kind: door, X: 470, Y: 560, Angle: 0, Width: 90 }
+              - { Id: o_gdoor, Kind: garage-door, X: 190, Y: 40, Angle: 0, Width: 220 }
+    Placements:
+      - { Id: p_panel, Kind: panel, Label: Main Panel, Room: garage, Floor: ground, X: 48, Y: 200, Facing: 0, Panel: main }
+      - { Id: p_fridge, Kind: appliance, Label: Fridge, Room: kitchen, Floor: ground, X: 430, Y: 82, Width: 85, Depth: 75, Footprint: fridge, Circuit: main/12, Node: fridge }
+      - { Id: p_ko1, Kind: outlet, Label: Counter left, Room: kitchen, Floor: ground, X: 388, Y: 180, Facing: 0, Gfci: true, Circuit: main/2 }
+    Runs:
+      - { Id: r_fridge, Kind: circuit, Floor: ground, Circuit: main/12, From: p_panel, To: p_fridge, Points: [ {X: 76, Y: 180}, {X: 430, Y: 180} ] }
+    AutoLocations:
+      - { Match: "outlet:rack_pdu_1:*", Location: garage }
 PlanStorage:
   Directory: /data/plans
   MaxMegabytes: 10
 ```
 
 `Circuit` is `<panel id>/<breaker number>`. Ids are unique across sites, floors, rooms and areas.
+
+Where a node is, where a panel is mounted, and the rooms a circuit serves are kept on each one under `Ext.locations`
+and set in the node editor and **Panel Schedule** under **Plugin settings**:
+
+```yaml
+EnergyFlow:
+  Nodes:
+    - { Id: fridge, Ext: { locations: { Location: kitchen } } }
+  Panels:
+    - Id: main
+      Ext: { locations: { Location: garage } }
+      Breakers:
+        - { Number: "12", Ext: { locations: { Rooms: [kitchen] } } }
+```
+
+Older configs with these under `EnergyFlow`, or `Location` and `Rooms` set directly, are moved on load.

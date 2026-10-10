@@ -158,6 +158,8 @@ internal class YamlConfigLoader
         dashboard.LegacyUrl = null;
         dashboard.LegacyToken = null;
 
+        Models.Config.LegacyLocations.Migrate(config);
+
         ApplyEnvironmentOverrides(config);
 
         return config;

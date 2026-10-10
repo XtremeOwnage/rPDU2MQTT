@@ -1,6 +1,5 @@
-using rPDU2MQTT.Models.Config;
 
-namespace rPDU2MQTT.Core.Flow;
+namespace rPDU2MQTT.Plugin.Locations;
 
 /// <summary>Places as exported tiers (#467): each room, area, floor and site with its own topic and Home Assistant device.</summary>
 public static class LocationExport
@@ -24,11 +23,11 @@ public static class LocationExport
 }
 
 /// <summary>Places as export tiers and rooms as Home Assistant areas, through the contributor hooks a plugin uses.</summary>
-public sealed class LocationContributor : Integrations.IExportContributor, Integrations.IAreaProvider
+public sealed class LocationContributor : IExportContributor, IAreaProvider
 {
-    public IReadOnlyList<Integrations.ContributedTier> Tiers(Integrations.ExportPass pass, rPDU2MQTT.Classes.Config cfg)
+    public IReadOnlyList<ContributedTier> Tiers(ExportPass pass, Config cfg)
     {
-        var locations = LocationIndex.For(cfg.EnergyFlow);
+        var locations = LocationIndex.For(cfg);
         if (locations.All.Count == 0 || pass.Tiers.Count == 0) return [];
         var topology = FlowTopology.For(pass.Snapshot, cfg.EnergyFlow);
         var graph = pass.Tiers[0].Graph;
@@ -36,7 +35,7 @@ public sealed class LocationContributor : Integrations.IExportContributor, Integ
         var energy = LocationRollup.Compute(locations, topology, LocationExport.ValuesOf(pass.Tiers.Count > 1 ? pass.Tiers[1].Graph : graph));
         var today = LocationRollup.Compute(locations, topology, LocationExport.ValuesOf(pass.Tiers.Count > 2 ? pass.Tiers[2].Graph : graph));
 
-        var tiers = new List<Integrations.ContributedTier>();
+        var tiers = new List<ContributedTier>();
         foreach (var place in locations.All)
         {
             if (power[place.Id].Value is not { } watts) continue;
@@ -46,9 +45,9 @@ public sealed class LocationContributor : Integrations.IExportContributor, Integ
         return tiers;
     }
 
-    public IReadOnlyList<string> TierIds(rPDU2MQTT.Classes.Config cfg) =>
-        [.. LocationIndex.For(cfg.EnergyFlow).All.Select(e => LocationExport.NodeId(e.Id))];
+    public IReadOnlyList<string> TierIds(Config cfg) =>
+        [.. LocationIndex.For(cfg).All.Select(e => LocationExport.NodeId(e.Id))];
 
-    public IReadOnlyDictionary<string, string> Areas(rPDU2MQTT.Classes.Config cfg, FlowTopology topology) =>
-        LocationExport.RoomNames(LocationIndex.For(cfg.EnergyFlow), topology);
+    public IReadOnlyDictionary<string, string> Areas(Config cfg, FlowTopology topology) =>
+        LocationExport.RoomNames(LocationIndex.For(cfg), topology);
 }

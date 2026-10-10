@@ -24,6 +24,7 @@ public static class EntityExtensions
     {
         PropertyNameCaseInsensitive = true,
         NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
+        Converters = { new LenientStringConverter() },
     };
 
     /// <summary>Every declared extension of the loaded plugins.</summary>

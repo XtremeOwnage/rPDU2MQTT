@@ -7,7 +7,7 @@ import { sourceEditorFor, genericSourceEditor } from '../source-editors.js';
 import { tagInput } from '../tags.js';
 import { templateHelp } from '../template-field.js';
 import { BALANCE_ROLES, balanceRoleOf, renameInBalance, setBalanceRole } from './balance.js';
-import { locationChoices, circuitChoices, choiceSelect } from '../location-options.js';
+import { circuitChoices, choiceSelect } from '../location-options.js';
 import { extensionsFor, renderExtensions } from '../entity-extensions.js';
 import {
   DIRECTIONAL_METRICS, LIVE_HINT, MODBUS_DATATYPES, MODBUS_REGISTER_TYPES, MODBUS_WORDORDERS,
@@ -845,13 +845,13 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     id => !feedsNothing((cand.get(id) || {}).kind)));
   wireSec.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
 
-  // --- Filing: tags, where it is, and where its EmonCMS feeds go. Folded until something is set. ---
+  // --- Filing: tags, its circuit, and where its EmonCMS feeds go. Folded until something is set. ---
   const more = el('details', { class: 'ne-more' }) as HTMLDetailsElement;
-  const filed = [(node.Tags || []).length, node.Location, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag, node.Hidden].filter(Boolean).length;
+  const filed = [(node.Tags || []).length, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag, node.Hidden].filter(Boolean).length;
   more.open = filed > 0 || nodeEditorFilingOpen;
   more.addEventListener('toggle', () => { nodeEditorFilingOpen = more.open; });
   more.appendChild(el('summary', { class: 'ne-more-summary' },
-    el('span', { text: 'Tags, location & EmonCMS' }),
+    el('span', { text: 'Tags, circuit & EmonCMS' }),
     el('span', { class: 'ne-count', text: filed ? `${filed} set` : '' })));
   const moreGrid = el('div', { class: 'node-editor-fields' });
 
@@ -863,10 +863,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     onChange: () => { if (!tags.length) node.Tags = undefined; rerender(); },
   }), 'Filter, highlight and export by tag. Never changes a reading.'));
 
-  // Where it is and which circuit it is plugged into (#461, #465).
-  const locSel = choiceSelect(locationChoices(), node.Location || '', '— not placed —');
-  locSel.onchange = () => { node.Location = locSel.value || undefined; };
-  moreGrid.appendChild(field('Location', locSel, 'Counted there on Floor Plans.'));
+  // Which circuit it is plugged into (#465).
   const circSel = choiceSelect(circuitChoices(), node.Circuit || '', '— not known —');
   circSel.onchange = () => { node.Circuit = circSel.value || undefined; };
   moreGrid.appendChild(field('Circuit', circSel, 'Breaker it is on. Counted among its metered devices.'));

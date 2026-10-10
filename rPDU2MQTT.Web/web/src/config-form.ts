@@ -35,7 +35,8 @@ import { featureToggle } from './sections/features.js';
 async function fetchChoices(path: string): Promise<[string, string][]> {
   try {
     const r: any = await api(path);
-    const list = Array.isArray(r?.body) ? r.body : (r?.body?.choices || []);
+    const b = r?.body;
+    const list = Array.isArray(b) ? b : Array.isArray(b?.result) ? b.result : (b?.choices || b?.result?.choices || []);
     return list.map((c: any) => Array.isArray(c) ? [String(c[0]), String(c[1] ?? c[0])] : [String(c), String(c)]);
   } catch { return []; }
 }

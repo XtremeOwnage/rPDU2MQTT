@@ -3899,23 +3899,7 @@ function searchSelect(choices          , value        , onPick                  
 }
 
 // ── location-options.ts ─────────────────────────────────────────
-// The places and circuits in the configuration, as picker options — for anything that says where a node is
-// or which circuit it is on (#461, #465).
-
-/// Every site, floor, room and area as [id, label], indented by depth so the tree reads in a flat list.
-function locationChoices()                     {
-  const out                     = [];
-  const sites        = state.data?.EnergyFlow?.Sites || [];
-  sites.forEach(s => {
-    out.push([s.Id, s.Name || s.Id]);
-    (s.Floors || []).slice().sort((a     , b     ) => (a.Level || 0) - (b.Level || 0)).forEach((f     ) => {
-      out.push([f.Id, `  ${f.Name || f.Id}`]);
-      (f.Rooms || []).forEach((r     ) => out.push([r.Id, `    ${r.Name || r.Id}`]));
-      (f.Areas || []).forEach((a     ) => out.push([a.Id, `    ${a.Name || a.Id} (area)`]));
-    });
-  });
-  return out;
-}
+// The circuits in the configuration, as picker options — for anything that says which circuit a node is on (#465).
 
 /// Every breaker in use in every panel as ["panel/number", label]; an unused slot is not a circuit anything is on.
 function circuitChoices()                     {
@@ -7599,13 +7583,13 @@ function renderNodeEditor(node     , links       , cand                  , reren
     id => !feedsNothing((cand.get(id) || {}).kind)));
   wireSec.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
 
-  // --- Filing: tags, where it is, and where its EmonCMS feeds go. Folded until something is set. ---
+  // --- Filing: tags, its circuit, and where its EmonCMS feeds go. Folded until something is set. ---
   const more = el('details', { class: 'ne-more' })                      ;
-  const filed = [(node.Tags || []).length, node.Location, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag, node.Hidden].filter(Boolean).length;
+  const filed = [(node.Tags || []).length, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag, node.Hidden].filter(Boolean).length;
   more.open = filed > 0 || nodeEditorFilingOpen;
   more.addEventListener('toggle', () => { nodeEditorFilingOpen = more.open; });
   more.appendChild(el('summary', { class: 'ne-more-summary' },
-    el('span', { text: 'Tags, location & EmonCMS' }),
+    el('span', { text: 'Tags, circuit & EmonCMS' }),
     el('span', { class: 'ne-count', text: filed ? `${filed} set` : '' })));
   const moreGrid = el('div', { class: 'node-editor-fields' });
 
@@ -7617,10 +7601,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
     onChange: () => { if (!tags.length) node.Tags = undefined; rerender(); },
   }), 'Filter, highlight and export by tag. Never changes a reading.'));
 
-  // Where it is and which circuit it is plugged into (#461, #465).
-  const locSel = choiceSelect(locationChoices(), node.Location || '', '— not placed —');
-  locSel.onchange = () => { node.Location = locSel.value || undefined; };
-  moreGrid.appendChild(field('Location', locSel, 'Counted there on Floor Plans.'));
+  // Which circuit it is plugged into (#465).
   const circSel = choiceSelect(circuitChoices(), node.Circuit || '', '— not known —');
   circSel.onchange = () => { node.Circuit = circSel.value || undefined; };
   moreGrid.appendChild(field('Circuit', circSel, 'Breaker it is on. Counted among its metered devices.'));
@@ -12258,15 +12239,12 @@ function addPanelScheduleSection(nav     , sections     ) {
   nodeSel.title = 'The energy-flow node that is this panel. Its reading is the power coming in, and a circuit mapped to one of its breakers is placed beneath it.';
   const feeders = el('span', { class: 'ps-feeders' });
   const feedAdd = el('select', { class: 'ps-feed-add' })                     ;
-  // Where the panel is mounted, from the locations on the Floor Plans page.
-  const whereBox = el('span', { class: 'ps-where' });
   feedAdd.title = 'Add a node that feeds this panel.';
   const settings = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
     el('label', { class: 'ld-inst' }, 'Name ', nameIn),
     el('label', { class: 'ld-inst' }, 'Slots ', slotsIn),
     el('label', { class: 'ld-inst' }, 'This panel is ', nodeSel),
-    el('label', { class: 'ld-inst' }, 'Fed by ', feeders, feedAdd),
-    el('label', { class: 'ld-inst' }, 'Mounted in ', whereBox));
+    el('label', { class: 'ld-inst' }, 'Fed by ', feeders, feedAdd));
   sec.appendChild(settings);
   // Settings plugins keep on the panel.
   const panelExt = el('div', { class: 'ps-ext' });
@@ -12301,6 +12279,8 @@ function addPanelScheduleSection(nav     , sections     ) {
   let nodes                                                = [];
 
   const flowIn = () => ensure(state.data, 'EnergyFlow', {});
+  // Items placed on the floor plans, kept by the Locations plugin.
+  const placementsIn = ()        => state.data?.Plugins?.locations?.Placements || [];
   const panelsIn = ()        => ensure(flowIn(), 'Panels', []);
   const clampsIn = ()        => ensure(flowIn(), 'Clamps', []);
   const linksIn = ()        => ensure(flowIn(), 'Links', []);
@@ -12651,20 +12631,9 @@ function addPanelScheduleSection(nav     , sections     ) {
     wholeBox.onchange = () => drawPickers();
     drawPickers();
 
-    // The rooms and areas the circuit serves (#459), and what is placed on it on the floor plans (#464).
-    const served = new Set        (entry?.Rooms || []);
-    const serves = el('div', { class: 'ps-serves' });
-    const places = locationChoices();
-    places.forEach(([id, label]) => {
-      const cb = el('input', { type: 'checkbox' })                    ;
-      cb.checked = served.has(id);
-      cb.onchange = () => { if (cb.checked) served.add(id); else served.delete(id); };
-      serves.appendChild(el('label', { class: 'ld-inst' }, cb, ' ' + label.trim()));
-    });
-    const servesField = field('Serves', places.length ? serves : el('div', { class: 'desc', text: integrationIds.has('floorplan') ? 'No rooms yet — add them on the Floor Plans page.' : 'No rooms yet — add them under EnergyFlow.Sites in the configuration.' }),
-      'The rooms and areas this circuit feeds. A room then lists it among the circuits serving it.');
-    const onIt = ((state.data?.EnergyFlow?.Placements || [])         ).filter(p => wasNumber && p.Circuit === `${panel.id}/${wasNumber}`);
-    const placedField = field('Placed on it', onIt.length
+    // What is placed on it on the floor plans (#464).
+    const onIt = placementsIn().filter(p => wasNumber && p.Circuit === `${panel.id}/${wasNumber}`);
+    const placedField = !integrationIds.has('locations') ? null : field('Placed on it', onIt.length
       ? el('ul', { class: 'ps-placed' }, ...onIt.map(p => el('li', { text: `${p.Label || p.Kind}${p.Room ? ' — ' + p.Room : ''}` })))
       : el('div', { class: 'desc', text: 'Nothing on the floor plans is linked to this circuit.' }));
 
@@ -12688,7 +12657,6 @@ function addPanelScheduleSection(nav     , sections     ) {
       target.Poles = Number(poles.value) || 1;
       target.Half = half.value ? Number(half.value) : null;
       target.State = stateSel.value;
-      target.Rooms = [...served];
       if (!entry) {
         const p = configPanel(panel.id);
         if (p) ensure(p, 'Breakers', []).push(target);
@@ -12697,7 +12665,7 @@ function addPanelScheduleSection(nav     , sections     ) {
       if (wasNumber && wasNumber !== newNumber) {
         clampsIn().filter((c     ) => c.Panel === panel.id && c.Breaker === wasNumber).forEach((c     ) => { c.Breaker = newNumber; });
         const was = `${panel.id}/${wasNumber}`, now = `${panel.id}/${newNumber}`;
-        [...((flowIn().Placements || [])         ), ...((flowIn().Nodes || [])         )].forEach((x     ) => { if (x.Circuit === was) x.Circuit = now; });
+        [...placementsIn(), ...((flowIn().Nodes || [])         )].forEach((x     ) => { if (x.Circuit === was) x.Circuit = now; });
       }
       const whole = target.Poles === 2 && wholeBox.checked;
       pickers.forEach((sel, i) => mapLeg(panel.id, newNumber, i + 1, sel.value, target.Wire, whole && i === 0));
@@ -12734,7 +12702,7 @@ function addPanelScheduleSection(nav     , sections     ) {
         field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor),
         field('Rating (A)', amps), field('Poles', poles),
         field('Tandem', half, 'A tandem breaker is two half-height breakers sharing one slot.'),
-        field('State', stateSel), pickerRows, servesField, placedField, extBox,
+        field('State', stateSel), pickerRows, placedField, extBox,
         ...(b?.node ? [field('On the energy flow', el('div', {
           class: 'desc',
           style: { margin: '0' },
@@ -12955,11 +12923,6 @@ function addPanelScheduleSection(nav     , sections     ) {
     const slots = Number(cfg?.Slots) || drawn.slots;
     const rows = Math.ceil(slots / 2);
     nameIn.value = cfg?.Name ?? drawn.name;
-    whereBox.innerHTML = '';
-    const whereSel = choiceSelect(locationChoices(), cfg?.Location || '', '— not placed —');
-    whereSel.title = 'The room, area or floor this panel is mounted in.';
-    whereSel.onchange = () => { if (cfg) { cfg.Location = whereSel.value || undefined; refreshDirty(); } };
-    whereBox.appendChild(whereSel);
     panelExt.innerHTML = '';
     if (cfg) renderExtensions('panel', cfg, panelExt, ['EnergyFlow', 'Panels', String(panelsIn().indexOf(cfg))]);
     slotsIn.value = String(slots);
@@ -13720,7 +13683,8 @@ function pluginPageTool(p            ) {
 async function fetchChoices(path        )                              {
   try {
     const r      = await api(path);
-    const list = Array.isArray(r?.body) ? r.body : (r?.body?.choices || []);
+    const b = r?.body;
+    const list = Array.isArray(b) ? b : Array.isArray(b?.result) ? b.result : (b?.choices || b?.result?.choices || []);
     return list.map((c     ) => Array.isArray(c) ? [String(c[0]), String(c[1] ?? c[0])] : [String(c), String(c)]);
   } catch { return []; }
 }

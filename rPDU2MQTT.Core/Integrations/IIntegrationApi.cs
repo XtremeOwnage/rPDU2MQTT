@@ -51,12 +51,14 @@ public enum ActionEffect
 /// Does the work. <c>args</c> holds the caller's parameters — query string, request body fields, or the
 /// GUI's form values, already flattened to strings. Returns anything serialisable; null means "no body".
 /// </param>
+/// <param name="Listed">False for an action only the plugin's own page calls, so it gets no button.</param>
 public sealed record IntegrationAction(
     string Name,
     string Title,
     string Description,
     ActionEffect Effect,
-    Func<IntegrationActionContext, CancellationToken, Task<object?>> Handler);
+    Func<IntegrationActionContext, CancellationToken, Task<object?>> Handler,
+    bool Listed = true);
 
 /// <summary>
 /// What an action is given when it runs: the live configuration and the caller's arguments.
@@ -67,7 +69,8 @@ public sealed record IntegrationAction(
 /// </remarks>
 /// <param name="Config">The live configuration, so an action reads current values rather than startup ones.</param>
 /// <param name="Args">Caller-supplied arguments, flattened to strings. Missing keys are absent, not empty.</param>
-public sealed record IntegrationActionContext(Config Config, IReadOnlyDictionary<string, string?> Args)
+/// <param name="Body">A JSON request body as sent, for an action given more than flat fields; null when there was none.</param>
+public sealed record IntegrationActionContext(Config Config, IReadOnlyDictionary<string, string?> Args, string? Body = null)
 {
     /// <summary>An argument, or null when the caller did not supply it.</summary>
     public string? Arg(string name) => Args.TryGetValue(name, out var v) ? v : null;
