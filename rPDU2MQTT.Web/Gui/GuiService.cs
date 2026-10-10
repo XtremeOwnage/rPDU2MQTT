@@ -942,7 +942,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 .Select(f => new { kind = f.Kind, severity = f.Severity, message = f.Message, breakers = f.Breakers, channels = f.Channels })
                 .ToArray();
 
-            // Each enabled integration's last outcome: this process's own, else the freshest a live process reported.
+            // Local outcome, else the freshest from another process.
             var reported = Core.Diagnostics.IntegrationReports.Local(integrationStatus);
             var integrationList = (integrations?.All ?? [])
                 .Where(i => i is Core.Integrations.IMeasurementDestination or Core.Integrations.IConfigurationPublisher

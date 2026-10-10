@@ -9,8 +9,7 @@ namespace rPDU2MQTT.Hosting;
 
 /// <summary>
 /// Registers this process with the <see cref="ProcessRegistry"/> on a timer, replacing the MQTT
-/// <c>HeartbeatService</c> beacons. Carries the process's roles + each integration's last outcome so the GUI
-/// Status board lists every role process in a split deployment.
+/// <c>HeartbeatService</c> beacons, with roles and per-integration outcomes.
 /// </summary>
 public sealed class ProcessRegistrar : BackgroundService
 {

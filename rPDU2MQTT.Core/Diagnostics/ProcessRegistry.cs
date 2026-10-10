@@ -1,6 +1,6 @@
 namespace rPDU2MQTT.Core.Diagnostics;
 
-/// <summary>One integration's last outcome, as a process carries it with its registration.</summary>
+/// <summary>One integration's last outcome.</summary>
 public sealed record IntegrationReport
 {
     public bool? Ok { get; init; }
@@ -19,7 +19,7 @@ public sealed record ProcessInfo
     public DateTime StartedUtc { get; init; }
     public string? Version { get; init; }
     public DateTime TimestampUtc { get; init; }
-    /// <summary>Each integration this process has run, by id. Only the process doing the work has an entry.</summary>
+    /// <summary>Last outcome per integration id this process has run.</summary>
     public IReadOnlyDictionary<string, IntegrationReport> Integrations { get; init; } = new Dictionary<string, IntegrationReport>();
 }
 
@@ -62,10 +62,8 @@ public sealed class ProcessRegistry
     }
 }
 
-/// <summary>Integration outcomes, as this process holds them and as the registry carries them.</summary>
 public static class IntegrationReports
 {
-    /// <summary>What this process has attempted, keyed by integration id.</summary>
     public static IReadOnlyDictionary<string, IntegrationReport> Local(Integrations.IntegrationStatus? status)
         => (status?.All() ?? new Dictionary<string, Integrations.IntegrationStatus.Entry>())
                .Where(kv => kv.Value.LastAttemptUtc is not null)
@@ -75,8 +73,7 @@ public static class IntegrationReports
                    LastError = kv.Value.LastError, Count = kv.Value.Count,
                }, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The newest report for <paramref name="id"/> from a process that is not stale, or null.</summary>
-    /// <remarks>A process that has not attempted it has no entry, so it cannot hide another's known outcome.</remarks>
+    /// <summary>Newest report for <paramref name="id"/> from a live process, or null.</summary>
     public static IntegrationReport? Freshest(IEnumerable<ProcessInfo> processes, string id)
         => processes.Where(p => (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= ProcessRegistry.StaleAfterSeconds)
                     .OrderByDescending(p => p.TimestampUtc)
