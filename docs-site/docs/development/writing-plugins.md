@@ -59,6 +59,7 @@ Implement any combination.
 | `IStatusProvider` | Decide what your own health means. |
 | `IConfigurablePlugin` | Carry your own settings section. |
 | `IGuiPageProvider` | Ship your own GUI pages. |
+| `IEntityExtensionProvider` | Keep your own settings on nodes, panels and breakers. |
 | `IPluginStoreUser` | Keep named hashes across restarts (Valkey/Redis when the cache is on). |
 
 ### Receiving data
@@ -109,6 +110,30 @@ Plugins:
     Enabled: true
     Url: http://influx:8086
 ```
+
+## Settings on nodes, panels and breakers
+
+A plugin can keep settings of its own on core entities it does not define. Declare a settings class per entity kind:
+
+```csharp
+public IReadOnlyDictionary<string, Type> EntityExtensions { get; } = new Dictionary<string, Type>
+{
+    [EntityKind.Node] = typeof(MyNodeSettings),
+};
+```
+
+The node editor (and the panel schedule, for panels and breakers) renders them from the class, as it renders your settings page. They are stored on the entity under `Ext:`, keyed by your plugin id, and kept as they are while your plugin is not loaded:
+
+```yaml
+EnergyFlow:
+  Nodes:
+    - Id: fridge
+      Ext:
+        influx:
+          Measurement: kitchen
+```
+
+Read and write them with `EntityExtensions.Read<MyNodeSettings>(node, Id)` and `EntityExtensions.Write(node, Id, settings)`.
 
 ## Your actions
 

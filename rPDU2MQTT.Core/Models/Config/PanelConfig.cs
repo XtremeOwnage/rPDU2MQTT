@@ -26,7 +26,7 @@ public static class BreakerState
 /// An electrical panel and what is in its slots (#452). The panel directory that lives on paper — breaker
 /// number, wire label, description, and which circuits nobody has identified — held in config instead.
 /// </summary>
-public class PanelConfig
+public class PanelConfig : IExtensible
 {
     [Description("Stable unique id for this panel, used to refer to it from elsewhere. For example 'main_panel'.")]
     public string Id { get; set; } = "";
@@ -50,6 +50,10 @@ public class PanelConfig
     [Description("The breakers in this panel's slots.")]
     public List<BreakerConfig> Breakers { get; set; } = new();
 
+    [ExtensionPoint(EntityKind.Panel)]
+    [Description("Settings plugins keep on this panel, keyed by plugin id. Kept as they are while the plugin is not loaded.")]
+    public Dictionary<string, object?>? Ext { get; set; }
+
     /// <summary>Rows of slots down the panel: two slots to a row, left and right. Derived, never stored.</summary>
     [JsonIgnore]
     [YamlIgnore]
@@ -69,7 +73,7 @@ public class PanelConfig
 /// One breaker in a panel slot (#452). A double-pole breaker holds the next slot in its own column as well;
 /// a tandem breaker is two halves sharing one slot, numbered like "26.1" and "26.2".
 /// </summary>
-public class BreakerConfig
+public class BreakerConfig : IExtensible
 {
     /// <summary>The slot this breaker sits in, numbered as the panel is: odd on the left, even on the right.</summary>
     [Range(1, 200, ErrorMessage = "Slot must be between 1 and 200.")]
@@ -119,6 +123,10 @@ public class BreakerConfig
     [DefaultValue(BreakerState.Unknown)]
     [Description("Whether this breaker is identified, not yet identified (the '????' rows of a paper directory), or an unused slot. A new breaker starts unknown, so a blank row claims nothing.")]
     public string State { get; set; } = BreakerState.Unknown;
+
+    [ExtensionPoint(EntityKind.Breaker)]
+    [Description("Settings plugins keep on this breaker, keyed by plugin id. Kept as they are while the plugin is not loaded.")]
+    public Dictionary<string, object?>? Ext { get; set; }
 
     /// <summary>Every slot this breaker occupies: a double-pole also holds the next slot in its own column.</summary>
     public IEnumerable<int> Occupies()

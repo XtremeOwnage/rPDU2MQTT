@@ -40,6 +40,7 @@ const MODULES = [
   'circuit-session.ts',
   'search-select.ts',
   'location-options.ts',
+  'entity-extensions.ts',
   'panel-layout.ts',
   'sections/paths.ts',
   'sections/diagnostics.ts',
