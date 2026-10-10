@@ -1,7 +1,7 @@
 import { api, btn, el, activate, formatNum, svgEl, navLink, instanceSelector, withInstance } from '../helpers.js';
 import { busyInSection, liveWhileActive, realtimeLive } from '../realtime.js';
 import { state } from '../state.js';
-import { homeEnergy, selfSufficiencyPct, coveredEnergy, netSelfProducedPct, shareBand } from '../energy.js';
+import { homeEnergy, homeBalanceTrend, selfSufficiencyPct, coveredEnergy, netSelfProducedPct, shareBand } from '../energy.js';
 import { sparkline, KIND_COLOR } from '../charts.js';
 import { requestFocus } from '../state.js';
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
@@ -135,6 +135,11 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
         ? rows.reduce((sum, r) => sum + (r[i] as number), 0)
         : null);
     return values.some(v => v != null) ? { values, color, units, at: trendSeries!.at } : undefined;
+  };
+
+  const homeTrend = (roles: { solar: string[], battery: string[], grid: string[] }, units: string) => {
+    const values = trendSeries && homeBalanceTrend(trendSeries.byNode, roles);
+    return values ? { values, color: 'var(--muted)', units, at: trendSeries!.at } : undefined;
   };
 
   const gaugeFor = (ids: string[], value: number | null, units: string) => {
@@ -390,7 +395,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
 
     if (home != null || load_.present)
       grid.appendChild(tile('home', '🏠', 'Home', fmt(home), home == null ? whyNoReading(loadIds) : (homeSub || 'consuming'), '',
-        dial(loadIds, home), trendFor(loadIds, 'var(--muted)', units), { ids: loadIds, label: 'Home' }));
+        dial(loadIds, home), load_.present ? trendFor(loadIds, 'var(--muted)', units) : homeTrend({ solar: solarIds, battery: battIds, grid: gridIds }, units), { ids: loadIds, label: 'Home' }));
 
     const ssPct = selfSufficiencyPct(eHome, eFromGrid);
     const ssCovered = coveredEnergy(eHome, eFromGrid);
