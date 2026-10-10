@@ -342,7 +342,7 @@ if (!battCells.includes('2') || battCells.some(c => /^4[12]$/.test(c))) fail(`a 
 // …and the page says how much of what it drew came from a counter that had been re-based.
 const statusText = query(sec, '.ld-count')?.textContent || '';
 if (!/1 counted from a counter reset/.test(statusText)) fail(`the page does not say a reading came from a reset counter: "${statusText}"`);
-if (!/changed between two readings/.test(blurb())) fail(`the page does not say it charted differences: ${blurb().slice(0, 160)}`);
+if (!/ change, /.test(blurb())) fail(`the page does not say it charted differences: ${blurb().slice(0, 160)}`);
 if (query(sec, 'th', true).some(h => /kWh, est/.test(h.textContent))) fail('energy readings were integrated as if they were watts');
 
 

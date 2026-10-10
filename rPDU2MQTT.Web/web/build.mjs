@@ -1,10 +1,4 @@
-// Zero-dependency GUI build: TypeScript ES modules -> a single bundled app.js, using only the Node
-// binary (no npm). Node's built-in module.stripTypeScriptTypes() removes the type annotations; the
-// modules share one scope at runtime (as the GUI always has), so "bundling" is: strip each module's
-// import/export lines and concatenate them with the entry (main) last. styles.css is minified too.
-//
-// A real bundler/minifier (esbuild) can replace bundle()/minifyJs() here verbatim once npm is available
-// in the build image — the inputs (web/src/*.ts) and outputs (wwwroot/app.js, styles.css) stay the same.
+// GUI build: strip TS types, concatenate modules into wwwroot/app.js, minify styles.css.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { stripTypeScriptTypes } from 'node:module';
@@ -15,11 +9,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const srcDir = join(here, 'src');
 const outDir = join(here, '..', 'wwwroot');
 
-// Module order: declarations first, the entry (top-level bootstrap) last. Order among the rest is
-// irrelevant — they only declare functions/consts — but the entry runs load() at the top level.
+// The entry module (main.ts) goes last; it runs load() at the top level.
 const MODULES = [
   'state.ts',
   'helpers.ts',
+  'temp-units.ts',
   'theme.ts',
   'realtime.ts',
   'dirty.ts',
@@ -31,6 +25,7 @@ const MODULES = [
   'cost.ts',
   'history-control.ts',
   'charts.ts',
+  'managed-nodes.ts',
   'context-menu.ts',
   'history-sheet.ts',
   'energy-diagram.ts',
@@ -43,12 +38,7 @@ const MODULES = [
   'overrides.ts',
   'circuit-finder.ts',
   'circuit-session.ts',
-  'plan-geometry.ts',
-  'plan-units.ts',
-  'plan-history.ts',
-  'plan-art.ts',
   'search-select.ts',
-  'plan-constraints.ts',
   'location-options.ts',
   'panel-layout.ts',
   'sections/paths.ts',
@@ -76,20 +66,19 @@ const MODULES = [
   'sections/node-trends.ts',
   'sections/circuit-finder.ts',
   'sections/panel-schedule.ts',
-  'sections/floor-plan.ts',
   'sections/export.ts',
   'sections/ha-energy.ts',
   'sections/ha-cleanup.ts',
   'sections/home.ts',
+  'sections/plugins.ts',
   'sections/features.ts',
   'sections/pdu-tags.ts',
+  'plugin-pages.ts',
   'config-form.ts',
   'actions.ts',
   'main.ts',
 ];
 
-// Drop import statements (including multi-line ones) and the leading `export ` keyword: the bundle is one
-// shared scope, so cross-module names resolve directly. A module listed twice is refused by name below.
 {
   const seen = new Set();
   const twice = MODULES.filter(m => seen.size === seen.add(m).size);
@@ -114,13 +103,12 @@ function debundle(js) {
   return out.join('\n');
 }
 
-// Safe, parser-free JS tidy-up: trim trailing whitespace and collapse runs of blank lines. (Does not
-// touch line contents, so strings/templates/regex are untouched and ASI is preserved.)
+// Whitespace-only tidy; line contents are untouched.
 function tidyJs(js) {
   return js.replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
 }
 
-// Safe CSS minify: strip /* */ comments and collapse whitespace (CSS has no regex literals).
+// Strip comments and collapse whitespace.
 function minifyCss(css) {
   return css
     .replace(/\/\*[\s\S]*?\*\//g, '')

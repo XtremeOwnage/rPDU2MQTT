@@ -76,7 +76,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // A PDU that cannot be read costs its own entities, not everyone's: a plugin device is fine and
             // still deserves its sensors. Without this, one unreachable PDU means no discovery at all.
-            try { data = await pdu.GetRootData_Public(cancellationToken); }
+            try { data = pdu is null ? null : await pdu.ReadAsync(cancellationToken); }
             catch (Exception ex) { Log.Warning($"Discovery could not read the PDU ({ex.Message}); publishing what else it has."); }
 
             if (data is not null)

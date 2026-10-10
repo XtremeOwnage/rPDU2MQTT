@@ -6,8 +6,10 @@ namespace rPDU2MQTT.Core.HomeAssistant;
 /// <param name="Identifiers">The integration-supplied identifiers; ours carry a known prefix.</param>
 /// <param name="EntityCount">How many entities HA still has attached to it.</param>
 /// <param name="ConfigEntryIds">The config entries it belongs to; removal is per entry.</param>
+/// <param name="OrphanedEntityCount">Entities HA says no integration provides any more.</param>
 public sealed record HaDevice(
-    string Id, string? Name, IReadOnlyList<string> Identifiers, int EntityCount, IReadOnlyList<string> ConfigEntryIds);
+    string Id, string? Name, IReadOnlyList<string> Identifiers, int EntityCount, IReadOnlyList<string> ConfigEntryIds,
+    int OrphanedEntityCount = 0);
 
 /// <summary>
 /// Which Home Assistant devices are ours and no longer backed by anything.
@@ -28,7 +30,8 @@ public sealed record HaDevice(
 public static class HaStaleDevices
 {
     /// <summary>
-    /// The devices safe to delete: ours by identifier prefix, and holding <b>no entities at all</b>.
+    /// The devices safe to delete: ours by identifier prefix, and holding <b>no entities at all</b>, or only
+    /// entities Home Assistant reports as no longer provided.
     ///
     /// <para>
     /// The zero-entity rule is what makes this safe rather than clever. A device that still has entities is
@@ -43,7 +46,7 @@ public static class HaStaleDevices
     /// </summary>
     public static IReadOnlyList<HaDevice> Stale(IEnumerable<HaDevice> devices)
         => (devices ?? Enumerable.Empty<HaDevice>())
-            .Where(d => d.EntityCount == 0
+            .Where(d => d.EntityCount == d.OrphanedEntityCount
                      && d.ConfigEntryIds.Count > 0
                      && d.Identifiers.Any(i => HaDiscoveryTopics.OwnedIdPrefixes.Any(
                             p => (i ?? "").StartsWith(p, StringComparison.OrdinalIgnoreCase))))

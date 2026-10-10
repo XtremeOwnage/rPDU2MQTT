@@ -71,6 +71,19 @@ const sec = query(getEl('sections'), '.section', true).find(s => s.classList.con
 if (!sec) fail('no section is open');
 const text = () => (sec.textContent || '');
 
+// The flow opens on today's energy; power is one pick away.
+const flowText = () => query(sec, 'div', true).find(d => /ov-flow/.test(d.attrs?.class || d.className || ''))?.textContent || '';
+if (!/Solar28\.9 kWh/.test(flowText()) || !/Home47\.7 kWh/.test(flowText())) fail(`the flow does not open on today's energy: ${flowText()}`);
+// Net of export: (47.7 − 18.8) / 47.7 = 61%, in the >50 band.
+const netTile = query(sec, 'div', true).find(d => /\bov-net\b/.test(d.attrs?.class || d.className || ''));
+if (!netTile || !/61%/.test(netTile.textContent)) fail(`the net self-produced share is wrong: ${netTile?.textContent}`);
+const netVal = query(netTile, 'div', true).find(d => /ov-value/.test(d.attrs?.class || d.className || ''));
+if (!/ov-band-3/.test(netVal.attrs?.class || netVal.className || '')) fail('61% is not in the >50 band');
+const showSel = query(sec, 'select', true)[0];
+showSel.value = 'realpower';
+showSel.onchange({});
+await new Promise(r => setTimeout(r, 400));
+
 // Home is the balance of what was measured: 4820 + 1310 = 6.1 kW.
 if (!/6\.1 kW/.test(text())) fail(`the home figure is not the balance of the measured sources: ${text().slice(0, 300)}`);
 // A battery reading of zero was measured, so it is a zero — not a dash.

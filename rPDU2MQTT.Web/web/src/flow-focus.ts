@@ -107,6 +107,13 @@ export function moveNodeCard(ev: any) {
   nodeCardEl.style.top = y + 'px';
 }
 
+/// Replace what an open card shows, where it is.
+export function updateNodeCard(rows: any[]) {
+  if (!nodeCardEl || !nodeCardEl.classList.contains('show')) return;
+  nodeCardEl.innerHTML = '';
+  rows.forEach(r => nodeCardEl.appendChild(r));
+}
+
 export function hideNodeCard() { if (nodeCardEl) nodeCardEl.classList.remove('show'); }
 
 // Device templates and the panels that import them live in node-templates.ts.

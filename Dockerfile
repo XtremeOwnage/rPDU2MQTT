@@ -1,19 +1,13 @@
-#See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
-
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
-# Numeric, not the "app" name: with a non-numeric USER, kubelet cannot verify the container is non-root and
-# a pod requesting runAsNonRoot fails to start. Same identity either way — $APP_UID is 1654 in the .NET
-# base images, which is the uid "app" resolves to.
+# Numeric UID so kubelet can verify runAsNonRoot.
 USER $APP_UID
 WORKDIR /app
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG BUILD_CONFIGURATION=Release
-# Human-readable version stamped into the binary (GUI / MQTT discovery / heartbeat).
-# CI passes the tag-derived version; local `docker build` falls back to a dev marker.
+# Version stamped into the binary; CI passes the tag-derived version.
 ARG APP_VERSION=0.0.0-dev
-# The GUI assets are built from TypeScript by an MSBuild target using only the `node` binary (no npm).
-# Bring Node in from the official image; if it's ever unavailable the build falls back to the committed bundle.
+# Node binary for the MSBuild TypeScript build of the GUI assets.
 COPY --from=node:22-bookworm-slim /usr/local/bin/node /usr/local/bin/node
 WORKDIR /src
 COPY ["rPDU2MQTT/rPDU2MQTT.csproj", "rPDU2MQTT/"]
@@ -22,6 +16,10 @@ COPY ["rPDU2MQTT.Core/rPDU2MQTT.Core.csproj", "rPDU2MQTT.Core/"]
 COPY ["rPDU2MQTT.Engine/rPDU2MQTT.Engine.csproj", "rPDU2MQTT.Engine/"]
 COPY ["rPDU2MQTT.Api/rPDU2MQTT.Api.csproj", "rPDU2MQTT.Api/"]
 COPY ["rPDU2MQTT.Web/rPDU2MQTT.Web.csproj", "rPDU2MQTT.Web/"]
+COPY ["plugins/rPDU2MQTT.Plugin.EmonCms/rPDU2MQTT.Plugin.EmonCms.csproj", "plugins/rPDU2MQTT.Plugin.EmonCms/"]
+COPY ["plugins/rPDU2MQTT.Plugin.FloorPlan/rPDU2MQTT.Plugin.FloorPlan.csproj", "plugins/rPDU2MQTT.Plugin.FloorPlan/"]
+COPY ["plugins/rPDU2MQTT.Plugin.Tigo/rPDU2MQTT.Plugin.Tigo.csproj", "plugins/rPDU2MQTT.Plugin.Tigo/"]
+COPY ["plugins/rPDU2MQTT.Plugin.Vertiv/rPDU2MQTT.Plugin.Vertiv.csproj", "plugins/rPDU2MQTT.Plugin.Vertiv/"]
 RUN dotnet restore "./rPDU2MQTT/rPDU2MQTT.csproj"
 COPY . .
 WORKDIR "/src/rPDU2MQTT"
@@ -35,7 +33,6 @@ RUN dotnet publish "./rPDU2MQTT.csproj" -c $BUILD_CONFIGURATION -o /app/publish 
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
-# Where externally loaded plugins go (v4). Created empty so a bind mount or volume has somewhere to land,
-# and so the loader's "directory does not exist" path is not the normal case. Override with RPDU2MQTT_PLUGINS.
+# Default external plugin directory (override with RPDU2MQTT_PLUGINS).
 RUN mkdir -p /app/plugins
 ENTRYPOINT ["dotnet", "rPDU2MQTT.dll"]

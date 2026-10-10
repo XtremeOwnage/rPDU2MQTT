@@ -369,3 +369,6 @@ FodyWeavers.xsd
 # Local Claude Code tooling config. Drop this line if you ever want to commit shared agent/skill
 # definitions for the project; an unedited placeholder was committed by accident in #288.
 .claude/
+
+# Netdocs build output
+docs-site/site/

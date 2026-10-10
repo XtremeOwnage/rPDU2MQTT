@@ -7,7 +7,9 @@ import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
 
 const code = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
-const css = await readFile(new URL('../wwwroot/styles.css', import.meta.url), 'utf8');
+const page = (f) => readFile(new URL('../../plugins/rPDU2MQTT.Plugin.FloorPlan/wwwroot/floor-plans.' + f, import.meta.url), 'utf8');
+const pageJs = await page('js'), css = await page('css');
+const pages = [{ id: 'floor-plans', title: 'Floor Plans', group: 'Energy Flow', icon: '⌗', configSection: 'EnergyFlow.Sites' }];
 const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import.meta.url), 'utf8')).filter(n => n.key !== '_README');
 const fail = (m) => { console.error('floor plan check FAILED: ' + m); process.exit(1); };
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
@@ -81,6 +83,9 @@ const { sandbox, getEl } = makeDom({
     if (url.includes('/api/ha/areas/preview')) return { ok: true, plan: haPlan };
     if (url.includes('/api/ha/areas/apply')) return { ok: true, plan: haPlan, linked: { kitchen: 'area_kitchen' }, failed: [], message: 'Published 1 room(s) as areas.' };
     if (url.includes('/api/plans/storage')) return { ok: true, where: 'the directory /app/plans', limits: 'PNG, JPEG, WebP or SVG, up to 10 MB.', persistent: false, configWritable: true, why: 'No plan storage is configured, so uploaded plan images are lost when it restarts.' };
+    if (url.endsWith('/api/integrations/floorplan/pages/floor-plans.js')) return pageJs;
+    if (url.endsWith('/api/integrations/floorplan/pages/floor-plans.css')) return css;
+    if (url.endsWith('/api/integrations')) return { ok: true, integrations: [{ id: 'floorplan', pages }] };
     if (url.includes('/api/schema')) return schema;
     if (url.includes('/api/instances')) return { ok: true, instances: [] };
     if (url.includes('/api/config')) return config;
@@ -93,8 +98,10 @@ vm.runInContext(code, sandbox, { filename: 'app.js' });
 await wait(50);
 
 // --- The geometry, the units and the history the editor stands on ---
-const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory } = sandbox;
-if (typeof planSnap !== 'function') fail('the plan geometry is not in the bundle');
+// The page's own helpers, from the plugin's script.
+const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle };\n') + '})()', sandbox);
+const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory } = lib;
+if (typeof planSnap !== 'function') fail('the plan geometry is not in the plugin page');
 const office = rect(400, 0, 800, 300);
 const s1 = planSnap({ X: 405, Y: 4 }, [office], 12, 10);
 if (s1.to !== 'corner' || s1.pt.X !== 400 || s1.pt.Y !== 0) fail(`a point beside a corner did not snap to it: ${JSON.stringify(s1)}`);
@@ -123,7 +130,7 @@ h.redo(); if (box.v !== 2) fail('redo did not come forward');
 h.push(); box.v = 9; if (h.canRedo()) fail('a new change did not clear what could be redone');
 
 // --- The constraint solver ---
-const { planSolve } = sandbox;
+const { planSolve } = lib;
 const sq = () => ({ Id: 'a', Shape: rect(0, 0, 400, 300) });
 const near1 = (a, b) => Math.abs(a - b) <= 1;
 {
@@ -139,8 +146,8 @@ const near1 = (a, b) => Math.abs(a - b) <= 1;
 }
 {
   const a = { Id: 'a', Shape: [{ X: 0, Y: 0 }, { X: 100, Y: 0 }, { X: 60, Y: 90 }] };
-  planSolve([a], [{ Id: 'g', Kind: 'angle', Refs: [{ Room: 'a', Corner: 1 }], Value: 90 * Math.sign(sandbox.planCornerAngle(a, 1)) }], new Set(['a#0', 'a#1']));
-  if (!near1(Math.abs(sandbox.planCornerAngle(a, 1)), 90)) fail(`a square corner is not square: ${sandbox.planCornerAngle(a, 1)}`);
+  planSolve([a], [{ Id: 'g', Kind: 'angle', Refs: [{ Room: 'a', Corner: 1 }], Value: 90 * Math.sign(lib.planCornerAngle(a, 1)) }], new Set(['a#0', 'a#1']));
+  if (!near1(Math.abs(lib.planCornerAngle(a, 1)), 90)) fail(`a square corner is not square: ${lib.planCornerAngle(a, 1)}`);
 }
 {
   const a = { Id: 'a', Shape: rect(0, 0, 100, 100) }, b = { Id: 'b', Shape: [{ X: 200, Y: 0 }, { X: 300, Y: 30 }, { X: 300, Y: 100 }, { X: 200, Y: 100 }] };

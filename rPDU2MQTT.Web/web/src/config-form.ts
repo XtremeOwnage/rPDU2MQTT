@@ -1,5 +1,4 @@
-// Schema-driven config form: render scalar/object/dictionary/list nodes, the per-section panels, the
-// nav, and the overall build() that wires every tab.
+// Schema-driven config form, nav, and build().
 import { ensure, el, btn, activate, slug, api, toast, navLink, navLabel } from './helpers.js';
 import { templateHelp } from './template-field.js';
 import { state } from './state.js';
@@ -7,7 +6,7 @@ import { expectRestart } from './realtime.js';
 import { registerField, clearFieldRegistry, refreshDirty, onDirty, changeCountFor } from './dirty.js';
 import { renderOverrides, previewOverridePaths } from './overrides.js';
 import { tagInput } from './tags.js';
-import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, cleanupEmonCmsInputs, cleanupEmonCmsFeeds, rediscoverHa, clearHa, testModbus, testHistory, integrationActionBar } from './actions.js';
+import { testMqtt, testPdu, testEmonCms, provisionEmonCmsFeeds, deleteEmonCmsFeeds, cleanupEmonCmsInputs, cleanupEmonCmsFeeds, showEmonCmsPlan, rediscoverHa, clearHa, testModbus, testHistory, integrationActionBar } from './actions.js';
 import { addPathsSection } from './sections/paths.js';
 import { addDiagnosticsSection } from './sections/diagnostics.js';
 import { addControlSection } from './sections/control.js';
@@ -16,36 +15,33 @@ import { addFlowSection, addNodesSection, addEnergyOverviewSection, addMqttImpor
 import { addNodeDataSection } from './sections/nodedata.js';
 import { addTrendsSection } from './sections/trends.js';
 import { renderPduTags } from './sections/pdu-tags.js';
-import { openMqttExplorer, openRegisterExplorer } from './sections/explorer.js';
+import { addMqttExplorerSection, openMqttExplorer, openRegisterExplorer } from './sections/explorer.js';
 import { addNodeTrendsSection } from './sections/node-trends.js';
 import { addGroupsSection } from './sections/groups.js';
 import { addBalanceSection } from './sections/balance.js';
 import { addCircuitFinderSection } from './sections/circuit-finder.js';
 import { addPanelScheduleSection } from './sections/panel-schedule.js';
-import { addFloorPlanSection } from './sections/floor-plan.js';
+import { pluginPages, pluginPageTool, integrationIds, type PluginPage } from './plugin-pages.js';
 import { addExportSection } from './sections/export.js';
 import { addHaEnergySection } from './sections/ha-energy.js';
 import { addTagsSection } from './sections/tags-page.js';
 import { addHomeSection } from './sections/home.js';
+import { addPluginsSection } from './sections/plugins.js';
 import { addOverviewSection } from './sections/overview.js';
 import { addDiscoveryCleanup } from './sections/ha-cleanup.js';
 import { featureToggle } from './sections/features.js';
 
-// Every scalar edit reports back, so the save bar, the nav badges and the field's own "edited" mark all
-// stay in step with the document as it is typed.
 function scalarInput(node: any, obj: any): any {
   const touched = () => refreshDirty();
   let el: any;
   if (node.type === 'bool') {
-    el = document.createElement('input'); el.type = 'checkbox'; el.className = 'switch'; el.checked = !!obj[node.key];
+    el = document.createElement('input'); el.type = 'checkbox'; el.className = 'switch'; el.checked = !!(obj[node.key] ?? node.default);
     el.onchange = () => { obj[node.key] = el.checked; touched(); };
   } else if (node.type === 'enum') {
     el = document.createElement('select');
-    // A blank choice (value "") means "unset" — leave the field out so its default/auto behaviour applies.
+    // A blank choice means unset; leave the field out.
     const choices: string[] = (node.enumValues || []).slice();
-    // A saved value the build does not offer stays on the list, named as unrecognised. Dropping it would
-    // show a blank control over a config that still holds the value, and the first edit of any other field
-    // on the page would look like the user chose to clear it.
+    // Keep an unrecognised saved value on the list.
     const current = obj[node.key];
     if (current != null && current !== '' && !choices.includes(String(current))) choices.push(String(current));
     choices.forEach((v: string) => {
@@ -66,10 +62,7 @@ function scalarInput(node: any, obj: any): any {
     if (obj[node.key] != null) el.value = obj[node.key];
     el.onchange = () => { obj[node.key] = el.value === '' ? null : el.value; touched(); };
   }
-  // A setting whose "off" would take away the means of turning it back on — the GUI's own Enabled flag
-  // being the one that matters. Shown rather than hidden: a setting that vanishes reads as unsupported and
-  // sends the operator looking for it, while a disabled control with the reason beside it answers in place.
-  // The server decides which these are (schema notEditableReason), so there is no list to keep in step here.
+  // Settings whose "off" would lock the GUI out are shown disabled (schema notEditableReason).
   if (node.notEditableReason) {
     el.disabled = true;
     el.title = node.notEditableReason;
@@ -77,8 +70,6 @@ function scalarInput(node: any, obj: any): any {
   return el;
 }
 
-// A boolean reads (and hits) better as a switch with the current state spelled out beside it than as a
-// 16px checkbox whose meaning you have to infer from the label.
 function switchWrap(input: any) {
   const label = el('span', { class: 'switch-state', text: input.checked ? 'On' : 'Off' });
   const wrap = el('label', { class: 'switch-wrap' }, input, label);
@@ -88,18 +79,15 @@ function switchWrap(input: any) {
   return wrap;
 }
 
-// Render an object's child properties into `container`: scalar fields flow into a multi-column grid
-// (compact), while nested lists/dicts/objects are tall unbreakable blocks, so they render full-width
-// and stacked — otherwise the CSS column-balancer shoves them into one lopsided column.
-// `path` is where `target` lives in the config document, so each field can be tracked for unsaved edits.
+// Render an object's properties: scalars in a multi-column grid, collections full-width.
+// `path` locates `target` in the config document.
 function renderObjectBody(properties: any[], target: any, container: any, path: string[] = []) {
   const isComplex = (c: any) => c.type === 'object' || c.type === 'list' || c.type === 'dictionary';
   const scalars = (properties || []).filter(c => !isComplex(c));
   const complex = (properties || []).filter(isComplex);
   const fields = new Map<string, any>();
 
-  // Settings the schema puts in a group are drawn together in a box of their own, in the order the group
-  // first appears. Retention is four numbers that only mean something beside each other.
+  // Schema-grouped settings render together in a box, in first-appearance order.
   const into = (list: any[], host: any) => {
     const grid = document.createElement('div'); grid.className = 'grid';
     list.forEach(child => {
@@ -125,17 +113,12 @@ function renderObjectBody(properties: any[], target: any, container: any, path: 
   complex.forEach(child => renderNode(child, target, container, path));
 }
 
-// A setting that only applies to one choice of another setting (schema visibleWhen) — the Prometheus URL,
-// when the history provider is Prometheus. Hidden the rest of the time rather than shown greyed out: an
-// EmonCMS page carrying a Prometheus URL reads as if that is what will be queried.
-//
-// Which fields these are comes from the schema, so the form holds no list of provider-specific settings.
+// Shown only when another setting has a given value (schema visibleWhen).
 function wireVisibility(props: any[], target: any, fields: Map<string, any>) {
   props.filter(p => p.visibleWhen).forEach(p => {
     const field = fields.get(p.key);
     if (!field) return;
-    // Unset means the deciding setting is at its default, not that it is blank — leaving History.Provider
-    // alone still means Prometheus, and the URL has to be reachable.
+    // Unset means the deciding setting is at its default.
     const decider = props.find((x: any) => x.key === p.visibleWhen.key);
     const sync = () => {
       const cur = target[p.visibleWhen.key] ?? decider?.default ?? '';
@@ -146,22 +129,17 @@ function wireVisibility(props: any[], target: any, fields: Map<string, any>) {
   });
 }
 
-// Every conditional field's re-check, run together whenever the document is edited. Rebuilt with the form,
-// so a sync never outlives the element it hides.
+// Re-checks for every conditional field; rebuilt with the form.
 let visibilitySyncs: (() => void)[] = [];
 let visibilityOff: any = null;
 const runVisibilitySyncs = () => visibilitySyncs.forEach(s => s());
 
-// Leaving a page can change what belongs in the nav too: a page kept visible only because you were on it
-// (its feature switched off from inside it) drops out once you go somewhere else. Registered once — the
-// list it runs is rebuilt with the form, this listener is not.
+// Re-evaluate feature-hidden nav entries on page change; registered once.
 window.addEventListener?.('rpdu:activate', runVisibilitySyncs);
 
 function show(elm: any, on: boolean) { elm.classList[on ? 'remove' : 'add']('is-hidden'); }
 
-/// PreferEmonCms -> "Prefer EmonCMS". The acronym is restored after the split, not before: splitting on a
-/// case change turns EmonCms into "Emon Cms" first, and a pattern looking for the joined-up form then
-/// matches nothing.
+/// PreferEmonCms -> "Prefer EmonCMS"; acronyms are restored after the split.
 function humanise(value: string) {
   return value
     .replace(/([a-z])([A-Z])/g, '$1 $2')
@@ -169,11 +147,7 @@ function humanise(value: string) {
     .replace(/^./, c => c.toUpperCase());
 }
 
-/// A radio group for a small closed set, each choice carrying its own explanation as a tooltip.
-///
-/// The alternative is a dropdown under a paragraph covering every option, and that paragraph is then
-/// repeated for every entry of a fixed list — eight times over on the EmonCMS types page, saying the same
-/// thing about choices the reader is not looking at. The tooltip belongs to the choice it describes.
+/// A radio group for a small closed set, each choice with its own tooltip.
 function radioGroup(node: any, obj: any) {
   const wrap = document.createElement('div');
   wrap.className = 'radio-group';
@@ -189,8 +163,7 @@ function radioGroup(node: any, obj: any) {
     input.onchange = () => { if (input.checked) { obj[node.key] = v; refreshDirty(); runVisibilitySyncs(); } };
     const text = document.createElement('span'); text.textContent = humanise(v);
     lab.appendChild(input); lab.appendChild(text);
-    // The explanation hangs off a mark you can aim at, rather than being a paragraph under every choice or
-    // an invisible tooltip on the whole row that nothing tells you is there.
+    // Info mark carrying the choice's explanation.
     if (why) {
       const hint = document.createElement('span');
       hint.className = 'hint'; hint.textContent = 'ⓘ'; hint.title = why;
@@ -201,9 +174,7 @@ function radioGroup(node: any, obj: any) {
   return wrap;
 }
 
-// Render an arbitrary node bound to obj[node.key] (the value lives under its key on obj).
-/// One schema section's settings, rendered into another page. Edits land in the same place and the save
-/// bar counts them as it does anywhere else.
+/// Render one schema section's settings into another page.
 export function renderSettingsOf(key: string, container: any) {
   const node = (state.schema || []).find((n: any) => n.key === key);
   if (!node?.properties) return;
@@ -217,7 +188,19 @@ export function renderNode(node: any, obj: any, container: any, path: string[] =
     const fs = document.createElement('fieldset');
     const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-    renderObjectBody(node.properties, target, fs, here);
+    const body = node.resettable ? document.createElement('div') : fs;
+    renderObjectBody(node.properties, target, body, here);
+    if (node.resettable) {
+      fs.appendChild(body);
+      const reset = btn('Reset to defaults');
+      reset.onclick = () => {
+        for (const p of node.properties || []) if (p.default !== undefined && p.default !== null) target[p.key] = p.default;
+        body.innerHTML = '';
+        renderObjectBody(node.properties, target, body, here);
+        refreshDirty();
+      };
+      fs.appendChild(reset);
+    }
     container.appendChild(fs);
   } else if (node.type === 'dictionary') {
     container.appendChild(renderMap(node, ensure(obj, node.key, {}), here));
@@ -225,20 +208,14 @@ export function renderNode(node: any, obj: any, container: any, path: string[] =
     container.appendChild(renderList(node, ensure(obj, node.key, []), here));
   } else {
     const f = document.createElement('div'); f.className = 'field';
-    // The setting's own name, so anything looking for a field finds it by what it is rather than by the
-    // words on the label — which are there to be read, and change.
     f.dataset.key = node.key;
-    // Where this control writes to, on the element itself: it makes a rendered form readable in devtools,
-    // and it is how a check can say "this exact setting is rendered once" rather than matching on a label
-    // like "Enabled", which several unrelated nested sections legitimately share.
+    // Config path of this control, for devtools and checks.
     f.dataset.path = here.join('.');
-    // A blank label means something beside the control already names it — a dictionary row's key.
+    // A blank label means something beside the control already names it.
     if (node.label !== '') { const lab = document.createElement('label'); lab.textContent = node.label; f.appendChild(lab); }
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; f.appendChild(d); }
     const input = node.radio ? radioGroup(node, obj) : scalarInput(node, obj);
-    // A masked field with no way to read it back is how a mistyped credential survives three attempts.
     f.appendChild(node.type === 'bool' ? switchWrap(input) : node.type === 'password' ? revealWrap(input) : input);
-    // Say why it's greyed out, in the field itself — a disabled control with no explanation reads as a bug.
     if (node.notEditableReason) {
       const why = document.createElement('div');
       why.className = 'desc field-locked';
@@ -270,11 +247,9 @@ const TYPE_LABELS: Record<string, string> = {
 };
 function labelFor(value: string) { return TYPE_LABELS[value] || value; }
 
-// Render the value of a dictionary/list element (valueSchema has no key of its own). `path` addresses
-// the element itself, e.g. ['Pdus','default'] or ['Modbus','Connections','0'].
-/// Returns the node the control is bound to, so a renamed key can be rebound to its own value.
+// Render a dictionary/list element's value; `path` addresses the element.
+/// Returns the node the control is bound to.
 function renderValue(valueSchema: any, holder: any, keyName: any, container: any, path: string[], inline = false) {
-  // Inline, the key sits beside the value and a second label saying "value" is noise.
   const node = Object.assign({}, valueSchema, { key: keyName, label: inline ? '' : 'value' });
   if (node.type === 'object') {
     const target = ensure(holder, keyName, {});
@@ -290,15 +265,13 @@ function renderMap(node: any, mapObj: any, path: string[]) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
   if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-  // A worked entry says more than another sentence about the shape of one.
   if (node.mapExample) {
     const ex = document.createElement('div'); ex.className = 'desc map-example'; ex.textContent = node.mapExample;
     fs.appendChild(ex);
   }
   const entries = document.createElement('div'); fs.appendChild(entries);
 
-  // A map of scalars is one row per entry — key, value, Remove. Only a map of objects (each PDU, each
-  // Modbus connection) has enough in it to be worth a card of its own.
+  // A map of scalars renders one row per entry; a map of objects renders cards.
   const inline = !node.valueSchema || node.valueSchema.type !== 'object';
 
   const drawEntry = (key: string) => {
@@ -318,8 +291,7 @@ function renderMap(node: any, mapObj: any, path: string[]) {
       head.appendChild(keyIn); head.appendChild(del); wrap.appendChild(head);
       bound = renderValue(node.valueSchema, mapObj, key, wrap, [...path, key]);
     }
-    // Renaming the key moves the value with it, and the control follows — bound to the old key it would
-    // write the entry straight back under the name that was just changed.
+    // Rebind the control to the renamed key.
     keyIn.onchange = () => {
       if (!keyIn.value || keyIn.value === key) return;
       mapObj[keyIn.value] = mapObj[key];
@@ -331,8 +303,7 @@ function renderMap(node: any, mapObj: any, path: string[]) {
     entries.appendChild(wrap);
   };
 
-  // Rows of two unlabelled boxes say nothing about which side is which, so the columns are headed — and
-  // the heading stands whether or not there are any entries yet to read it against.
+  // Column headings for key/value rows.
   if (inline) {
     const head = document.createElement('div'); head.className = 'map-head';
     const k = document.createElement('span'); k.textContent = node.keyLabel || 'Key';
@@ -352,8 +323,7 @@ function renderList(node: any, arr: any[], path: string[]) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
 
-  // A list of tag names is a list of references to something defined elsewhere, so it is chosen rather
-  // than typed: a mistyped tag here is a filter that silently matches nothing.
+  // Tag lists are picked from defined tags, not typed.
   if (node.tagChoices) {
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
     const picker = tagInput(arr, { strict: true });
@@ -363,9 +333,7 @@ function renderList(node: any, arr: any[], path: string[]) {
   }
 
   const entries = document.createElement('div'); fs.appendChild(entries);
-  // A fixed list is the set it ships with — the measurement types EmonCMS understands, say. Its entries are
-  // titled by the field that names them rather than offering that field for editing, and neither the Add
-  // nor the Remove button is drawn, because either would produce an entry nothing downstream can act on.
+  // A fixed list: entries are titled by fixedListKey, with no Add or Remove.
   const fixedKey: string | undefined = node.fixedListKey;
   const draw = (idx: number) => {
     const wrap = document.createElement('div'); wrap.className = 'list-entry';
@@ -392,31 +360,27 @@ function renderList(node: any, arr: any[], path: string[]) {
   return fs;
 }
 
-// Nav grouped by function (#209): the PDU group only does anything with Vertiv rPDUs configured; live
-// value sources are Integrations; readings are consolidated and shipped onward (Destinations); the rest is
-// plumbing (System). A group holds both schema-driven config sections (by key) and the bespoke tool tabs
-// (by their add* fn). Ungrouped schema sections fall into System, so a new one is never lost.
-/// `after` names the schema section a tool belongs to. Without it a tool lands at the END of its group,
-/// and `child: true` then indents it under whatever schema section happened to sort last — which is how
-/// "HA Energy Mapping" ended up hanging off EmonCMS.
+// Nav groups; ungrouped schema sections fall into System.
+/// `after` names the schema section(s) a tool follows; without it a tool goes to the end of its group.
+/// `page` holds a plugin page's place; it is dropped when that plugin is not loaded.
 type NavItem = { schema: string, child?: boolean }
-  | { tool: (nav: any, sections: any) => any, child?: boolean, after?: string };
+  | { tool: (nav: any, sections: any) => any, child?: boolean, after?: string | string[] }
+  | { page: string };
+/** Anchors for the PDU tabs, in order of preference. */
+const PDU_BLOCK = ['Overrides', 'Pdus'];
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
-  // Sources: the Vertiv rPDU integration is the parent; its PDU-only tabs hang off it as children.
-  { title: 'Sources', items: [{ tool: addLiveDataSection, child: true }, { tool: addControlSection, child: true }, { tool: addPathsSection, child: true }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addBalanceSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { tool: addFloorPlanSection }, { tool: addNodeDataSection }] },
-  { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
+  // Sources: the PDU tabs are children of the Vertiv rPDU page.
+  { title: 'Sources', items: [{ tool: addLiveDataSection, child: true, after: PDU_BLOCK }, { tool: addControlSection, child: true, after: PDU_BLOCK }, { tool: addPathsSection, child: true, after: PDU_BLOCK }] },
+  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addBalanceSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { page: 'floor-plans' }, { tool: addNodeDataSection }] },
+  { title: 'Integrations', items: [{ tool: addMqttExplorerSection, child: true, after: 'MQTT' }, { tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
-  // The status board is a System page: it answers "is the bridge healthy", which is the second question.
-  { title: 'System', items: [{ tool: addHomeSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
+  { title: 'System', items: [{ tool: addHomeSection }, { tool: addPluginsSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
 
-// Display-label fixes — acronyms in caps, and clearer names (#209). Keys are schema section keys.
+// Display-label fixes, keyed by schema section key.
 const LABEL_OVERRIDES: Record<string, string> = { Pdus: 'Vertiv rPDU', Api: 'API', Gui: 'GUI', Modbus: 'Modbus TCP', HomeAssistant: 'Home Assistant' };
 
-// A leading glyph per schema-driven page. Purely a scanning aid — the label is still the page's
-// identity — so an unlisted section simply gets the neutral bullet. (The bespoke tool tabs pass their
-// own glyph to navLink() where they build their link.)
+// A leading glyph per schema-driven page; unlisted sections get the neutral bullet.
 const NAV_ICONS: Record<string, string> = {
   'Vertiv rPDU': '▤', 'Overrides': '✎', 'MQTT': '⇅', 'Modbus TCP': '⧉', 'EmonCMS': '▦',
   'Home Assistant': '⌂', 'Prometheus': '◎', 'GUI': '▭', 'API': '⚙',
@@ -424,8 +388,7 @@ const NAV_ICONS: Record<string, string> = {
 };
 function navIcon(label: string) { return NAV_ICONS[label] || '•'; }
 
-// A collapsible nav group: clicking the header toggles its items. Returns the container the group's links
-// (schema sections or tool tabs) are appended into.
+// A collapsible nav group; returns the container its links are appended into.
 function navGroup(nav: any, title: string) {
   const wrap = el('div', { class: 'nav-group-wrap' });
   const header = el('div', { class: 'nav-group', text: title });
@@ -435,9 +398,7 @@ function navGroup(nav: any, title: string) {
   return items;
 }
 
-// A credential field with a show/hide button. Hidden by default — it is a credential — but readable while
-// it is being entered, because a value you cannot see is a value you cannot check against the one you
-// copied.
+// A credential field with a show/hide button, hidden by default.
 function revealWrap(input: any) {
   const wrap = el('div', { class: 'reveal-wrap' });
   const eye = btn('Show');
@@ -454,8 +415,7 @@ function revealWrap(input: any) {
   return wrap;
 }
 
-// The History page's extras, each in the box its settings are in: where EmonCMS history comes from beside the
-// provider, where the store is beside its directory, and copying between backends in a box of its own.
+// The History page's extras, each placed in its settings' box.
 function historyBox(sec: any, name: string) {
   const found = [...sec.querySelectorAll('fieldset.setting-group')].find((f: any) => f.querySelector('legend')?.textContent === name);
   if (found) return found;
@@ -464,7 +424,7 @@ function historyBox(sec: any, name: string) {
   return box;
 }
 
-// Reading history from EmonCMS reads the feeds the EmonCMS export writes, so point at the page that configures it.
+// Link to the EmonCMS export page, whose feeds EmonCMS history reads.
 function wireHistoryProvider(sec: any) {
   const wrap = el('div', { class: 'desc feature-pointer' });
   wrap.appendChild(el('span', { text: 'EmonCMS history reads the feeds the EmonCMS export writes. Its server, API key and feed names are configured on the EmonCMS page. ' }));
@@ -477,7 +437,7 @@ function wireHistoryProvider(sec: any) {
   sync();
   visibilitySyncs.push(sync);
 
-  // LocalPath left empty resolves at runtime, so say where the readings are actually going.
+  // An empty LocalPath resolves at runtime; show where readings actually go.
   const where = el('div', { class: 'history-facts' });
   historyBox(sec, 'Local storage').appendChild(where);
   api('/api/history/store').then((r: any) => {
@@ -530,7 +490,6 @@ function historyCopyPanel() {
     const why = backends.find((x: any) => x.id === to.value)?.replace;
     replace.disabled = !!why;
     if (why) conflicts.value = 'keep';
-    // Said only when replacing is not on offer, and why.
     conflictNote.textContent = why ? `Replacing is not available for ${to.value}: ${why}.` : '';
     conflictNote.hidden = !why;
   };
@@ -547,7 +506,7 @@ function historyCopyPanel() {
       el('div', { class: 'field' }, el('label', { text: 'When both have a reading' }), conflictNote, conflicts)),
     el('div', { class: 'ld-toolbar' }, go));
 
-  // The run itself: what it is doing, how far through, and how long is left.
+  // Progress of the running copy.
   const pill = el('span', { class: 'pill' });
   const route = el('strong');
   const bar = el('span', { style: { width: '0%' } });
@@ -594,7 +553,7 @@ function historyCopyPanel() {
         from.append(el('option', { value: x.id, text: x.id + (x.read ? ` (${x.read})` : ''), disabled: !!x.read }));
         to.append(el('option', { value: x.id, text: x.id + (x.write ? ' (read only)' : ''), disabled: !!x.write, title: x.write || '' }));
       }
-      // A copy needs two different backends: start with the first readable one into local.
+      // Default: the first readable backend into local.
       const readable = (b.backends || []).find((x: any) => !x.read && x.id !== 'local');
       if (readable) from.value = readable.id;
       if ((b.backends || []).some((x: any) => x.id === 'local' && !x.write)) to.value = 'local';
@@ -616,19 +575,12 @@ function historyCopyPanel() {
   return wrap;
 }
 
-// A settings page for a capability that is switched off is a page of settings for something that is not
-// running. Its nav entry is hidden until the feature is turned on.
-//
-// Hidden, not removed: the page is still built, still reachable from the Features card's Settings button
-// and from the command palette, and its entry returns the instant the switch is flipped — no save, no
-// reload. The Features page is the one place that answers "what is this bridge doing?", and the nav now
-// agrees with it instead of listing ten pages for things that are off.
+// A disabled feature's settings page is still built, but its nav entry is hidden.
 function hideWhileOff(link: any, sectionKey: string, feature: any) {
   const sync = () => {
     const cur = (state.data[sectionKey] || {})[feature.key];
     const on = cur == null ? !!feature.default : !!cur;
-    // Never hide the page being looked at: switching a feature off from its own settings page is exactly
-    // when its nav entry would vanish under you, which reads as the GUI breaking.
+    // Never hide the active page.
     show(link, on || link.classList.contains('active'));
   };
   sync();
@@ -639,16 +591,15 @@ function hideWhileOff(link: any, sectionKey: string, feature: any) {
 function renderConfigSection(node: any, nav: any, sections: any) {
   const label = LABEL_OVERRIDES[node.key] || node.label;
   const link = navLink(nav, label, navIcon(label));
-  // Which part of the document this page edits, so its nav entry can carry a count of pending edits.
+  // The document section this page edits, for the nav's pending-edit count.
   link.dataset.section = node.key;
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = label; sec.appendChild(h);
   if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; sec.appendChild(d); }
-  // Section-specific actions belong with the section they act on, not on every page.
   const acts = sectionActions(node);
   if (acts) sec.appendChild(acts);
   if (node.key === 'Overrides') {
-    // Bespoke, live-data-driven editor instead of the blind dictionary form.
+    // Live-data-driven editor instead of the dictionary form.
     const tools = document.createElement('div'); tools.className = 'sec-actions';
     const refresh = btn('Refresh live data');
     const preview = btn('Preview generated paths (with unsaved edits)');
@@ -662,23 +613,14 @@ function renderConfigSection(node: any, nav: any, sections: any) {
   } else {
     if (node.type === 'object') {
       ensure(state.data, node.key, {});
-      // The Energy Dashboard's settings — its URL and long-lived token above all — are rendered here, on
-      // the Home Assistant page, because that is where anyone looks for them: the status board reports the
-      // sync as "Home Assistant — Failing", and this is the page it names. The HA Energy Mapping page keeps
-      // its own copies of the two connection fields, bound to this same object, because it cannot test a
-      // connection it has no way to enter.
       let props = node.properties;
-      // A feature's on/off switch lives on the Features page, not on eight separate pages (#292). It is
-      // removed here rather than duplicated: two switches bound to one value would disagree the moment one
-      // of them was clicked, and a page showing "Off" for something that is on is exactly the kind of
-      // inaccuracy this GUI must never show.
+      // A feature's on/off switch lives on the Features page, so it is removed here.
       const feature = featureToggle(node);
       if (feature) {
         props = (props || []).filter((p: any) => p !== feature);
         hideWhileOff(link, node.key, feature);
       }
-      // A plugin's settings live under Plugins/<id>, not as a property of their own — Config was compiled
-      // before the plugin existed. Everything else about rendering and change-tracking is identical.
+      // Plugin settings live under Plugins/<id>.
       const target = node.isPlugin
         ? ensure(ensure(state.data, 'Plugins', {}), node.key, {})
         : state.data[node.key];
@@ -686,9 +628,7 @@ function renderConfigSection(node: any, nav: any, sections: any) {
       renderObjectBody(props, target, sec, path);
     }
     else renderNode(node, state.data, sec, []);
-    // A plugin's buttons come from what it says it can do — no per-integration wiring here at all.
     if (node.isPlugin) integrationActionBar(node.key).then(bar => { if (bar) sec.appendChild(bar); });
-    // The discovery cleanups belong with the discovery buttons, not on the energy-mapping page.
     if (node.key === 'HomeAssistant') addDiscoveryCleanup(sec);
     if (node.key === 'History') wireHistoryProvider(sec);
     if (node.key === 'Gui') wireGuiAuth(sec);
@@ -697,7 +637,6 @@ function renderConfigSection(node: any, nav: any, sections: any) {
     else if (node.key === 'Operator') { wireOperatorCheck(sec); wireOperatorSwitch(sec); }
     link.onclick = () => activate(link, sec);
   }
-  // The PDU page is where anything about the PDUs is looked for, their tags included.
   if (node.key === 'Pdus') {
     const tags = renderPduTags();
     sec.appendChild(tags.el);
@@ -710,53 +649,51 @@ function renderConfigSection(node: any, nav: any, sections: any) {
 export function build() {
   const nav: any = document.getElementById('nav'); const sections: any = document.getElementById('sections');
   nav.innerHTML = ''; sections.innerHTML = '';
-  // Everything registered against the old DOM is gone with it.
   clearFieldRegistry();
   visibilitySyncs = [];
 
   const byKey = new Map(state.schema.map((n: any) => [n.key, n]));
-  // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs), so its raw schema form is hidden here.
-  // EnergyFlow has a dedicated visual editor (Flow/Nodes tabs). Plugins is the raw storage behind the
-  // per-plugin pages — every loaded plugin already renders its own typed section, so showing the map as
-  // well gives two editors for one thing, and the raw one is a free-text box you cannot usefully type into.
-  // Deployment settings have no page: ports, directories, buckets, the cache endpoint and what is switched
-  // on at all belong to the config file or the chart's values, where the volume, the service and the
-  // container that back them are also declared. Debug's two switches are on Diagnostics, beside the runtime
-  // state they are used to investigate.
-  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache']);
-  // A section the client doesn't place itself — a plugin's, or a new built-in — goes where the schema says
-  // it belongs, and into System when it says nothing, so a new one is never lost.
-  //
-  // Built from a COPY of NAV_GROUPS. Pushing into the module-level constant meant every rebuild of the form
-  // appended the same sections again, so saving twice put a page in the nav three times.
-  // Every schema section is placed by what the SCHEMA says, built-in or plugin. NAV_GROUPS now carries
-  // only the visual editors (Flow, Nodes, Trends…), which have no schema section to declare a group on.
-  // Holding the grouping in two places is how a section ends up registered, rendered and reachable while
-  // sitting in the wrong group, with nothing to say it was forgotten.
-  //
-  // Schema sections lead each group and the tools follow, because a tool marked `child` indents under
-  // whatever precedes it — the PDU tabs belong under the PDU page, not above it.
+  // Sections with no page of their own.
+  const HIDDEN = new Set(['EnergyFlow', 'Plugins', 'Health', 'Debug', 'PlanStorage', 'Api', 'Cache', 'DisabledPlugins']);
+  // The PDU pages need the Vertiv plugin.
+  const noPdu = !integrationIds.has('vertiv');
+  if (noPdu) PDU_BLOCK.forEach(k => HIDDEN.add(k));
+  // The EmonCMS page needs the EmonCMS plugin.
+  if (!integrationIds.has('emoncms')) HIDDEN.add('EmonCMS');
+  // Schema sections are placed by their declared group (System if none); tools follow them.
   const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: [] as NavItem[] }));
   const groupFor = (title: string) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System')!;
 
   state.schema.forEach((n: any) => {
     if (HIDDEN.has(n.key)) return;
-    groupFor(n.group || 'System').items.push({ schema: n.key });
+    groupFor(n.group || 'System').items.push({ schema: n.key, child: n.key === 'Overrides' });
   });
-  NAV_GROUPS.forEach((g, i) => g.items.forEach(it => {
-    // A tool that names its parent section sits directly after it; everything else keeps to the end.
-    const after = 'after' in it ? it.after : undefined;
-    const at = after ? navGroups[i].items.findIndex(x => 'schema' in x && x.schema === after) : -1;
-    if (at >= 0) navGroups[i].items.splice(at + 1, 0, it);
-    else navGroups[i].items.push(it);
+  const placed = new Set<PluginPage>();
+  const navItems = NAV_GROUPS.map(g => g.items.filter(it => !(noPdu && 'after' in it && it.after === PDU_BLOCK)).flatMap(it => {
+    if (!('page' in it)) return [it];
+    const p = pluginPages.find(pp => pp.id === it.page && !placed.has(pp));
+    if (!p) return [];
+    placed.add(p);
+    return [{ tool: pluginPageTool(p) }];
+  }));
+  pluginPages.filter(p => !placed.has(p)).forEach(p => (navItems[NAV_GROUPS.findIndex(g => g.title === p.group)] ?? navItems[navItems.length - 1]).push({ tool: pluginPageTool(p) }));
+  navItems.forEach((list, i) => list.forEach(it => {
+    // Place a tool after its first present anchor, behind tools already there; otherwise at the end.
+    const items = navGroups[i].items;
+    const after = 'after' in it && it.after ? ([] as string[]).concat(it.after) : [];
+    let at = -1;
+    for (const key of after) { at = items.findIndex(x => 'schema' in x && x.schema === key); if (at >= 0) break; }
+    if (at < 0) { items.push(it); return; }
+    while (at + 1 < items.length && 'tool' in items[at + 1] && (items[at + 1] as any).after === it.after) at++;
+    items.splice(at + 1, 0, it);
   }));
 
-  // The landing page: what the system is doing now, rendered first so it's the default tab (#395).
+  // The landing page, first so it is the default tab.
   const overview = addOverviewSection(nav, sections);
   const first: any = overview.link;
 
   for (const g of navGroups) {
-    // Drop items whose schema section is absent (e.g. Logging is hidden from the schema under Kubernetes).
+    // Drop items whose schema section is absent.
     const items = g.items.filter(it => 'tool' in it || byKey.get((it as any).schema));
     if (!items.length) continue;
     const container = navGroup(nav, g.title);
@@ -772,28 +709,26 @@ export function build() {
     }
   }
 
-  // Open the tab named in the URL hash (so a refresh / shared link lands where you were), else the first.
+  // Open the tab named in the URL hash, else the first.
   const wanted = decodeURIComponent((location.hash || '').slice(1));
   const target = wanted ? ([...nav.querySelectorAll('a')] as any[]).find(a => slug(navLabel(a)) === wanted) : null;
   (target || first)?.click();
 
-  // One subscription for every conditional field, so changing the setting they hang off takes effect as
-  // soon as it is picked rather than after a save and reload.
+  // One subscription re-runs every conditional field's check.
   visibilityOff?.();
   visibilityOff = onDirty(runVisibilitySyncs);
 
   wireNavBadges(nav);
 }
 
-// Each config page's nav entry carries the number of unsaved edits inside it, so pending work is
-// visible from anywhere — you don't have to remember which tab you were on when you changed something.
+// Each config page's nav entry shows its unsaved-edit count.
 let navBadgesOff: any = null;
 function wireNavBadges(nav: any) {
-  // A rebuild replaces every link, so drop the watcher that was pointing at the old ones.
   navBadgesOff?.();
   const links = ([...nav.querySelectorAll('a')] as any[]).filter(a => a.dataset?.section);
+  const claimed = links.flatMap(a => String(a.dataset.section).split(',').map((s: string) => s.trim()));
   navBadgesOff = onDirty(() => links.forEach(a => {
-    const n = changeCountFor(a.dataset.section);
+    const n = changeCountFor(a.dataset.section, claimed);
     const existing = a.querySelector('.nav-badge');
     if (!n) { existing?.remove(); return; }
     if (existing) existing.textContent = String(n);
@@ -827,8 +762,7 @@ function wireEmonCmsTransport(sec: any) {
   const transportSel = field('Transport')?.querySelector('select');
   if (!transportSel) return;
   const mqttOnly = ['MqttBaseTopic', 'MqttTopicTemplate'].map(field).filter(Boolean);
-  // Url/ApiKey are needed by the HTTP transport AND by feed auto-config (which drives the REST API
-  // regardless of the measurement transport); Path is HTTP-transport only.
+  // Url/ApiKey are needed for HTTP transport and feed auto-config; Path is HTTP only.
   const urlKey = ['Url', 'ApiKey'].map(field).filter(Boolean);
   const pathField = field('Path');
   const feedsAuto = field('AutoConfigure')?.querySelector('input[type=checkbox]');
@@ -843,9 +777,7 @@ function wireEmonCmsTransport(sec: any) {
   apply();
 }
 
-// The API section advertises OpenAPI/Scalar docs but never said where they live (#190). Show the real
-// URLs, derived from the configured port. The API listens on its own port, so the links are built from
-// this page's hostname rather than its path — they are only reachable if that port is exposed to you.
+// Show the OpenAPI/Scalar doc URLs, built from this page's hostname and the API port.
 function wireApiDocs(sec: any) {
   const fields = [...sec.querySelectorAll('.field')] as any[];
   const field = (label: string) => fields.find(f => f.querySelector('label')?.textContent === label);
@@ -880,10 +812,7 @@ function wireApiDocs(sec: any) {
       a.href = base + path; a.textContent = base + path;
       a.target = '_blank'; a.rel = 'noopener';
       a.style.cssText = 'font:12px ui-monospace,Consolas,monospace;';
-      // Left clickable even when the API is off. Killing pointer-events made these look like ordinary
-      // links that silently ignored a click — reported as "API links not clickable" (#295), because a
-      // dead-looking link is indistinguishable from a broken page. The reason is now on the row itself
-      // rather than only in the paragraph above it, so the state is legible where the link is.
+      // Left clickable when the API is off; the row states why.
       if (!on) {
         a.style.opacity = '0.55';
         a.title = 'The API is disabled, so nothing is listening on this port yet — enable it above, save, and restart.';
@@ -904,8 +833,7 @@ function wireApiDocs(sec: any) {
   sec.appendChild(box);
 }
 
-// Operator page: an on-demand update check. Asks the operator to query the registry now and says plainly
-// whether a newer eligible version (bounded by Policy) is available — read-only, never touches the Deployment.
+// Operator page: an on-demand, read-only update check.
 function wireOperatorCheck(sec: any) {
   const box = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = 'Update check'; box.appendChild(lg);
@@ -917,9 +845,7 @@ function wireOperatorCheck(sec: any) {
   sec.appendChild(box);
 
   const show = (u: any) => {
-    // The operator reports both the message and a Severity, so the colour comes straight from that severity —
-    // no re-deriving from wording (the old code called 'unstable' a "release", then keyword-sniffed the prose).
-    // Fall back to `available` only for a legacy report that predates the severity field.
+    // Colour from the reported severity; `available` is the fallback for legacy reports.
     const msg = u?.message || (u?.available ? 'Update available.' : 'Up to date.');
     const sev = u?.severity ?? (u?.available ? 'UpdateAvailable' : 'Ok');
     if (sev === 'UpdateAvailable') { result.style.color = 'var(--warn, #fa4)'; result.textContent = '↑ ' + msg; }
@@ -938,7 +864,7 @@ function wireOperatorCheck(sec: any) {
   };
 }
 
-// Operator page: a channel/version switcher — roll the Deployment to stable/edge/dev or a specific release (#210).
+// Operator page: a channel/version switcher.
 function wireOperatorSwitch(sec: any) {
   const box = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = 'Deployed version'; box.appendChild(lg);
@@ -961,7 +887,6 @@ function wireOperatorSwitch(sec: any) {
     toast(res.body?.message || (res.ok ? 'Force update requested.' : 'Force update failed.'), forcedOk);
     if (forcedOk) {
       status.textContent = res.body.message;
-      // The workload is about to go away. Say so, so the dropped stream reads as "busy", not "broken".
       expectRestart('Re-pulling the deployed image');
       toast('Updating — the bridge is restarting. This page reconnects on its own.', true);
     }
@@ -1004,9 +929,7 @@ function wireOperatorSwitch(sec: any) {
   }).catch(() => { desc.textContent = 'Could not load available versions.'; sel.style.display = 'none'; switchBtn.style.display = 'none'; forceBtn.style.display = 'none'; });
 }
 
-// A link out to the system this page configures. It appears only when a URL is actually configured, so it
-// can never dangle, and the href is resolved on each visit rather than at build time — otherwise editing
-// the URL and clicking straight through would open the old one.
+// A link to the configured system, shown only when a URL is set; href resolved on each visit.
 function externalLink(label: string, href: () => string | null, hint: string) {
   const a: any = el('a', { class: 'ext-link', target: '_blank', rel: 'noopener', title: hint }, label + ' ↗');
   const sync = () => {
@@ -1015,12 +938,12 @@ function externalLink(label: string, href: () => string | null, hint: string) {
     else a.classList.add('is-hidden');
   };
   sync();
-  // activate() announces every tab switch, so a URL edited elsewhere is picked up on the way back here.
+  // activate() fires on each tab switch, picking up URL edits.
   window.addEventListener?.('rpdu:activate', sync);
   return a;
 }
 
-// A configured URL, trimmed and only if it looks like one — a half-typed host shouldn't produce a link.
+// A configured URL, trimmed, only if it looks like one.
 function cfgUrl(...path: string[]): string | null {
   let o: any = state.data;
   for (const p of path) { if (o == null) return null; o = o[p]; }
@@ -1028,13 +951,11 @@ function cfgUrl(...path: string[]): string | null {
   return /^https?:\/\/.+/i.test(s) ? s.replace(/\/+$/, '') : null;
 }
 
-// Section-specific action buttons (connection tests; Home Assistant discovery actions; a way in to the
-// system being configured).
+// Section-specific action buttons.
 function sectionActions(node: any) {
   const bar = document.createElement('div'); bar.className = 'sec-actions';
 
-  // What the last action did, on the page. A toast is gone in a few seconds and "did that work?" is the
-  // whole reason these buttons exist — a test whose answer you have to catch is a test that says nothing.
+  // The last action's result, shown on the page.
   const result = el('div', { class: 'desc test-result' });
 
   const add = (label: string, fn: any, cls?: string) => {
@@ -1051,7 +972,7 @@ function sectionActions(node: any) {
           result.classList.add(out.ok ? 'test-ok' : 'test-bad');
         }
       } catch (e: any) {
-        // An action that throws must not leave the button stuck on "Working…" with nothing said.
+        // A throwing action must not leave the button stuck on "Working…".
         result.textContent = '✗ ' + (e?.message || e);
         result.classList.add('test-bad');
       } finally { b.disabled = false; b.textContent = was; }
@@ -1064,28 +985,24 @@ function sectionActions(node: any) {
   else if (node.key === 'PDU') add('Test PDU connection', testPdu);
   else if (node.key === 'Modbus') { add('Test connections', testModbus); add('Explore registers', async () => openRegisterExplorer()); }
   else if (node.key === 'EmonCMS') {
-    add('Test EmonCMS connection', testEmonCms); add('Provision feeds now', provisionEmonCmsFeeds);
+    add('Test EmonCMS connection', testEmonCms); add('Show feed plan', showEmonCmsPlan); add('Provision feeds now', provisionEmonCmsFeeds);
     add('Delete old inputs', cleanupEmonCmsInputs); add('Delete old feeds', cleanupEmonCmsFeeds, 'danger'); add('Delete all feeds', deleteEmonCmsFeeds, 'danger');
     bar.appendChild(externalLink('Open EmonCMS', () => cfgUrl('EmonCMS', 'Url'), 'Open the EmonCMS server this bridge feeds'));
   } else if (node.key === 'HomeAssistant') {
     if ((state.data.HomeAssistant || {}).DiscoveryEnabled !== false) {
       add('Republish discovery', rediscoverHa);
       add('Clear discovery', clearHa, 'danger');
-      // The two cleanups that "Clear discovery" cannot do. One removes retained configs for things this
-      // build no longer publishes; the other removes devices Home Assistant still lists whose config is
-      // already gone, which is reachable only through HA's own API.
+      // The two cleanups "Clear discovery" cannot do.
     }
-    // The base URL is configured for the Energy Dashboard sync, but it's the way in to HA either way.
     bar.appendChild(externalLink('Open Home Assistant', () => cfgUrl('HomeAssistant', 'EnergyDashboard', 'Url'), 'Open Home Assistant'));
   } else if (node.key === 'Prometheus') {
-    // Our own exporter, not the Pushgateway (that URL is a write endpoint, not something to visit). Built
-    // from this page's hostname the way the API docs links are — it only resolves if that port is exposed.
+    // Our own exporter's /metrics, on this page's hostname.
     bar.appendChild(externalLink('Open /metrics', () => {
       const p = state.data?.Prometheus || {};
       return p.Exporter === false ? null : `${location.protocol}//${location.hostname}:${p.Port || 9184}/metrics`;
     }, 'The metrics this bridge exposes for Prometheus to scrape'));
   } else if (node.key === 'Pdus') {
-    // One way in per configured PDU — their web UIs are where you go to check anything this can't show.
+    // One link per configured PDU's web UI.
     Object.entries(state.data?.Pdus || {}).forEach(([id, pdu]: any) => {
       bar.appendChild(externalLink(`Open ${id}`, () => {
         const c = pdu?.Connection || {};

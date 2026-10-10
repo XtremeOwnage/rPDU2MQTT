@@ -300,6 +300,23 @@ public static class FlowGraphBuilder
         foreach (var id in breakerUnknown) expectsReading.Add(id);
         bool Unavailable(string id) => expectsReading.Contains(id);
 
+        // A solar node fed only by measured solar nodes supplies their sum (panels → string), so two such
+        // strings on one MPPT each carry their own figure instead of an undetermined split.
+        var rolledUp = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool IsSolar(string id) => kind.TryGetValue(id, out var k) && k == "solar";
+        for (var grew = true; grew;)
+        {
+            grew = false;
+            foreach (var (id, feeders) in incoming)
+            {
+                if (leaf.ContainsKey(id) || !IsSolar(id) || Mode(id) != "auto" || Unavailable(id) || feeders.Count == 0) continue;
+                if (!feeders.All(f => leaf.ContainsKey(f) && IsSolar(f) && outgoing.TryGetValue(f, out var o) && o.Count == 1)) continue;
+                leaf[id] = feeders.Sum(f => leaf[f]);
+                rolledUp.Add(id);
+                grew = true;
+            }
+        }
+
         // Every node that ended up carrying a conservation back-fill.
         var inferred = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -602,6 +619,7 @@ public static class FlowGraphBuilder
         // Where a node's number came from.
         string DerivationOf(string id)
         {
+            if (rolledUp.Contains(id)) return FlowDerivation.Summed;
             if (leaf.ContainsKey(id)) return FlowDerivation.Measured;
             if (ValueOf(id) is null) return FlowDerivation.Unknown;
             // A node that absorbed a remainder is inferred even if it also sums children.

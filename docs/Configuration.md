@@ -1,29 +1,26 @@
-# Configuration Guide 
+# Configuration Guide
 
-This guide will walk you through the configuration options available for this service. The configuration file, typically named `config.yaml`, should be properly set up before deploying the service.
+Configuration file: `config.yaml`.
 
-> Clustering multiple PDUs? See [Aggregation.md](Aggregation.md) for OneView setup.
+Multiple PDUs: see [Aggregation.md](Aggregation.md) for OneView setup.
 
 ## MQTT Configuration
 
 ### Credentials (Optional)
 
-To connect to your MQTT broker, you can optionally specify a username and password.
-
-If- your MQTT broker requires authentication, you will be required to provide a username and password.
+Required if the broker requires authentication.
 
 ```yaml
 Mqtt:
   Credentials:
-    Username: "user"    # Replace with your MQTT username
-    Password: "password" # Replace with your MQTT password
+    Username: "user"
+    Password: "password"
 ```
 
 ### Connection (Optional)
 
-`Scheme` selects how the broker is reached. When it is omitted, the scheme is inferred from `Port`
-(8883 → `mqtts`, 8000 → `ws`, 8884 → `wss`, anything else → `mqtt`), and when `Port` is omitted it
-defaults to the well-known port for the scheme.
+- `Scheme` omitted: inferred from `Port` (8883 → `mqtts`, 8000 → `ws`, 8884 → `wss`, anything else → `mqtt`).
+- `Port` omitted: the scheme's default port.
 
 | Scheme  | Transport             | Default port |
 |---------|-----------------------|--------------|
@@ -37,106 +34,99 @@ Mqtt:
   Connection:
     Host: "broker.example.com"
     Scheme: "mqtts"          # omit to infer from Port
-    ValidateCertificate: true # set false to accept a self-signed broker certificate (TLS schemes only)
+    ValidateCertificate: true # false accepts a self-signed broker certificate (TLS schemes only)
 ```
 
 ### Parent Topic (Optional)
 
-This defines the parent topic under which all MQTT keys will be published.
+Parent topic for all published keys.
 
 ```yaml
 Mqtt:
-  ParentTopic: "rpdu2mqtt"  # Customize this to your desired parent topic
+  ParentTopic: "rpdu2mqtt"
 ```
 
 ### Client ID (Optional)
 
-This sets the client ID that the service will use when connecting to the MQTT broker.
+Client ID used when connecting to the broker.
 
 ```yaml
 Mqtt:
-  ClientID: "rpdu2mqtt"  # Customize as needed
+  ClientID: "rpdu2mqtt"
 ```
 
 ### KeepAlive (Optional)
-This defines the keep-alive interval (in seconds) for the MQTT connection.
+
+Keep-alive interval, in seconds.
 
 ```yaml
 Mqtt:
-  KeepAlive: 60  # Adjust as necessary
+  KeepAlive: 60
 ```
 
 ### Last Will / Availability (Optional)
-By default the bridge registers an MQTT **Last-Will** message and sets an `availability_topic` on every
-entity, so Home Assistant marks them **unavailable the instant the bridge disconnects**.
+
+`LastWill: true` (default) registers an MQTT Last-Will message and sets an `availability_topic` on every
+entity. Home Assistant marks entities unavailable when the bridge disconnects.
 
 ```yaml
 Mqtt:
   LastWill: true   # default
 ```
 
-Set `LastWill: false` to disable both the Last-Will and the availability topic. Entities then rely on
-**`HomeAssistant.SensorExpireAfterSeconds`** (the `expire_after` timeout) to go unavailable once their
-data goes stale — tune that value to control how long until they show unavailable:
+`LastWill: false` disables both. Entities then go unavailable after
+**`HomeAssistant.SensorExpireAfterSeconds`** (`expire_after`):
 
 ```yaml
 Mqtt:
   LastWill: false
 HomeAssistant:
-  SensorExpireAfterSeconds: 300   # how long stale sensors stay "available"
+  SensorExpireAfterSeconds: 300
 ```
 
-> Note: `expire_after` only applies to sensors/binary-sensors. Outlet **switches** have no
-> `expire_after` in Home Assistant, so with `LastWill: false` switches will not auto-mark unavailable.
+- `expire_after` applies to sensors and binary sensors only. Outlet switches do not go unavailable with
+  `LastWill: false`.
 
 ### Message Timestamp (Optional)
 
-Published measurements carry **the time the PDU was read** — not the time we happened to publish — so a
-consumer can tell a fresh reading from a republished one.
+Adds the time the PDU was read to each published measurement.
 
 ```yaml
 Mqtt:
   MessageTimestamp: None   # None (default) | UserProperty | Payload
 ```
 
-> Both non-`None` modes change what goes on the wire, so neither is on by default: turn one on deliberately
-> and watch the next poll land before you walk away from it.
-
-| Mode | What a measurement looks like |
+| Mode | Measurement format |
 | --- | --- |
-| `UserProperty` | The payload is unchanged (a bare value); the time rides along as an MQTT v5 `timestamp` user property. **Test this against your broker before relying on it** — the payload being unchanged doesn't mean the packet is, and a broker or client that mishandles user properties on PUBLISH can drop the connection, which looks like everything stopping at once. |
-| `Payload` | The payload becomes `{"value": "123.4", "timestamp": "2026-07-21T18:30:15.250Z"}`. Home Assistant discovery adapts automatically (the sensors get `value_template: {{ value_json.value }}`), but anything reading these topics by hand needs updating — which is why it isn't the default. |
-| `None` | No timestamp at all — the behaviour before this option existed. **Default.** |
+| `None` | Bare value, no timestamp. **Default.** |
+| `UserProperty` | Bare value; time in an MQTT v5 `timestamp` user property. Test against your broker: a broker or client that mishandles user properties on PUBLISH can drop the connection. |
+| `Payload` | `{"value": "123.4", "timestamp": "2026-07-21T18:30:15.250Z"}`. Home Assistant discovery adds `value_template: {{ value_json.value }}`. Other consumers of these topics need updating. |
 
-The timestamp is ISO-8601 UTC to milliseconds. The value stays a **string** in `Payload` mode, because that's
-how the PDU reports it — re-typing it as a number would turn `0.00` into `0` and lose the device's precision.
-
-> The energy-flow export (`EnergyFlow.MqttExport`) publishes a JSON payload already, so it always includes a
-> `timestamp` field regardless of this setting. For a rolled-up tier it's the **oldest** contributing
-> snapshot's time — a roll-up is only as current as its stalest input.
+- Timestamp: ISO-8601 UTC, milliseconds.
+- In `Payload` mode the value is a string, as reported by the PDU.
+- The energy-flow export (`EnergyFlow.MqttExport`) always includes a `timestamp` field. For a rolled-up tier
+  it is the oldest contributing snapshot's time.
 
 ### Connection Details (Required)
-Configure the connection to your MQTT broker:
 
 ```yaml
 Mqtt:
   Connection:
-    Host: "localhost"  # Replace with your MQTT broker's IP or hostname
-    Port: 1883         # Replace with the MQTT broker's port number
-    Timeout: 15        # Connection timeout in seconds
-    ValidateCertificate: true  # Set to false if you're using self-signed certificates
+    Host: "localhost"
+    Port: 1883
+    Timeout: 15                # seconds
+    ValidateCertificate: true  # false for self-signed certificates
 ```
 
-Everything is published under `ParentTopic` — here's the tree in MQTT Explorer:
+Published topics under `ParentTopic`, in MQTT Explorer:
 
 ![Published MQTT topics in MQTT Explorer](images/mqtt-explorer.webp)
 
 ## PDU Configuration (Required)
 
-PDUs are configured under **`Pdus:`** — a map of named instances. A single PDU is just one entry
-named `default`; add more entries to bridge several PDUs from one deployment. Each instance is polled
-independently and published under its own MQTT/Home Assistant namespace (a lone instance is
-un-namespaced, identical to a single-PDU setup).
+`Pdus:` is a map of named instances. A single PDU is one entry named `default`. Each instance is polled
+independently and published under its own MQTT/Home Assistant namespace. A single instance is not
+namespaced.
 
 ```yaml
 Pdus:
@@ -145,49 +135,46 @@ Pdus:
       Host: "10.0.0.10"
       Port: 80
     PollInterval: 5
-  rack-b:                  # add more instances as needed
+  rack-b:
     Connection:
       Host: "10.0.0.11"
       Port: 80
 ```
 
-> **Upgrading from v1:** the old single `PDU:` section is auto-migrated to `Pdus: { default: ... }`
-> on load (with a one-time warning), so existing configs keep working — but update to `Pdus:` to
-> silence it. The fields below apply **per instance** (under `Pdus.<name>`).
+- **v1 configs:** a single `PDU:` section is migrated to `Pdus: { default: ... }` on load, with a one-time
+  warning.
+- The fields below are per instance, under `Pdus.<name>`.
 
 ### Connection Details (Required)
-Set up the connection details to your Power Distribution Unit (PDU).
 
 ```yaml
 Pdus:
   default:
     Connection:
-      Scheme: http         # http or https, based on your PDU's configuration
-      Host: "localhost"    # Replace with your PDU's IP or hostname
-      Port: 80             # Replace with your PDU's port number
-      Timeout: 15          # Request timeout in seconds
-      ValidateCertificate: true  # Set to false if using self-signed certificates
+      Scheme: http         # http or https
+      Host: "localhost"
+      Port: 80
+      Timeout: 15          # seconds
+      ValidateCertificate: true  # false for self-signed certificates
 ```
 
-The same options in the GUI's **PDU** section (note **Enable Write Actions** for outlet control):
+GUI **PDU** section (**Enable Write Actions** enables outlet control):
 
 ![GUI PDU configuration](images/gui-pdu.webp)
 
 ### Credentials (Optional)
-Provide credentials if required to connect to the PDU.
 
 ```yaml
 Pdus:
   default:
     Credentials:
-      Username: "actionsUser"  # Replace with your PDU username
-      Password: "actionsPass"  # Replace with your PDU password
+      Username: "actionsUser"
+      Password: "actionsPass"
 ```
 
 ### Credentials via environment / secrets (Optional)
-To keep secrets out of `config.yaml`, MQTT and PDU credentials can be supplied via environment
-variables. These override whatever is in the config file. For the **complete list of variables and
-the full precedence rules** (env vs config file vs the Kubernetes CRD), see
+
+These variables override the config file. Full list and precedence (env, config file, Kubernetes CRD):
 [environment-variables.md](../Examples/Configuration/environment-variables.md).
 
 | Variable | Overrides |
@@ -198,9 +185,9 @@ the full precedence rules** (env vs config file vs the Kubernetes CRD), see
 | `RPDU2MQTT_GUI_PASSWORD` | GUI Basic-auth password |
 | `RPDU2MQTT_OIDC_CLIENT_SECRET` | GUI OIDC client secret |
 
-For each variable, a `<NAME>_FILE` form is also supported: set it to a file path (e.g. a Docker
-secret at `/run/secrets/mqtt_password`) and the value is read from that file. The `_FILE` form
-takes precedence over the plain variable.
+- Each variable has a `<NAME>_FILE` form: a file path (e.g. `/run/secrets/mqtt_password`) whose contents are
+  the value.
+- `_FILE` takes precedence over the plain variable.
 
 ```yaml
 # docker-compose example
@@ -213,143 +200,137 @@ services:
 ```
 
 ### Polling Interval (Optional)
-Set how often the PDU sensors should be polled and published to MQTT (in seconds).
+
+Seconds between polls.
 
 ```yaml
 Pdus:
   default:
-    PollInterval: 5  # Adjust the polling interval as needed
+    PollInterval: 5
 ```
 
 ### Actions Enabled
-Enable or disable the ability to perform write-actions on the PDU (e.g., toggling outlets).
-Requires PDU `Credentials`. Disabled by default.
+
+Enables write actions on the PDU (e.g. toggling outlets). Requires PDU `Credentials`. Default: disabled.
 
 ```yaml
 Pdus:
   default:
-    ActionsEnabled: true  # Set to false to disable any changes on the PDU
+    ActionsEnabled: true
 ```
 
-When enabled, each outlet gains the following **outlet operations** in Home Assistant
-(and a matching **Control** tab in the configuration GUI):
+When enabled, each outlet gets these Home Assistant entities, and the GUI gets a **Control** tab:
 
 | Entity | Type | Action |
 | --- | --- | --- |
 | Switch | `switch` | Turn the outlet on / off |
 | Reboot | `button` | Power-cycle the outlet |
-| On Delay / Off Delay / Reboot Delay | `number` | Configure the outlet's on/off/reboot timing (seconds) |
-| Power-On Action | `select` | What the outlet does when power is restored |
+| On Delay / Off Delay / Reboot Delay | `number` | On/off/reboot timing (seconds) |
+| Power-On Action | `select` | Outlet behaviour when power is restored: `on` / `off` / `last` (restore the pre-outage state) |
 | Reset Statistics | `button` | Reset the outlet's accumulated energy statistics |
 
-The GUI **Control** tab is the easiest place to exercise these against a single outlet. It also
-shows each outlet's current delays and power-on action so changes made from Home Assistant are
-visible there, and lets you **rename the outlet's label on the PDU** (handy since the PDU's own web
-UI is slow) — also gated by write actions.
+GUI **Control** tab:
 
-> Power-On Action options are `on` / `off` / `last` (restore the pre-outage state).
+- Controls a single outlet.
+- Shows each outlet's current delays and power-on action.
+- Renames the outlet's label on the PDU (requires write actions).
 
 ## Overrides Configuration (Optional)
 
-This section allows you to override generated `entity_id`, names, and enabled/disabled states for various objects. 
+Overrides generated `entity_id`, names, and enabled state.
 
-For all override sections, Name can be updated at anytime. Home assistant will reflect the updated names after the next discovery job runs.
+- All fields are optional.
+- `Name` can change at any time; Home Assistant updates after the next discovery run.
+- `ID` is used only when the device/entity is first created.
 
-ID fields, are only used when the device/entity is initially created. Changing this after the entity has been created will have no effect.
+GUI **Overrides** editor: lists devices, outlets and measurements from live PDU data, with a preview of
+generated paths.
 
-All fields, are optional.
-
-> The GUI's **Overrides** editor is the easiest way to set these — it's driven by your live PDU data,
-> so you pick real devices/outlets/measurements and can preview the generated paths before saving:
->
-> ![GUI Overrides editor](images/gui-overrides.webp)
+![GUI Overrides editor](images/gui-overrides.webp)
 
 ### PDU Override
-Override details about the PDU itself.
 
 ```yaml
 Overrides:
   PDU:
-    ID: null  # Leave as null unless you have a specific ID
-    Name: "Your-PDU"  # Customize the PDU name
+    ID: null
+    Name: "Your-PDU"
 ```
 
 ### Devices Override
-Override details regarding devices exposed by the PDU using their serial numbers.
 
-Each PDU can expose multiple devices. The outlets, sensors, etc will belong to one of these devices within Home Assistant.
+Keyed by device serial number (shown on the PDU's info tab). Each PDU can expose several devices; outlets and
+sensors belong to one of them in Home Assistant.
 
 ```yaml
 Overrides:
   Devices:
-    A0AE260C851900C3:       # Replace this with the serial number from your device. You can get this from the info tab.
-      ID: null              # Leave as null unless you have a specific ID
-      Name: "Device Name"   # Customize the device name
-      Enabled: true         # Set to false to disable this device. 
+    A0AE260C851900C3:       # device serial number
+      ID: null
+      Name: "Device Name"
+      Enabled: true
 ```
 
 ### Outlets Override
-Customize individual outlets by their number (1-based, matching the PDU UI). Outlets are nested under
-their device's serial number.
+
+Keyed by outlet number (1-based, as in the PDU UI), under the device serial number.
 
 ```yaml
 Overrides:
   Devices:
-    A0AE260C851900C3:           # Device serial number
+    A0AE260C851900C3:           # device serial number
       Outlets:
         1:
-          ID: kube02                # Customize the outlet ID
-          Name: "Proxmox: Kube02"   # Customize the outlet name
-          Enabled: true             # Set to false to disable this outlet
-          Make: "Dell"              # Manufacturer shown in Home Assistant
-          Model: "PowerEdge R730xd" # Model shown in Home Assistant
+          ID: kube02
+          Name: "Proxmox: Kube02"
+          Enabled: true
+          Make: "Dell"              # manufacturer shown in Home Assistant
+          Model: "PowerEdge R730xd" # model shown in Home Assistant
 ```
 
-`Make` and `Model` override what Home Assistant shows in the device info (instead of the PDU's
-hardware make/model, e.g. `GEI` / `MNU3E1R1-...`). They apply to devices, outlets, and OneView groups,
-and take precedence over the `RemapMake` / `RemapModel` toggles.
+- `Make` / `Model` replace the PDU hardware make/model (e.g. `GEI` / `MNU3E1R1-...`) in Home Assistant device
+  info.
+- They apply to devices, outlets, and OneView groups.
+- They take precedence over `RemapMake` / `RemapModel`.
 
 ### Measurements Override
-Customize how metrics are sent to services. The entity ID used for metrics is `[DEVICE_ID]_[METRIC_TYPE]`.
 
-Example, say, you have a device named `kube02`. The measurements will be named kube02_power
+Measurement entity ID: `[DEVICE_ID]_[METRIC_TYPE]`, e.g. `kube02_power`.
 
 ```yaml
 Overrides:
   Measurements:
     apparentPower:
-      ID: null         # Leave as null unless you have a specific ID
-      Name: "Apparent Power"  # Human-readable name for this metric
-      Enabled: true    # Set to false to disable this metric
+      ID: null
+      Name: "Apparent Power"
+      Enabled: true
     realPower:
-      ID: power        # Customize the ID if needed
-      Name: "Power"    # Human-readable name for this metric
-      Enabled: true    # Set to false to disable this metric
+      ID: power
+      Name: "Power"
+      Enabled: true
 ```
 
 ## Home Assistant Integration
 
 ### Discovery Configuration
 
-Enable automatic discovery of the PDU and its entities in Home Assistant.
-
 ```yaml
 HomeAssistant:
-  DiscoveryEnabled: true                      # Set to false if you do not want Home Assistant discovery
-  DiscoveryTopic: "homeassistant/discovery"   # Customize the discovery topic
-  DiscoveryInterval: 300                      # Interval (in seconds) between discovery messages
-  SensorExpireAfterSeconds: 300               # Time after which sensors are marked as unavailable
+  DiscoveryEnabled: true
+  DiscoveryTopic: "homeassistant/discovery"
+  DiscoveryInterval: 300                      # seconds between discovery messages
+  SensorExpireAfterSeconds: 300               # seconds until sensors are marked unavailable
 ```
 
-The GUI's **HomeAssistant** section exposes these (and the group member name/object-id templates):
+GUI **HomeAssistant** section (also holds the group member name/object-id templates):
 
 ![GUI Home Assistant configuration](images/gui-homeassistant.webp)
 
-The bridge, each PDU, every outlet, and each OneView group then appear as Home Assistant devices:
+The bridge, each PDU, every outlet, and each OneView group appear as Home Assistant devices:
 
 ![Home Assistant bridge device](images/home-assistant-bridge.webp)
 
-Outlets and power sensors are usable in automations too (device triggers like "power crossed threshold"):
+Outlets and power sensors provide device triggers (e.g. "power crossed threshold"):
 
 ![Home Assistant device automation triggers](images/home-assistant-automation.webp)
 
@@ -357,30 +338,25 @@ Outlets and power sensors are usable in automations too (device triggers like "p
 
 ### Debug Options
 
-Use these settings when debugging or requiring additional data.
-
-You- typically should never need to touch, or change any settings here.
-
 ```yaml
 Debug:
-  PrintDiscovery: false  # Set to true to print discovery messages to the console
-  PublishMessages: true  # Set to false to test the program without sending messages
+  PrintDiscovery: false  # true prints discovery messages to the console
+  PublishMessages: true  # false runs without sending messages
 ```
 
 ## Logging Configuration
 
-### What each level tells you
+### Levels
 
-Every sink below takes its own `Severity`, so you can keep the console quiet and send the detail to a file or
-syslog instead. What you get at each level:
+Each sink has its own `Severity`.
 
-| Level | What it covers |
+| Level | Logs |
 | --- | --- |
-| `Information` | The default. What the process decided to be at startup (roles, config source, every PDU/Modbus source, every destination that's on or off), each PDU's shape when it changes, and **every write** — outlet on/off/reboot, config field changes, group actions. Anything that changes the physical world or the topology. |
-| `Debug` | Why nothing is happening. Each poll with its latency and counts, the energy-flow graph as it's provisioned (each node's type and feeders), flow ingest batches, feed provisioning passes, subscription reconciliation, and failures that are repeats of one already reported. |
-| `Verbose` (trace) | The roll-up, step by step: every node's value change and who it notified, every ingested reading, every topic sample. This is what to turn on when a tier's number looks wrong and nothing else explains it — it is very chatty, so prefer a file sink. |
+| `Information` | Default. Startup decisions (roles, config source, every PDU/Modbus source, every destination on or off), each PDU's shape when it changes, and every write: outlet on/off/reboot, config field changes, group actions. |
+| `Debug` | Each poll with latency and counts, the energy-flow graph as provisioned (each node's type and feeders), flow ingest batches, feed provisioning passes, subscription reconciliation, repeated failures. |
+| `Verbose` (trace) | Roll-up steps: every node's value change and who it notified, every ingested reading, every topic sample. High volume; use a file sink. |
 
-A useful troubleshooting combination — normal console, full detail on disk:
+Example: console at `Information`, file at `Verbose`.
 
 ```yaml
 Logging:
@@ -394,91 +370,58 @@ Logging:
 ```
 
 ### Console Logging
-Customize how messages are logged to the console (stdout).
+
+Logs to stdout.
 
 ```yaml
 Logging:
   Console:
-    Enabled: true  # Set to false to disable console logging
-    Severity: Information  # Minimum severity of messages to log
-    Format: "[{Timestamp:HH:mm:ss} {Level}] {Message:lj}{NewLine}{Exception}"  # Customize the log format
+    Enabled: true
+    Severity: Information
+    Format: "[{Timestamp:HH:mm:ss} {Level}] {Message:lj}{NewLine}{Exception}"
 ```
 
 ### File Logging
-Configure logging to a file.
 
 ```yaml
 Logging:
   File:
-    Enabled: false  # Set to true to enable file logging
-    Severity: Debug  # Minimum severity of messages to log
-    Format: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"  # Customize the log format
-    Path: null  # Specify the log file path
-    FileRollover: Day  # Set the frequency of log file rollover (e.g., Day, Month)
-    FileRetention: 30  # Number of rolled over logs to retain
+    Enabled: false
+    Severity: Debug
+    Format: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}"
+    Path: null
+    FileRollover: Day  # e.g. Day, Month
+    FileRetention: 30  # rolled-over logs to keep
 ```
 
 ### Syslog Logging
-Send logs to a remote syslog server (RFC3164/RFC5424) over UDP or TCP.
+
+Remote syslog (RFC3164/RFC5424) over UDP or TCP.
 
 ```yaml
 Logging:
   Syslog:
-    Enabled: false       # Set to true to enable syslog
-    Host: "10.0.0.10"    # Syslog server hostname/IP (required when enabled)
-    Port: 514            # Syslog server port
+    Enabled: false
+    Host: "10.0.0.10"    # required when enabled
+    Port: 514
     Protocol: UDP        # UDP or TCP
-    AppName: "rPDU2MQTT" # Application name reported in syslog messages
-    Severity: Information # Minimum severity of messages to send
+    AppName: "rPDU2MQTT"
+    Severity: Information
 ```
-
-
-### Accuracy: what the flow will and won't infer
-
-The diagram never states a number nobody supplied. A node's value comes from one of:
-
-1. **A measurement** — a live source bound to it, or a static `Value`.
-2. **Its children**, summed.
-3. **Conservation**, when it is the *single* unmeasured path into a node whose demand is measured. The load
-   is really being drawn and there is exactly one way for it to arrive, so the figure is derived, not guessed.
-
-If none of those apply the node reads **"no data"** on the diagram, publishes nothing to MQTT / Home
-Assistant / EmonCMS, and is reported as `null` by the API — deliberately *not* `0`, because 0 is a claim
-(solar at night really is 0 W) and a fabricated zero recorded into history is worse than a gap.
-
-In particular, **several unmeasured feeders into one node all read "no data"**. If solar, battery and grid
-all feed an inverter and none of them is metered, nothing indicates which supplied the load, so none of them
-is given a share of it. To say where unaccounted power comes from, mark that feeder's `Mode: residual` — the
-designated absorber carries the remainder after every measured feeder has supplied its part.
-
-> Before this rule existed, that case split the load equally between them: three unmeasured sources under a
-> 553 W load each showed 184.3 W, which is indistinguishable on the diagram from a real measurement.
-
-A configured node always appears on the diagram even when it has no value, so a gap in your metering is
-visible as a gap rather than as a missing node.
-
-**Grouping nodes.** Several nodes can be shown as one collapsible node on both flow graphs — e.g. three MPPTs
-as one "Incoming PV". Add a group on the **Nodes** tab (give it an id, label and members); the flow diagram
-and the node roll-up then show the group as a single node whose value is the **sum of its members**, with a
-toggle above each graph to expand it back to the members. The members are unchanged — they keep their own
-wiring and still export individually — and the group itself also publishes its summed total (`{id}` on the
-MQTT tier topic, its own Home Assistant sensor) when `EnergyFlow.MqttExport` is on. A group is the sum of the
-members that have data, and is itself "no data" when none of them do — never a fabricated zero.
 
 ## Metric Exporters (Optional)
 
-In addition to MQTT, measurements can be exported to Prometheus and/or EmonCMS. Both are disabled
-by default and poll on the same `Pdu.PollInterval` cadence.
+Prometheus and EmonCMS exporters. Both disabled by default; both run on `Pdu.PollInterval`.
 
-### History: where past readings come from
+### History
 
-The Flow, Energy and Trends pages read past readings through one backend, chosen by `History.Provider`.
+The Flow, Energy and Trends pages read past readings from the backend set by `History.Provider`.
 
 ```yaml
 History:
   Enabled: true
-  Provider: local          # which backend the pages READ from
-  LocalEnabled: true       # whether the bridge KEEPS its own copy — on by default, whatever it reads from
+  Provider: local          # backend the pages read from
+  LocalEnabled: true       # keep the bridge's own copy, whatever Provider is
   LocalPath: ''            # empty: the directory the deployment mounted, else one beside the program
   LocalRawKeepDays: 7        # as they arrive
   LocalMinuteKeepDays: 90    # a minute at a time
@@ -487,78 +430,77 @@ History:
   ToleranceSeconds: 30
 ```
 
-**Recording and reading are separate.** `LocalEnabled` says whether the bridge keeps its own copy of every
-reading; `Provider` says which backend the pages read from. Keeping the copy is on by default and goes on
-whatever is chosen, because a store that is only written while it is also the chosen backend is empty on the
-day someone switches to it — which is the day they wanted a year of readings. Turn `LocalEnabled` off and the
-bridge stores nothing of its own.
+| Setting | Value |
+| --- | --- |
+| `Provider` | `local` (default), `prometheus`, `emoncms`, `homeassistant`. |
+| `LocalEnabled` | `true` (default): record every reading to the local store regardless of `Provider`. `false`: store nothing locally. |
+| `LocalPath` | Store directory. Overrides `RPDU2MQTT_HISTORY_DIRECTORY`. |
+| `Local*KeepDays` | Retention per resolution. |
 
-**`local` is the bridge's own store, and the default to read from.** Every node's readings are written on the same sweep
-that already reads them, into a directory of fixed-interval files — one per series, per resolution, per
-chunk of time. There is no index and nothing to query: a reading's place in a file is arithmetic
-(`(when − start) / interval`), so a window is a seek and a sequential read, and the whole database is a
-directory you can copy, tar or mount read-only.
+**`local` store:**
 
-- **Every metric the bridge understands** is recorded for every node that reports one: power, apparent power,
-  energy, the day's energy, current, voltage, frequency, power factor, state of charge, any other percentage,
-  and temperature — plus the return lanes (battery charge, grid export) as series of their own. A metric a
-  node does not report is not stored for it, and costs nothing. A source can be bound to any of them except
-  the day's energy, which the bridge works out from a counter's rise rather than reading.
-- **A slot nobody wrote is "no reading"**, stored as NaN. Unknown is never a zero, in the files or out of them.
-- **Four resolutions, each kept for as long as you choose.** The readings as they arrive
-  (`LocalRawKeepDays`), a minute at a time (`LocalMinuteKeepDays`), an hour (`LocalHourKeepDays`), and a day
-  (`LocalDayKeepDays`). A coarser tier holds the **last** reading of each bucket — what a read asks for
-  anyway, and what keeps a counter's meaning, which an average would not. A chart over a month is answered a
-  day at a time: thirty seeks, not a walk through a quarter of a million readings.
-- **The raw tier is what costs the disk**; the rest is rounding. A century of daily readings is about 300 KB
-  per series, so there is little reason to drop any — which is why there is no separate monthly tier: a year
-  drawn by month is twelve reads of the daily one.
-- **Retention deletes whole files**, never rewrites one: a chunk is a day, a month or a year of one series.
-- **Roughly 1 GB a year** for two hundred series read every ten seconds, with the defaults.
+- A directory of fixed-interval files: one per series, per resolution, per chunk of time. No index.
+- The store can be copied, archived or mounted read-only as a plain directory.
+- Written on the same sweep that reads node values.
+- Recorded metrics (for every node that reports them): power, apparent power, energy, the day's energy,
+  current, voltage, frequency, power factor, state of charge, other percentages, temperature, and the return
+  lanes (battery charge, grid export) as separate series.
+- A source can be bound to any of these except the day's energy, which is computed from a counter's rise.
+- An unwritten slot is stored as NaN ("no reading").
+- Resolutions: raw (`LocalRawKeepDays`), minute (`LocalMinuteKeepDays`), hour (`LocalHourKeepDays`), day
+  (`LocalDayKeepDays`). Coarser tiers hold the **last** reading of each bucket. No monthly tier.
+- Retention deletes whole files. A chunk is a day, a month or a year of one series.
+- Size: about 300 KB per series per century of daily readings; about 1 GB a year for 200 series read every
+  10 s with the defaults.
 
-Put it on a volume. The Helm chart does this by default (`history.persistence.enabled`, mounted at
-`/data/history`) and passes that path as `RPDU2MQTT_HISTORY_DIRECTORY`; anywhere else and the readings go
-with the container at the next restart. `LocalPath` overrides it when set — left empty, the History page
-says which directory is in use, how many series are in it and how large it is. A read-only
-mount is reported by the backend test rather than discovered at the first sweep.
+**Storage location:**
 
-**Copying history between backends.** The History page's **Copy history** panel copies every node's history
-from one backend to another in the background, and shows how far it has got. Any backend can be read: `local`,
-`emoncms`, `prometheus`, `homeassistant`. Only `local` and `emoncms` can be written: Prometheus takes past
-samples only through a remote-write receiver, and Home Assistant only as hourly statistics. The copy reads each
-local tier's span at that tier's interval (the last `LocalRawKeepDays` at the raw interval, then a minute, an
-hour, a day), and by default writes only where the destination holds nothing: readings already there are kept, and a second
-run writes nothing. **When both have a reading** can instead be set to replace the destination's with the
-source's (`conflicts=replace`); readings only the destination has are left alone. Replacing is available for
-`local` only, since EmonCMS has no way to delete a range of points. A gap in the source stays a gap. EmonCMS is written only into feeds provisioning has already
-created. Only the leader writes to `local`. `days` limits how far back it reads (empty means ten years), and the
-API is `POST /api/history/copy?from=emoncms&to=local&days=45&conflicts=keep`, with `GET` for progress.
+- Helm: `history.persistence.enabled` (default on), mounted at `/data/history`, passed as
+  `RPDU2MQTT_HISTORY_DIRECTORY`.
+- Without a volume, history is lost on container restart.
+- The History page shows the directory in use, its series count and size.
+- A read-only mount is reported by the backend test.
 
-The other three read from a service you already run — `prometheus`, `emoncms`, `homeassistant` — and are
-unchanged: they answer for whatever was exported to them, including readings from before this bridge existed.
+**Copy history** (History page):
+
+- Copies every node's history from one backend to another in the background, with progress.
+- Readable: `local`, `emoncms`, `prometheus`, `homeassistant`. Writable: `local`, `emoncms`.
+- Reads each local tier's span at its interval (the last `LocalRawKeepDays` raw, then minute, hour, day).
+- `conflicts=keep` (default): write only where the destination has no reading. A second run writes nothing.
+- `conflicts=replace`: overwrite the destination's reading where both have one. `local` only. Readings only
+  in the destination are kept.
+- Gaps in the source stay gaps.
+- EmonCMS is written only into feeds provisioning has created.
+- Only the leader writes to `local`.
+- `days`: how far back to read. Empty: ten years.
+- API: `POST /api/history/copy?from=emoncms&to=local&days=45&conflicts=keep`; `GET` for progress.
+
+`prometheus`, `emoncms` and `homeassistant` read from the external service, including readings that predate
+the bridge.
 
 ### Prometheus
-Each measurement type becomes a gauge (e.g. `rpdu2mqtt_realpower`) labelled by `device`, `source`, and
-`units`. Two independent delivery methods — enable **either or both**:
 
-- **`Exporter`** — expose a `/metrics` endpoint for Prometheus to **scrape** (pull).
-- **`Pushgateway`** — **push** to a Prometheus **Pushgateway** (for setups where scraping isn't practical).
+Each measurement type is a gauge (e.g. `rpdu2mqtt_realpower`) labelled `device`, `source`, `units`. Enable
+either or both:
+
+- **`Exporter`**: `/metrics` endpoint for scraping.
+- **`Pushgateway`**: push to a Prometheus Pushgateway.
 
 ```yaml
 Prometheus:
   Exporter: false       # expose /metrics for scraping
   Port: 9184            # /metrics endpoint port (Exporter)
-  MetricNameTemplate: "rpdu2mqtt_{type}"  # naming template; {type} = measurement type
+  MetricNameTemplate: "rpdu2mqtt_{type}"  # {type} = measurement type
   Pushgateway:
-    Enabled: false      # push to a Pushgateway
+    Enabled: false
     Url: "http://pushgateway:9091/metrics"
     Job: "rpdu2mqtt"
     IntervalSeconds: 0  # 0 = use Pdu.PollInterval
 ```
 
-> The older `Prometheus.Enabled: true` still works — it's treated as `Exporter: true`.
+- `Prometheus.Enabled: true` is treated as `Exporter: true`.
 
-**Customizing metric names.** `MetricNameTemplate` controls the generated metric name. Placeholders:
+**`MetricNameTemplate` placeholders:**
 
 | Placeholder | Value |
 | --- | --- |
@@ -567,38 +509,30 @@ Prometheus:
 | `{source}` / `{outlet}` | outlet or entity name |
 | `{units}` | measurement units |
 
-For example `"pdu_{device}_{type}"` yields `pdu_rack_pdu_1_realpower`. The result is lower-cased with
-non-alphanumeric characters replaced by `_` (so pick a template that starts with a letter). Note that
-`device`, `source`, and `units` are **also always emitted as Prometheus labels**, so you can keep the
-default `rpdu2mqtt_{type}` and aggregate/filter by label (the idiomatic approach), or encode them into
-the name if you prefer.
+- Example: `"pdu_{device}_{type}"` → `pdu_rack_pdu_1_realpower`.
+- Output is lower-cased; non-alphanumeric characters become `_`. Start the template with a letter.
+- `device`, `source` and `units` are always emitted as labels.
 
-**Friendly names in labels.** The default labels are object-id forms (`device="rack_pdu_1"`,
-`source="outlet_10"`) — stable, but not what the thing is *called*. `Prometheus.Labels` can add the
-human forms alongside them:
+**`Prometheus.Labels`** adds labels, including display-name forms:
 
 ```yaml
 Prometheus:
   Labels: [device, device_name, source, name, type, type_name, units]
 ```
 
-| Label | Example | What it is |
+| Label | Example | Value |
 | --- | --- | --- |
 | `device` / `device_name` | `rack_pdu_1` / `Rack PDU 1` | the PDU's id form / its display name |
 | `source` / `name` | `outlet_10` / `Dell MD1200` | the outlet or entity's id form / its display name |
-| `type` / `type_name` | `realpower` / `Real Power` | the measurement type / said in English |
+| `type` / `type_name` | `realpower` / `Real Power` | the measurement type / its English name |
 | `number`, `units`, `instance`, `hierarchy` | `10`, `W`, `rack-b`, `Rack Circuit A` | outlet number, units, PDU instance key, the energy-flow tier feeding it |
 
-> The default set stays `[device, source, units]` on purpose: adding a label changes the identity of every
-> existing time series, which breaks continuity in dashboards that are already recording. Opt in when you
-> want it.
+- Default: `[device, source, units]`.
+- Adding a label changes the identity of every existing series.
 
-Every gauge's **HELP** text is the measurement said in English with its unit
-(`Real Power (W), measured by rPDU2MQTT.`), so series are readable in Grafana's metric browser without
-adding any labels at all.
+**HELP text:** the measurement's English name and unit, e.g. `Real Power (W), measured by rPDU2MQTT.`
 
-You can also rename an individual measurement type via its **Measurements override ID**, which replaces
-`{type}`. For example, with the default template:
+**Per-measurement rename:** the Measurements override `ID` replaces `{type}`:
 
 ```yaml
 Overrides:
@@ -607,16 +541,16 @@ Overrides:
       ID: power      # -> rpdu2mqtt_power instead of rpdu2mqtt_realpower
 ```
 
-The GUI **Paths** tab (and the Overrides "Preview generated paths" button) show the resulting metric
-names so you can confirm them before deploying.
+The GUI **Paths** tab and the Overrides "Preview generated paths" button show the resulting metric names.
 
-The Prometheus section in the GUI (with the metric-name template and Pushgateway options):
+GUI Prometheus section:
 
 ![GUI Prometheus configuration](images/gui-prometheus.webp)
 
 ### EmonCMS
-Pushes measurements to EmonCMS each poll (EmonCMS auto-creates the inputs). Delivery is either the
-HTTP `input/post` API or EmonCMS's **MQTT input** on the broker rPDU2MQTT already uses.
+
+Pushes measurements to EmonCMS each poll; EmonCMS creates the inputs. Transport: HTTP `input/post` API, or
+EmonCMS's MQTT input on the same broker.
 
 ```yaml
 EmonCMS:
@@ -630,22 +564,34 @@ EmonCMS:
   MqttBaseTopic: "emon"               # values published to <base>/<node> as JSON (Mqtt transport)
 ```
 
-**Input names (templating).** `InputNameTemplate` controls the per-measurement input key, the same way
-`Prometheus.MetricNameTemplate` does. Placeholders: `{device}`, `{source}` (object-id form), `{name}`
-(the formatted display name), `{number}` (outlet number; blank for circuits/phase/total), `{type}`
-(honoring its `Overrides.Measurements` ID), and `{units}`. For example `{device}_{source}_{type}` →
-`rack_pdu_1_dell_md1200_realpower`. Leave it **blank** to fall back to the full raw identifier (the old,
-verbose default). The result is lower-cased with non-alphanumeric characters replaced by `_`.
+**`InputNameTemplate` placeholders:**
 
-**MQTT transport.** With `Transport: Mqtt`, measurements are published as a JSON object to
-`<MqttBaseTopic>/<Node>` (e.g. `emon/rpdu2mqtt`) — point EmonCMS's [MQTT input](https://docs.openenergymonitor.org/emoncms/postingdata.html#sending-data-to-emoncms-using-mqtt)
-at the same broker. No `Url`/`ApiKey` needed.
+| Placeholder | Value |
+| --- | --- |
+| `{device}` | device (object-id form) |
+| `{source}` | outlet or entity (object-id form) |
+| `{name}` | formatted display name |
+| `{number}` | outlet number; blank for circuits/phase/total |
+| `{type}` | measurement type (honoring its `Overrides.Measurements` ID) |
+| `{units}` | units |
 
-**Testing & health.** The GUI's EmonCMS section has a **Test EmonCMS connection** button (validates the
-server + API key for HTTP, or broker connectivity for MQTT), and the **Diagnostics** page shows the last
-export result (ok / error, transport, input count).
+- Example: `{device}_{source}_{type}` → `rack_pdu_1_dell_md1200_realpower`.
+- Blank: the full raw identifier.
+- Output is lower-cased; non-alphanumeric characters become `_`.
 
-The GUI's EmonCMS section, and the inputs/feeds it auto-creates in EmonCMS:
+**MQTT transport** (`Transport: Mqtt`):
+
+- Publishes a JSON object to `<MqttBaseTopic>/<Node>` (e.g. `emon/rpdu2mqtt`).
+- Point EmonCMS's [MQTT input](https://docs.openenergymonitor.org/emoncms/postingdata.html#sending-data-to-emoncms-using-mqtt)
+  at the same broker.
+- `Url` / `ApiKey` not needed.
+
+**Testing:**
+
+- GUI **Test EmonCMS connection**: validates server and API key (HTTP) or broker connectivity (MQTT).
+- **Diagnostics** page: last export result (ok / error, transport, input count).
+
+GUI EmonCMS section, and the inputs/feeds it creates:
 
 ![GUI EmonCMS configuration](images/gui-emoncms.webp)
 
@@ -655,9 +601,7 @@ The GUI's EmonCMS section, and the inputs/feeds it auto-creates in EmonCMS:
 
 ## Configuration GUI (Optional)
 
-An embedded web GUI can view, edit and test the configuration instead of hand-editing this file.
-It is disabled by default. When enabled, browse to `http://<host>:<port>` and sign in with the
-configured username/password (HTTP Basic auth).
+Web GUI to view, edit and test the configuration. Disabled by default. Browse to `http://<host>:<port>`.
 
 ```yaml
 Gui:
@@ -670,10 +614,9 @@ Gui:
 
 ### Single Sign-On (OIDC)
 
-The GUI authentication method is chosen with **`Gui.AuthType`** (`Basic`, `Oidc`, or `None`). Set it to
-`Oidc` to authenticate against an OpenID Connect provider (Keycloak, Authentik, Authelia, Google,
-Entra ID, etc.): unauthenticated visitors are redirected to the provider, and a **Logout** link
-appears in the header.
+`Gui.AuthType: Oidc` authenticates against an OpenID Connect provider (Keycloak, Authentik, Authelia, Google,
+Entra ID, etc.). Unauthenticated visitors are redirected to the provider; a **Logout** link appears in the
+header.
 
 ```yaml
 Gui:
@@ -690,64 +633,38 @@ Gui:
 
 ![GUI authentication / OIDC settings](images/gui-oidc.webp)
 
-- Register the redirect URI `https://<your-gui-host>/signin-oidc` with your provider.
-- Provide the client secret out-of-band via **`RPDU2MQTT_OIDC_CLIENT_SECRET`** (or its `_FILE` form)
-  rather than in the config.
-- The GUI honors `X-Forwarded-Proto`/`-Host`, so behind an Ingress/Gateway terminating TLS the
-  redirect URI is built with the external `https` URL.
-- In the GUI form, the **Authentication** dropdown greys out the fields that don't apply to the
-  selected method.
+- Redirect URI: `https://<your-gui-host>/signin-oidc`.
+- Client secret: **`RPDU2MQTT_OIDC_CLIENT_SECRET`** (or its `_FILE` form).
+- `X-Forwarded-Proto` / `-Host` are honoured when building the redirect URI.
+- The GUI **Authentication** dropdown disables fields that do not apply to the selected method.
 
 ### Disabling authentication
-
-For a trusted, isolated network you can turn GUI authentication off entirely:
 
 ```yaml
 Gui:
   Enabled: true
-  AuthType: None   # ⚠️ no login — anyone who can reach the port has full access
+  AuthType: None   # no login: anyone who can reach the port has full access
 ```
 
-**Only** use it where the GUI port is otherwise protected (e.g. a private network or a NetworkPolicy);
-a warning is logged at startup.
+- Use only where the GUI port is otherwise protected (private network, NetworkPolicy).
+- A warning is logged at startup.
 
-The GUI:
-- Renders a **structured form for every option**, generated from the configuration model (so it stays
-  in sync automatically), with inline descriptions, types, and the dynamic Overrides maps.
-- **Tests** the running services — the MQTT section has a "Test MQTT connection" button (broker
-  connectivity) and the PDU section a "Test PDU connection" button (fetches live data and reports the
-  device/outlet counts).
-- **Home Assistant actions** — the Home Assistant section has "Republish discovery" and
-  "Clear discovery" buttons. **Republish** first **reloads the saved config from the source** and
-  re-reads the PDU, so discovery-affecting edits (overrides, names, templates) take effect without a
-  full restart. Clear removes the retained discovery messages so the entities disappear from Home
-  Assistant (until discovery runs again).
-- **Live-driven Overrides** — the Overrides section is populated from the **live PDU data**: it lists
-  the actual devices, outlets (by index), measurement types, and OneView groups currently being
-  discovered, each with Name/ID/Enabled fields, so you can see exactly what an override targets
-  instead of typing keys blind. Existing overrides for entities that are not currently discovered
-  (e.g. disabled ones) are still shown so they can be re-enabled.
-- **Live Data** — a read-only view of the current measurements being pulled from the PDU(s). The
-  **Grouped** view pivots to one row per outlet/entity (grouped by device) with a column per
-  measurement type and the outlet on/off state; a **Flat** view lists one row per reading. Both have a
-  filter and optional 5-second auto-refresh.
-- **Paths** — shows the generated **MQTT topic**, **Prometheus metric**, and **EmonCMS key** for each
-  measurement (reflecting your overrides), with click-to-copy. Prometheus/EmonCMS columns appear only
-  when those exporters are enabled.
-- **Export YAML** — an "Export YAML" view renders the current form state (including unsaved edits) as
-  the `config.yaml` that would be written, with a Copy button, for pasting into a ConfigMap, source
-  control, etc.
-- **Saves** back to this config file (keeping a `config.yaml.bak` copy). Discovery-affecting edits
-  (overrides, names, templates) can be applied by pressing **Republish discovery** (it reloads the
-  config); connection-level changes (MQTT/PDU host/port, GUI/Health ports) still need a restart.
+### GUI features
 
-Notes:
-- Basic auth is sent in clear text, so only expose the GUI on a trusted network or behind a
-  TLS-terminating reverse proxy. Remember to publish/forward the GUI `Port` (e.g. `-p 8080:8080`,
-  or a `ports:` entry in docker-compose).
-- For **Save** to work in a container, the config file must be writable. The example
-  docker-compose mounts it read-only (`:ro`) — drop the `:ro` if you want to edit the config from
-  the GUI:
+| Feature | Behaviour |
+| --- | --- |
+| Settings form | A form for every option, generated from the configuration model, with descriptions, types, and the Overrides maps. |
+| Connection tests | MQTT: "Test MQTT connection" (broker connectivity). PDU: "Test PDU connection" (fetches live data, reports device/outlet counts). |
+| Home Assistant actions | **Republish discovery**: reloads the saved config from the source, re-reads the PDU, republishes. **Clear discovery**: removes retained discovery messages until discovery runs again. |
+| Overrides | Lists the live devices, outlets (by index), measurement types and OneView groups, each with Name/ID/Enabled. Existing overrides for undiscovered entities are also shown. |
+| Live Data | Read-only current measurements. **Grouped**: one row per outlet/entity, grouped by device, a column per measurement type plus on/off state. **Flat**: one row per reading. Filter and optional 5-second auto-refresh. |
+| Paths | Generated **MQTT topic**, **Prometheus metric** and **EmonCMS key** per measurement, with click-to-copy. Prometheus/EmonCMS columns appear only when enabled. |
+| Export YAML | Current form state (including unsaved edits) as `config.yaml`, with Copy. |
+| Save | Writes the config file and keeps `config.yaml.bak`. Discovery-affecting edits (overrides, names, templates) apply on **Republish discovery**. MQTT/PDU host/port and GUI/Health ports need a restart. |
+
+- Basic auth is clear text. Expose the GUI only on a trusted network or behind a TLS-terminating proxy.
+- Publish the GUI `Port` (e.g. `-p 8080:8080`, or `ports:` in docker-compose).
+- **Save** requires a writable config file (no `:ro` mount):
   ```yaml
   services:
     rpdu2mqtt:
@@ -756,48 +673,43 @@ Notes:
       volumes:
         - ./config.yaml:/config/config.yaml   # writable (no :ro) so the GUI can save
   ```
-- "Test" reflects the **currently running** configuration, not unsaved edits — save and restart to
-  test new connection settings.
+- "Test" uses the running configuration, not unsaved edits.
 
 ### GUI with Kubernetes / read-only config
 
-A `config.yaml` mounted from a **ConfigMap** (or any `:ro` mount) is **read-only**, so the GUI
-cannot save to it. In that case the GUI is **view + test only**: it detects the read-only file,
-disables the **Save** button, and shows a notice (a save attempt returns HTTP 409). Viewing the
-config and the MQTT/PDU connection tests still work.
+A `config.yaml` from a **ConfigMap** or any `:ro` mount is read-only:
 
-If you want to edit and persist config from the GUI under Kubernetes, mount `config.yaml` from a
-**writable** volume (e.g. a `PersistentVolumeClaim`) instead of a ConfigMap. Note that GUI edits
-then become the source of truth for that file, which trades off against managing the config
-declaratively (ConfigMap / GitOps). A common pattern is to keep the ConfigMap as the source of
-truth and use the GUI only to view and test.
+- **Save** is disabled and a notice is shown. A save attempt returns HTTP 409.
+- Viewing and the MQTT/PDU connection tests work.
+- To save from the GUI, mount `config.yaml` from a writable volume (e.g. a `PersistentVolumeClaim`).
 
 ### Kubernetes config source (CRD)
 
-Alternatively, store the configuration in an **`RpduConfig` custom resource** instead of a ConfigMap.
-The CR is a writable API object, so the GUI's **Save works** (it PATCHes the CR), config is validated
-by the CRD schema, and a `status` subresource reports health (`kubectl get rpduconfig`). Enable it via
-the Helm chart (`kubernetesConfigSource.enabled=true`) or the manifests in
-[`Examples/Kubernetes/crd/`](../Examples/Kubernetes/crd/); full details in
-[KubernetesCRD.md](KubernetesCRD.md). Saving from the GUI shows a reminder to update your GitOps
-source, and the GUI's **Export** view can render the current config as an `RpduConfig` manifest
-(secrets redacted) to commit back. Credentials are not stored in the CR — provide them via a Secret
-and the `RPDU2MQTT_*` env vars.
+Configuration stored in an **`RpduConfig` custom resource**.
+
+- GUI **Save** PATCHes the CR.
+- Validated by the CRD schema.
+- `status` subresource reports health (`kubectl get rpduconfig`).
+- Enable: Helm `kubernetesConfigSource.enabled=true`, or the manifests in
+  [`Examples/Kubernetes/crd/`](../Examples/Kubernetes/crd/). Details: [KubernetesCRD.md](KubernetesCRD.md).
+- Saving from the GUI shows a reminder to update the GitOps source.
+- The GUI **Export** view renders the config as an `RpduConfig` manifest, secrets redacted.
+- Credentials are not stored in the CR. Supply them via a Secret and the `RPDU2MQTT_*` env vars.
 
 ### GUI Diagnostics page
 
-The GUI's **Diagnostics** tab shows runtime status — app version, container image, uptime, MQTT
-connection, last successful PDU poll, config source, and (in Kubernetes) the namespace/pod. It also
-has a **Restart bridge** button (stops the process so the container/host restarts it) and, when using
-the Kubernetes config source, on-demand **pod logs** and **recent events** (requires the RBAC the Helm
-chart grants — `pods`, `pods/log`, `events`).
+Shows app version, container image, uptime, MQTT connection, last successful PDU poll, config source, and (in
+Kubernetes) namespace/pod.
+
+- **Restart bridge**: stops the process for the container/host to restart.
+- With the Kubernetes config source: **pod logs** and **recent events** (RBAC from the Helm chart: `pods`,
+  `pods/log`, `events`).
 
 ![GUI Diagnostics page](images/gui-diagnostics.webp)
 
 ## Health Checks (Optional)
 
-The bridge exposes lightweight HTTP health endpoints for container/orchestrator probes, enabled by
-default on their own port:
+HTTP health endpoints on their own port. Enabled by default.
 
 ```yaml
 Health:
@@ -807,29 +719,26 @@ Health:
 
 | Endpoint | Meaning |
 | --- | --- |
-| `GET /healthz` | **Liveness** — the process is up (always `200 OK` while running). |
-| `GET /readyz` | **Readiness** — `200` when MQTT is connected and the PDU has been polled recently; otherwise `503`. |
+| `GET /healthz` | **Liveness**: `200 OK` while the process runs. |
+| `GET /readyz` | **Readiness**: `200` when MQTT is connected and the PDU has been polled recently; otherwise `503`. |
 
-The Helm chart wires these as `livenessProbe` / `readinessProbe` automatically (toggle with
-`healthProbes.enabled`, default on). For Docker Compose you can point a `healthcheck` at `/healthz`.
+- Helm: wired as `livenessProbe` / `readinessProbe` (`healthProbes.enabled`, default on).
+- Docker Compose: point a `healthcheck` at `/healthz`.
 
 ## REST API (Optional)
 
-A read-only REST API with OpenAPI + a [Scalar](https://scalar.com/) docs UI, hosted on its own port
-and independent of the GUI. Off by default; intended for monitoring/automation on a **trusted
-network** (it is unauthenticated, like the health endpoints).
+Read-only REST API with OpenAPI and a [Scalar](https://scalar.com/) docs UI, on its own port, independent of
+the GUI. Off by default. Unauthenticated.
 
 ```yaml
 Api:
   Enabled: false        # default
   Port: 8082            # default
-  ApiKey: ""            # optional; set to enable the write/control endpoints (see below)
+  ApiKey: ""            # set to enable the control endpoints
 ```
 
-`ApiKey` can also be supplied out of band as **`RPDU2MQTT_API_KEY`** (or `RPDU2MQTT_API_KEY_FILE`
-pointing at a file, e.g. a Docker/Kubernetes secret), like the other credentials. With the Kubernetes
-config source this is **required** rather than optional: the API key is stripped from the `RpduConfig`
-CR along with every other secret, so it has to come from the environment.
+- `ApiKey` env var: **`RPDU2MQTT_API_KEY`** or `RPDU2MQTT_API_KEY_FILE`.
+- With the Kubernetes config source the env var is required; the key is stripped from the `RpduConfig` CR.
 
 | Endpoint | Description |
 | --- | --- |
@@ -839,16 +748,17 @@ CR along with every other secret, so it has to come from the environment.
 | `GET /api/v1/readings` | Flattened measurements from the latest snapshot(s); filter with `?instance=`. |
 | `GET /openapi/v1.json`, `/scalar/v1` | OpenAPI document + interactive docs UI. |
 
-Browsing to the API port's root (`/`) redirects to `/scalar/v1`. The GUI's **Api** page also links
-straight to these URLs. Because the API listens on its own port, those links only resolve if that port
-is reachable from your browser — in Kubernetes, expose it via the chart's `service: api` route (see
-[the chart README](../charts/rpdu2mqtt/README.md)).
+- `/` redirects to `/scalar/v1`.
+- The GUI **Api** page links to these URLs; the API port must be reachable from the browser. In Kubernetes,
+  use the chart's `service: api` route (see [the chart README](../charts/rpdu2mqtt/README.md)).
 
 ### Control endpoints (opt-in)
 
-Outlet/group control is **disabled unless `Api.ApiKey` is set**. When set, write requests must send a
-matching `X-Api-Key` header, the target instance must exist, and that instance must have
-`ActionsEnabled: true`.
+Enabled only when `Api.ApiKey` is set. Requirements:
+
+- `X-Api-Key` header matching `Api.ApiKey`.
+- The target instance exists.
+- The instance has `ActionsEnabled: true`.
 
 | Endpoint | Body | Description |
 | --- | --- | --- |
@@ -861,120 +771,146 @@ curl -X POST -H "X-Api-Key: $KEY" -H "Content-Type: application/json" \
   http://rpdu2mqtt:8082/api/v1/instances/default/outlets/DEVICE/0/control
 ```
 
-### How settings are labelled
+### Setting labels
 
-A setting's label is its name as words — `PrometheusUrl` reads as "Prometheus URL", `ToleranceSeconds` as
-"Tolerance Seconds" — with initialisms (URL, API, MQTT, PDU, GUI, …) kept upper case. `[Display(Name)]` on
-the property overrides it where the name alone does not read well, and `[SettingGroup("…")]` draws related
-settings in one bordered box: History's four retention settings are grouped that way.
+- Label: the property name as words (`PrometheusUrl` → "Prometheus URL", `ToleranceSeconds` → "Tolerance
+  Seconds"), initialisms (URL, API, MQTT, PDU, GUI, …) upper case.
+- `[Display(Name)]` overrides the label.
+- `[SettingGroup("…")]` draws related settings in one bordered box (e.g. History's four retention settings).
 
 ### Settings without a page
 
-Deployment settings have no page in the GUI. They are set in `config.yaml`, in `values.yaml`, or in the
-`RpduConfig` resource, beside the volume, service, port or container that backs them — all of them are still
-in the schema and the CRD.
+Set in `config.yaml`, `values.yaml`, or the `RpduConfig` resource. All are in the schema and the CRD.
 
-- `Health` (port), `Api` (port, key) and `PlanStorage` (directory, bucket, size limit): the listener or the
-  volume behind each is declared in the deployment, and a second editor in the GUI would disagree with it.
-- `Cache` (endpoint, prefix, timeout): the Valkey/Redis service is part of the deployment.
-- **Feature switches** — what is turned on at all — are set the same way. There is no Features page; each
-  page says where its own switch lives and does not render one.
-- `Debug` (publish to MQTT, print discovery payloads) is on the **Diagnostics** page, beside the runtime
-  state it is used to read.
+- `Health` (port), `Api` (port, key), `PlanStorage` (directory, bucket, size limit).
+- `Cache` (endpoint, prefix, timeout).
+- Feature switches. There is no Features page; each page says where its switch lives.
+- `Debug` (publish to MQTT, print discovery payloads) is on the **Diagnostics** page.
+- A page for a disabled feature is hidden in the nav.
 
-The Diagnostics page also lists every directory this process writes to — history, floor plan images,
-plugins — with what each holds, the file count, the mount it sits on and the free space there. A directory
-that is not there, or that cannot be written to, is marked: both look like data quietly not being kept.
-The Used column is green, amber when the volume has under 10% free, and red under 3% (or 64 MB).
+**Diagnostics storage table:** every directory the process writes to (history, floor plan images, plugins),
+with contents, file count, mount and free space.
 
-The Status board carries a **Storage** card judged by the directory in the worst shape: red when a
-directory is missing, read-only or full, amber when one is nearly full. The plugins directory is only read,
-so it is never faulted for being read-only or on a busy filesystem.
+- Missing or unwritable directories are marked.
+- Used column: green; amber under 10% free; red under 3% (or 64 MB).
 
-A page for a feature that is off stays hidden in the nav until it is turned on, as before.
+**Status board Storage card:** reflects the worst directory. Red: missing, read-only or full. Amber: nearly
+full. The plugins directory is never faulted for read-only or busy filesystems.
 
 ## Energy Flow (Optional)
 
-The **Flow** tab models where your energy actually goes: PDU → outlet links are derived automatically, and
-you add the upstream nodes yourself (panels, breakers, a transfer switch, a "Total"). Every tier's value
-rolls up from its children, and with `MqttExport` on, each tier is published to MQTT and — when HA
-discovery is enabled — appears in Home Assistant as its own device.
+The **Flow** tab models energy distribution.
 
-### The energy balance: what counts as Solar, Grid, Battery and Home
+- PDU → outlet links are derived automatically.
+- Upstream nodes (panels, breakers, a transfer switch, a "Total") are added by hand.
+- Each tier's value rolls up from its children.
+- `MqttExport: true`: each tier is published to MQTT and, with HA discovery, appears as a Home Assistant
+  device.
 
-`EnergyFlow.Balance` names the nodes each headline total is made of. The Energy and Overview pages, Trends,
-self-sufficiency and the Home Assistant Energy Dashboard sync all read it, so they cannot disagree about what
-"solar" is. Each list is summed, and nothing outside the lists counts:
+### Value resolution
+
+A node's value comes from one of:
+
+1. **A measurement**: a bound live source, or a static `Value`.
+2. **Its children**, summed.
+3. **Conservation**: it is the single unmeasured path into a node whose demand is measured.
+
+Otherwise:
+
+- The diagram shows **"no data"**, nothing is published to MQTT / Home Assistant / EmonCMS, and the API
+  returns `null` (not `0`).
+- Several unmeasured feeders into one node all read "no data".
+- `Mode: residual` on a feeder makes it carry the remainder after every measured feeder.
+- A configured node always appears on the diagram, with or without a value.
+
+**Groups** (Nodes tab: id, label, members):
+
+- Shown as one collapsible node on both flow graphs (e.g. three MPPTs as "Incoming PV"), with a toggle to
+  expand.
+- Value: sum of members that have data; "no data" when none do.
+- Members keep their own wiring and export individually.
+- `Parent`: the group it is nested in. A nested group shows only while its parent is expanded.
+- `Expand`: how the group draws when expanded. `replace` (default) shows the members in its place, `parents`
+  draws the members feeding the group node, `children` draws the group node feeding the members.
+- `ExpandChildren`: expanding the group also expands every group nested in it.
+- With `EnergyFlow.MqttExport`, the group publishes its total (`{id}` on the MQTT tier topic, its own Home
+  Assistant sensor).
+
+### Energy balance
+
+`EnergyFlow.Balance` lists the nodes summed into each headline total. Used by the Energy and Overview pages,
+Trends, self-sufficiency and the Home Assistant Energy Dashboard sync. Nodes not listed are not counted.
 
 ```yaml
 EnergyFlow:
   Balance:
-    Solar:   [pv_total]          # the PV total — not the MPPT strings it is made of as well
+    Solar:   [pv_total]          # the PV total, not its MPPT strings as well
     Grid:    [utility_meter]     # one reading of the grid, not the inverter's as well
     Battery: [battery]           # discharge out, charge in
     Home:    [inverter]          # the inverter's load output; empty works it out from the other three
 ```
 
-What a node *is* (its `Kind`) and what it *counts toward* are separate on purpose. A hybrid inverter reports
-solar, battery, grid and load, each on a node of its own, and the node carrying its load output is the home
-total even though it is an inverter. MPPT strings stay `solar` so they are drawn as solar, and are simply
-not listed. Two inverters, two arrays or two battery banks are several entries in one list.
+- A node's `Kind` and its balance total are independent.
+- Multiple inverters, arrays or battery banks: several entries in one list.
+- Set on the **Balance** page (under Energy Flow) or with **Counts toward** on a node. A node counts toward
+  at most one total.
+- A listed id that matches no node is marked on the Balance page.
+- Renaming a node keeps its entry; deleting it removes it.
 
-Set it on the **Balance** page (under Energy Flow), or with **Counts toward** on a node — both edit the same
-list, and a node counts toward one total at most. A listed id that matches no node is marked on the Balance
-page, since that total is then short. Renaming a node in the editor keeps its place; deleting it removes it.
+**All lists empty:**
 
-**With every list empty, totals follow each node's kind, counting each node once** — the rule before the
-Balance existed, so an existing setup looks the same until you set one. A `load` node counts as Home. Where
-one node already holds another — the MPPT strings a PV total is grouped from, a sub-panel beneath its panel —
-adding both would be the same energy twice, so a node another one holds (`within`) is left out. The Balance
-page shows what that rule comes to and can start the lists from it.
+- Totals follow each node's kind, each node counted once. `load` counts as Home.
+- A node held by another (`within`, e.g. MPPT strings under a PV total, a sub-panel under its panel) is
+  excluded.
+- The Balance page shows the result and can seed the lists from it.
 
-**A counter that was re-based is counted from zero.** Some counters re-base — weekly, on a device restart, or
-when a feed is recreated — and a reading lower than the one before it means the count started again. That
-reading is what has run since, so it is counted as the period's figure rather than dropped, and marked: the
-page says how many readings came from a reset, and the table underlines those cells, because whatever ran
-before the reset is gone and the real figure may be higher.
+**Counter resets:** a reading lower than the previous one is treated as a reset and counted from zero as the
+period's figure. The page reports how many readings came from a reset; the table underlines those cells.
 
-**The Trends page also gives the figures as a table** under the charts — a row per day, newest first, with the
-home, solar, battery charged and discharged, grid used and exported, and the net of the meter (used less
-exported). A day nothing reported is empty rather than zero — and a day whose export was not read has no net,
-since the import alone is not one. A column's total says when it is the sum of the days that are known.
+**Trends table** (below the charts): one row per day, newest first: home, solar, battery charged and
+discharged, grid used and exported, and meter net (used less exported).
 
-**The view is the reader's.** A live reading redraws the diagram without touching the zoom or where the pane
-is scrolled to — only **Fit** puts it back to the whole diagram. **Showing** draws one node and everything
-beneath it and nothing else, which is how a phone reads a panel's circuits: what carries something is offered
-(panels, breakers, inverters, PDUs), an end load is not, and the choice holds across a redraw. **Double-click**
-a node to drill into it, the node at the top again to come back out one level, and bare canvas for the whole
-diagram.
+- A day with no reports is empty.
+- A day with no export reading has no net.
+- Column totals say when they sum only the known days.
 
-**A live reading waits while a control is in use.** Redrawing a page rebuilds its controls, which closes a
-dropdown someone has just opened and loses what they were typing. An update that arrives while a select, an
-input or a text box on that page has focus is held and drawn as soon as it is let go — the newest of them,
-not every one that queued. A control left focused does not freeze the page: after a minute the update goes
-through.
+**Diagram view:**
 
-**Right-click a node on the diagram** for a menu about it: **History…** charts what it has been drawing;
-**Drill into this** draws it and what is beneath it alone, with **Out one level** and **Show the whole
-diagram** to come back; **Trace its supply** lights everything upstream of it and dims the rest; and **Edit this node** opens it on
-the Nodes page — disabled for a node the bridge derives from what it polls, which has no entry to edit.
-Escape, or a click anywhere else, closes the menu, and a live reading arriving while it is open is held until
-it closes, so the diagram does not redraw out from under it. A right-click on bare canvas is about the diagram
-instead: clear the trace, fit it to the page, or refresh.
+- Live updates keep the zoom and scroll position. **Fit** resets to the whole diagram.
+- **Showing** draws one node and everything beneath it. Offered for panels, breakers, inverters and PDUs, not
+  end loads. Persists across redraws.
+- **Double-click** a node to drill in; the top node to go up one level; bare canvas for the whole diagram.
 
-The history sheet covers the last hour, 6 hours, 24 hours, 7 days or 30 days, in whichever measurement is
-picked there — watts, amps, VA or today's energy — and says how much of the window is known, the peak and
-when it happened, the average and the latest reading. A moment with no reading is a gap in the line, never a
-zero or a partial sum. Beneath it, **what the tier feeds** is broken out, busiest first, each on a strip of
-its own from the same reading, so where a total went can be read off without asking again — and on the Panel
-Schedule, a double-pole breaker's chart breaks out its two legs the same way. The window you pick is kept for
-the next sheet you open.
+**Updates while a control has focus:** held while a select, input or text box on the page has focus; the
+newest is drawn when focus leaves. After a minute it is drawn anyway.
+
+**Node context menu** (right-click):
+
+| Item | Action |
+| --- | --- |
+| **History…** | Chart of the node's readings. |
+| **Drill into this** | Draw the node and what is beneath it; **Out one level** / **Show the whole diagram** to return. |
+| **Trace its supply** | Highlight everything upstream; dim the rest. |
+| **Edit this node** | Open it on the Nodes page. Disabled for nodes derived from polling. |
+
+- Escape or a click elsewhere closes the menu.
+- Live updates are held while it is open.
+- Right-click on bare canvas: clear the trace, fit, or refresh.
+
+**History sheet:**
+
+- Windows: 1 hour, 6 hours, 24 hours, 7 days, 30 days.
+- Measurements: watts, amps, VA, today's energy.
+- Shows coverage of the window, peak and its time, average, latest reading.
+- Missing readings are gaps.
+- Below: what the tier feeds, busiest first, each on its own strip.
+- Panel Schedule: a double-pole breaker's chart breaks out its two legs.
+- The selected window is kept for the next sheet.
 
 ### Live sources from MQTT
 
-A node doesn't have to be a fixed number. Bind it to a topic that's already on your broker and it becomes a
-live measurement, rolling up and exporting exactly like a PDU outlet does. This is how you pull in a
-producer that rPDU2MQTT doesn't poll itself — **Solar Assistant**, a CT clamp, an inverter bridge.
+Binds a node to a broker topic (e.g. **Solar Assistant**, a CT clamp, an inverter bridge). It rolls up and
+exports like a PDU outlet.
 
 ```yaml
 EnergyFlow:
@@ -994,44 +930,31 @@ EnergyFlow:
   MqttExport: true
 ```
 
-Per-source settings:
-
-| Setting | Purpose |
+| Setting | Value |
 | --- | --- |
-| `Topic` | The topic to subscribe to. Bound live — adding one in the GUI needs no restart. |
-| `Metric` | Which roll-up this feeds (`realpower`, `energy`, …). Bind one topic per metric to drive both power and energy. |
-| `JsonField` | For JSON payloads, the field to read — dotted for nesting (`battery.power`). Blank means the whole payload is the number. |
-| `Scale` | Multiplier for unit conversion (`0.001` for W → kW) or to flip a sign convention (`-1`). |
-| `Accumulation` | For an `energy` source: `lifetime` (default — a cumulative counter whose *rise* is measured) or `period` (the device resets it daily, so the reading already **is** today's total). |
-| `StaleAfterSeconds` | Ignore the value once it's this old (default 900). Stops a dead publisher from propping up the flow with a reading that stopped being true. `0` disables the check. |
+| `Topic` | Topic to subscribe to. Added in the GUI without a restart. |
+| `Metric` | Roll-up it feeds (`realpower`, `energy`, …). One topic per metric. |
+| `JsonField` | JSON field to read, dotted for nesting (`battery.power`). Blank: the whole payload is the number. |
+| `Scale` | Multiplier, e.g. `0.001` for W → kW, `-1` to flip sign. |
+| `Accumulation` | `energy` sources only. `lifetime` (default): cumulative counter, its rise is measured. `period`: the device resets it daily; the reading is today's total. |
+| `StaleAfterSeconds` | Ignore the value once it is this old. Default 900. `0` disables. |
 
-Notes:
+**`Accumulation`:** check each energy topic across a rollover; a daily counter drops, a cumulative one does
+not. Examples: ESPHome `energy_d` / `daily_energy` reset at midnight, `total_energy` does not; Solar
+Assistant `total/…_energy` is cumulative on current versions.
 
-- **Check `Accumulation` on every energy source, and check it against the topic rather than the publisher.**
-  One publisher can do both, and which it does is not visible in the name: ESPHome's `energy_d` /
-  `daily_energy` sensors reset at midnight while its `total_energy` does not, and Solar Assistant's
-  `total/…_energy` family is cumulative on current versions. Do not take either on trust — watch the topic
-  across a rollover, because a daily counter drops there and a cumulative one carries straight on.
-  Both mistakes cost you data, in opposite ways:
-  - A **daily counter declared `lifetime`** is the expensive one. Its rise is measured, so it loses the
-    whole day every midnight (seen live: 2.76 kWh of solar against 27.4 kWh actually generated) — and worse,
-    the export guard reads every subsequent reading as a meter running backwards and publishes *nothing*, so
-    the cumulative sensor sits at `unknown` and Home Assistant's grid/solar/battery sources have no
-    statistic to read. The bridge now says so in the log the first time it catches a `lifetime` counter
-    restarting.
-  - A **cumulative counter declared `period`** is caught by the daily-counter audit and withheld, because a
-    lifetime total displayed as "today" is a confident wrong figure.
-- A live reading **supersedes** the node's fixed `Value`, which stays as the fallback for anything you're
-  modelling by hand. A live `0` is a real reading (solar at night), not a fall-back to `Value`.
-- Negative readings are clamped to `0` — a directed flow graph can't carry a negative, and it would
-  subtract from the roll-up. Use `Scale: -1` if your publisher's sign convention is inverted.
-- Values feed the same exports as everything else, so an MQTT-sourced node reaches Prometheus, the MQTT
-  tier export, and the HA Energy Dashboard without any extra wiring.
+| Misconfiguration | Result |
+| --- | --- |
+| Daily counter set to `lifetime` | Loses the day at each midnight. The export guard then withholds every reading, so the cumulative sensor stays `unknown` and Home Assistant energy sources have no statistic. Logged the first time a `lifetime` counter restarts. |
+| Cumulative counter set to `period` | Caught by the daily-counter audit and withheld. |
 
-### Values worked out from a node's other readings
+- A live reading supersedes the node's `Value`, which is the fallback. A live `0` is a reading.
+- Negative readings are clamped to `0`. Use `Scale: -1` for an inverted sign convention.
+- MQTT-sourced values reach Prometheus, the MQTT tier export and the HA Energy Dashboard.
 
-A meter that reports some of what it measures can have the rest. Add a binding of type `derived` and the
-value is computed from the node's own readings, using the electrical relations and nothing else:
+### Derived values
+
+`Type: derived` computes a metric from the node's other readings:
 
 | Relation | Exact when |
 | --- | --- |
@@ -1039,8 +962,7 @@ value is computed from the node's own readings, using the electrical relations a
 | `P = S × PF` | always |
 | `P = V × I` | only at a power factor of 1 — a DC string, a resistive load |
 
-So **voltage, current, power, apparent power and power factor** can each be worked out from a pair of the
-others:
+Derivable: voltage, current, power, apparent power, power factor.
 
 ```yaml
 EnergyFlow:
@@ -1053,81 +975,60 @@ EnergyFlow:
         - { Type: derived, Metric: current, Direction: split }
 ```
 
-- **The exact relation wins.** With a power factor bound, current resolves as `(P ÷ PF) ÷ V` — reached in
-  two steps — rather than `P ÷ V`, which would under-report it by that factor. Operands may themselves be
-  derived; nothing is ever derived from itself.
-- **An approximation says so.** `P ÷ V` is offered only when nothing better fits, and the node editor prints
-  *assumes a power factor of 1* beside it.
-- **A measured reading always wins.** Bind an ammeter and the arithmetic steps aside.
-- **Both readings are required.** A node whose derived binding has no pair to work from is flagged in the
-  editor, naming the pairs that would do. The value is simply absent — never a zero, never half an answer.
-- A reading of `0` in a divisor, or either reading gone stale, produces nothing, and the Energy and
-  Hierarchy pages say which node and why in the withheld-sources banner.
-- Direction is carried through: `current#in` uses the power flowing that way, over the same bus voltage —
-  voltage and power factor have no direction.
-- The relations are single-phase. A three-phase meter reporting a line voltage needs its own maths, which
-  this does not attempt.
+- Exact relations take priority: with PF bound, current is `(P ÷ PF) ÷ V`, not `P ÷ V`.
+- Operands may be derived; nothing is derived from itself.
+- `P ÷ V` is used only when nothing else fits; the node editor shows *assumes a power factor of 1*.
+- A measured reading overrides a derived one.
+- Both operands are required. A derived binding with no usable pair is flagged in the editor with the pairs
+  that would work; the value is absent.
+- A `0` divisor or a stale operand produces nothing; the Energy and Hierarchy pages name the node and reason
+  in the withheld-sources banner.
+- Direction carries through: `current#in` uses the power flowing that way over the same bus voltage. Voltage
+  and power factor have no direction.
+- Single-phase only. Three-phase line voltage is not supported.
 
-> **Kubernetes:** the CRD no longer enumerates a source's `Type` — the set is open, since plugins contribute
-> types at runtime. If your cluster still has an older CRD, saving a `derived` binding fails with
-> `Unsupported value: "derived"`. Apply the CRD from `charts/rpdu2mqtt/files/rpduconfig-crd.yaml` once and it
-> will not happen again, for this or any future type.
+**Kubernetes:** the CRD does not enumerate source `Type`. With an older CRD, saving a `derived` binding fails
+with `Unsupported value: "derived"`. Apply `charts/rpdu2mqtt/files/rpduconfig-crd.yaml`.
 
 ### Where today's totals are kept
 
-`EnergyFlow.Aggregation` accumulates each node's energy since the period boundary. That state has to
-outlive the process, or every restart starts the day again:
+`EnergyFlow.Aggregation` accumulates each node's energy since the period boundary.
 
 | `Cache.Enabled` | Store | Survives a restart |
 | --- | --- | --- |
 | on | the shared cache (Valkey/Redis) | yes, if the cache persists — the chart's `valkey.persistence` is on by default |
 | off | `energy-totals.json` beside the binary | only if that path is on a volume, which the chart does not mount |
 
-In Kubernetes with the cache off, the file lives in the container's own filesystem, so **every rollout
-loses the day's totals**. On a deployment tracking a moving tag that is several times a day.
-
-When nothing carries over the bridge says so, once, at startup:
+- Kubernetes with the cache off: every rollout loses the day's totals.
+- When nothing carries over, logged once at startup:
 
 ```
 Daily energy totals did not carry over: the file store held nothing. Today's figures accumulate from
 now, not from the period boundary …
 ```
 
-…and the Overview labels the figures `only since HH:MM — totals did not carry over` rather than "since the
-day rolled over". Trends is unaffected: it reads the history backend, which still holds the whole day.
+- The Overview then labels figures `only since HH:MM — totals did not carry over`.
+- Trends reads the history backend and is unaffected.
 
 ### Lifetime counters never go backwards
 
-The `energy` and `energy_in` fields feed sensors declared `state_class: total_increasing`. Home Assistant
-reads a decrease in such a series as a meter reset and records the next reading as a delta from zero, so a
-single dip writes a whole counter into one period.
+`energy` and `energy_in` feed sensors with `state_class: total_increasing`.
 
-A roll-up dips without anything being wrong at the meter: a parent's total is the sum of the links whose
-flow is *known*, so a contributor going stale makes the parent smaller. That figure is the energy of the
-part that happened to be reporting, not the node's energy.
-
-So a value below one already published is **withheld**, and logged once:
+- A value below the last published one is withheld and logged once:
 
 ```
 Holding back main_panel|energy: 9800 is below the 14616.54 already published. …
 ```
 
-The sensor holds its last good value until the reading passes that figure again, which happens by itself
-when the missing contributor comes back — logged as `… is being published again`. A counter that genuinely
-restarts (a replaced meter) stays withheld until it passes its old peak or the bridge restarts; that is the
-safer way round, because the alternative rewrites statistics that cannot be recovered.
-
-`energy_today` is not guarded: it re-bases every period by design, and that reset is one Home Assistant
-handles correctly.
+- The sensor holds its last value until the reading passes it, then logs `… is being published again`.
+- A counter that genuinely restarts (a replaced meter) stays withheld until it passes its old peak or the
+  bridge restarts.
+- `energy_today` is not guarded.
 
 ### Repairing Home Assistant statistics
 
-A tier's `energy` field feeds a sensor declared `state_class: total_increasing`. Home Assistant reads a
-drop in such a series as a meter reset and takes the next reading as a delta from zero, so anything that
-makes the value fall records a whole counter as one period's usage.
-
-If the Energy dashboard shows megawatt-hours a day, the statistics already stored have to be cleared —
-fixing the publisher stops new corruption but cannot repair what the recorder wrote:
+For Energy dashboard values in megawatt-hours a day (a `total_increasing` sensor that dropped), clear the
+stored statistics:
 
 ```bash
 pip install websockets
@@ -1138,41 +1039,32 @@ python3 scripts/ha-clear-energyflow-statistics.py --dry-run   # list what would 
 python3 scripts/ha-clear-energyflow-statistics.py --yes       # clear it
 ```
 
-It touches only `sensor.energyflow_*` — the sensors this bridge publishes. The same thing can be done by
-hand in **Developer tools → Statistics**, which offers to fix or clear one entity at a time.
-
-Run it *after* the corrected build is live, or the next bad reading lands on top of the corrected total.
+- Affects only `sensor.energyflow_*`.
+- Manual alternative: **Developer tools → Statistics**, one entity at a time.
+- Run after the corrected build is live.
 
 ### Live sources from Modbus TCP
 
-A node's value can also come from a Modbus TCP device (an inverter, a meter, a PLC). Define the connection
-once under `Modbus`, then bind a node's metric to a register — same live-value seam as MQTT (polled by the
-worker, rolled up and exported identically).
+Define the connection under `Modbus`, then bind a node's metric to a register. Polled by the worker; rolls up
+and exports like MQTT sources.
 
-Each connection has a **`Framing`**:
+`Framing` per connection:
 
-- **`auto`** (default) — try native Modbus TCP, then Modbus RTU over TCP, and use whichever the device
-  actually answers. You normally don't have to think about it. (The resolved framing is remembered per
-  connection so it isn't re-probed every poll.)
-- **`tcp`** — pin native Modbus TCP (a device/gateway that speaks Modbus/TCP directly, usually port 502).
-- **`rtu-over-tcp`** — pin Modbus RTU frames over a raw TCP socket. This is what most **RS485-to-Ethernet
-  gateways / serial dongles** speak (e.g. an **EG4** inverter reached on port 4196/8899).
+| Value | Framing |
+| --- | --- |
+| `auto` | Default. Tries native Modbus TCP, then Modbus RTU over TCP; uses whichever answers. The result is remembered per connection. |
+| `tcp` | Native Modbus TCP (usually port 502). |
+| `rtu-over-tcp` | Modbus RTU frames over raw TCP. Most RS485-to-Ethernet gateways (e.g. an **EG4** inverter on port 4196/8899). |
 
-If a connection *connects* but every register reads as an error, it's the framing — `auto` handles that for
-you; pin one only if you want to skip the detection.
-
-**One poller per device.** Many RS485-to-Ethernet gateways accept only **one TCP client at a time**, so the
-Modbus poller runs **only in the Worker role** — in a split deployment the API/UI don't poll the device
-themselves (they'd contend with the worker and each other, and reads would time out). The Nodes editor shows
-each binding's value from the shared live cache the worker fills; the **"Test device read"** button opens a
-one-off connection to check a binding before it's saved — use it sparingly if your gateway is single-client,
-since it briefly competes with the worker's poll.
+- Connects but every register errors: wrong framing.
+- The Modbus poller runs **only in the Worker role**.
+- The Nodes editor shows values from the shared live cache.
+- **"Test device read"** opens a one-off connection to check an unsaved binding. On a single-client gateway it
+  competes with the worker's poll.
 
 ### Live sources from EmonCMS feeds
 
-If a circuit is already metered by something that posts to EmonCMS — an IotaWatt, an emonTx, an emonPi — the
-number is already sitting in a feed, and it can value a flow node directly. Set `Type: emoncms` on the
-binding and name the feed:
+`Type: emoncms` binds a node to an EmonCMS feed (e.g. from an IotaWatt, emonTx, emonPi).
 
 ```yaml
 EnergyFlow:
@@ -1193,98 +1085,207 @@ EmonCMS:
     PollIntervalSeconds: 30
 ```
 
-**Naming the feed.** A bare name is resolved against the server's feed list, so the binding survives a
-re-provision that renumbers the feed. EmonCMS names are only unique *within a tag*, though — `energy` may
-well exist under both `solar` and `grid`. An ambiguous name is reported as ambiguous and reads as nothing
-rather than silently binding to whichever came back first; qualify it as `tag/name`, or use the numeric id.
-The Nodes editor's **Browse…** button lists the server's feeds with their current values and picks the right
-form for you.
+**`Feed`:**
 
-**What it needs.** Only `EmonCMS.Url` and an API key that can read feeds. `EmonCMS.Enabled` switches the
-*export* on and is not required here — reading a neighbouring EmonCMS you push nothing to is an ordinary
-setup. The poll itself only runs when something is actually bound to a feed.
+- Bare name: resolved against the server's feed list.
+- Names are unique only within a tag. An ambiguous name is reported and reads as nothing; use `tag/name` or the
+  numeric id.
+- The Nodes editor **Browse…** button lists feeds with current values and fills in the right form.
 
-**One request per poll.** The whole poll is a single `/feed/list.json`, however many feeds are bound. That
-call also carries each feed's own timestamp, and **that** is what freshness is judged against — not the
-moment the poll ran. A dead IotaWatt leaves its last reading in the feed forever, and a node whose feed
-stopped updating goes to "no data" on its `StaleAfterSeconds` rather than propping the hierarchy up on a
-number that stopped being true overnight.
+**Requirements:** `EmonCMS.Url` and an API key that can read feeds. `EmonCMS.Enabled` (export) is not
+required. The poll runs only when a feed is bound.
 
-Units, `Scale`, `Direction` (including `split`), `Accumulation` and the daily-counter audit all behave
-exactly as they do for an MQTT or Modbus binding — a feed's value is indistinguishable downstream from any
-other source. If EmonCMS records a unit for the feed it is converted to the metric's canonical unit on the
-way in; set the binding's own `Unit` to override a mislabelled feed.
+**Polling:**
+
+- One `/feed/list.json` request per poll.
+- Freshness uses each feed's own timestamp. A feed that stops updating goes to "no data" after
+  `StaleAfterSeconds`.
+
+- Units, `Scale`, `Direction` (including `split`), `Accumulation` and the daily-counter audit behave as for
+  MQTT or Modbus bindings.
+- A feed's recorded unit is converted to the metric's canonical unit. The binding's `Unit` overrides it.
 
 ### Live sources from Home Assistant entities
 
-The same seam, pointed at an HA entity: `Type: homeassistant` with the entity id in the binding's
-`Settings.Entity`, read over the REST API using `HomeAssistant.EnergyDashboard.Url` and a long-lived access
-token. Useful when the thing measuring a circuit is already in Home Assistant through some other
-integration. An entity that is `unavailable` or non-numeric supplies nothing — never zero.
+- `Type: homeassistant`, entity id in `Settings.Entity`.
+- Read over the REST API using `HomeAssistant.EnergyDashboard.Url` and a long-lived access token.
+- An entity that is `unavailable` or non-numeric supplies nothing.
+
+### Live sources from Tigo optimizers (plugin)
+
+Per-panel readings from Tigo TS4 optimizers, read from the TAP's RS485 bus.
+
+- Hardware: an RS485-to-Ethernet gateway in raw TCP mode, 38400 baud, 8N1.
+- Plugin: `plugins/rPDU2MQTT.Plugin.Tigo`, loaded from `bundled-plugins/tigo/`.
+- Protocol: from [openTAPtoX](https://github.com/jontubs/openTAPtoX) (MIT). Not a Tigo API.
+
+**GUI:** Sources → **Tigo TAP**. Add a connection under **Connections**, then Save.
+
+**YAML:**
+
+```yaml
+Plugins:
+  tigo:
+    Enabled: true
+    StaleSeconds: 180
+    Connections:
+      - Id: roof
+        Host: 192.168.1.50
+        Port: 4196
+        Mode: Listen
+```
+
+| Setting | Default | Value |
+|---------|---------|-------|
+| `Enabled` | `false` | Read Tigo optimizers. |
+| `StaleSeconds` | `180` | Seconds after an optimizer's last report that its reading stops being current. While the TAP still answers, a stale optimizer reads 0 W. |
+| `Connections` | `[]` | One entry per TAP bus. |
+
+Per connection:
+
+| Setting | Default | Value |
+|---------|---------|-------|
+| `Id` | | Stable id, e.g. `roof`. |
+| `Name` | | Friendly name. |
+| `Enabled` | `true` | Read this bus. |
+| `Host` | | Gateway address. |
+| `Port` | `4196` | Gateway raw TCP port. Waveshare: `4196`. USR-TCP232: `8899`. |
+| `Mode` | `Listen` | `Listen` or `Poll`. |
+| `GatewayId` | blank | Poll only. TAP gateway id in hex, e.g. `1209`. Blank: learned from the bus. |
+| `PollIntervalMs` | `1000` | Poll only. Milliseconds between polls. |
+| `AmpsScale` | `0.0056` | Amps per count of the input-current field. |
+
+| Mode | Bus | Transmits |
+|------|-----|-----------|
+| `Listen` | A Tigo CCA polls the TAP; the bridge reads the traffic. | Never |
+| `Poll` | No CCA; the bridge polls the TAP and pages its node table. | Yes. Stops if another controller is heard. |
+
+- **Names.** An optimizer is named by its serial once a node table or topology report is seen. Before that it
+  shows as `node-<gateway>-<n>`.
+- **Lease.** Each connection holds the single-owner lease keyed by `host:port`. Other replicas show Standby.
+- **Restarts.** With `Cache.Enabled`, optimizer names and last readings are kept in Valkey/Redis, so a restart
+  doesn't need the CCA to resend its node table.
+- **Readings.** Input volts, input amps, power (vin × iin), output volts, temperature, duty, RSSI.
+
+**Solar Array page** (Energy Flow → **Solar Array**):
+
+- Strings with their panels in wiring order. Each panel shows Power, Volts, Amps or Temp.
+- Marked: low panels (power under 0.75× the string median) and quiet panels.
+- Click a panel: its history.
+- **Point in time** (needs `History.Enabled`): a timeline of the strings over 1 hour to 7 days, ending today or a picked day; click or drag on it to show every panel and string as recorded then.
+- **Edit**: drag panels to reorder them or move them to another string; drag a string by ⠿ (or use ‹ ›) to reorder strings; rename panels and strings; set each string's MPPT.
+- Unassigned optimizers are listed below the strings. Adding one creates:
+  - a panel: a `solar` node with `Type: tigo` sources for `realpower`, `voltage`, `current` and
+    `temperature`, `Settings.Optimizer: <serial>`;
+  - a link panel → string;
+  - a string: a `solar` node tagged `pv-string`, linked string → MPPT node.
+- `Optimizer` also accepts the label serial (`4-DFA5A5Y`).
+- **Edit** also assigns a panel type, per panel or for a whole string. Strings with typed panels show rated
+  Voc (sum), Isc (highest) and kWp at STC.
+
+**Panel Types page** (Energy Flow → **Panel Types**): module datasheets, stored under `Plugins.tigo.PanelTypes`.
+
+```yaml
+Plugins:
+  tigo:
+    PanelTypes:
+      - { Id: rec-405, Manufacturer: REC, Model: Alpha Pure 405, Watts: 405, Voc: 44.9, Isc: 11.4, Vmp: 37.6, Imp: 10.78 }
+```
+
+A panel's type is `Settings.PanelType: <Id>` on its `tigo` sources.
+
+**MPPT limits** (Solar Array → Edit → MPPTs): per MPPT, max input voltage, MPPT voltage range, max usable current
+and max short-circuit current; plus the site's coldest temperature. Each string is checked against its MPPT:
+
+| Check | Level |
+|---|---|
+| Voc (at the coldest temperature when every panel type has a Voc coefficient, else STC) over max input voltage | error |
+| Voc within 5% of max input voltage | warning |
+| Vmp outside the MPPT range | warning |
+| Isc of the MPPT's parallel strings over max short-circuit current | error |
+| Imp of the MPPT's parallel strings over max usable current (clipping) | warning |
+
+```yaml
+Plugins:
+  tigo:
+    DesignMinTempC: -15
+    Mppts:
+      MPPT_2: { MaxVoltage: 600, MinMpptVoltage: 120, MaxMpptVoltage: 500, MaxCurrent: 15, MaxShortCircuitCurrent: 19 }
+```
+
+**Flow group per string** (Edit) keeps one `EnergyFlow.Groups` entry per string, its panels as members, nested
+in the group holding its MPPT. Stored as `Plugins.tigo.GroupPanels: true`.
+
+**Hidden** (Edit, per string) sets the string node's `Hidden`: off this page outside Edit and off the flow diagrams.
+
+Per-string columns, set in **Edit**:
+
+```yaml
+Plugins:
+  tigo:
+    Strings:
+      pv_a1: { Columns: 4 }
+```
+
+Panels without optimizers are counted per string, set in **Edit** ("Without optimizers"), drawn as placeholders
+and included in the rating:
+
+```yaml
+Plugins:
+  tigo:
+    StringPanels:
+      pv_a1: { PanelType: jinko-jkm410m-72h, Panels: 4 }
+```
 
 ### Device templates (Nodes tab → "Import device template")
 
-Rather than wire a known device register-by-register, the **Nodes** tab can import a ready-made template:
-pick the device, give it an id prefix and (for Modbus) its host/IP, and it drops in the Modbus connection
-plus pre-wired nodes (solar / battery / grid / inverter) with the register bindings filled in. Review and
-**Save** afterwards.
+Imports a Modbus connection and pre-wired nodes (solar / battery / grid / inverter) with register bindings.
 
-> Register maps are **community starting points** and vary by model and firmware — verify the addresses and
-> scales against your own device. Each imported binding notes the register it maps, and the template links
-> its source. Included today: **EG4 FlexBoss 21**. More can be added — paste a device's register table and
-> it can be turned into a template.
+- Inputs: device, id prefix, and (for Modbus) host/IP.
+- Review and **Save** afterwards.
+- Register maps vary by model and firmware; verify addresses and scales. Each binding notes its register; the
+  template links its source.
+- Included: **EG4 FlexBoss 21**.
 
 ### Gauges
 
-A node with a **Gauge max** set gets a dial on the Energy page showing its reading as a proportion of that
-maximum — a PV array's peak output, an inverter's rating, a main breaker's size. Set it per node on the
-**Nodes** tab (solar, battery, grid, load and inverter kinds).
+**Gauge max** on a node (solar, battery, grid, load and inverter kinds; **Nodes** tab) shows a dial on the
+Energy page: reading as a proportion of that maximum.
 
-Leave it blank and the tile shows the plain reading instead. **No ceiling is ever inferred**: deriving one
-from the highest value seen would redefine "full" on the first spike and make the same needle position mean
-something different tomorrow. A reading past the maximum draws full and is flagged rather than running off
-the end — the reading isn't wrong, the stated maximum is too low, and those are different problems.
+- Blank: the tile shows the plain reading. No maximum is inferred.
+- A reading above the maximum draws full and is flagged.
 
-### Nothing is computed behind your back
+### Inferred values
 
-Every number the flow shows is either measured, summed from measured children, or **inferred** — and the
-diagram says which. An inferred value is labelled `· inferred` on the chart and explained in the hover card;
-it is never rendered the way a metered reading is.
+Every flow value is measured, summed from measured children, or **inferred**. Inferred values are labelled
+`· inferred` on the chart and explained in the hover card.
 
-Two behaviours compute rather than read, and both are switches you can see on the **Flow** tab under
-*Energy roll-up*:
+**Flow** tab, *Energy roll-up*:
 
 | Switch | What it does | Default |
 | --- | --- | --- |
 | Derive kWh from power | Integrates watts over time for nodes with no energy counter. An estimate — a real energy source always wins. | Off |
 | Infer from a single supply path | Fills in an unmeasured node from what it feeds, when only one of several possible routes could have supplied it. | On |
 
-The second one is worth understanding. When a node has exactly **one** feeder, propagating demand up it is
-arithmetic, not a guess — a PDU's total is its outlets' — and that is always done. When a node has
-**several** feeders and all but one are ruled out (by `Mode: none`, or by their source having gone silent),
-picking the survivor is a claim about the hierarchy you drew rather than anything measured. That is what this
-switch governs, and what gets labelled `inferred`. Turn it off and such a node reads "no data" instead;
-plain roll-ups are unaffected either way.
+- A node with exactly one feeder always propagates demand up it (e.g. a PDU's total is its outlets').
+- *Infer from a single supply path* applies when a node has several feeders and all but one are ruled out
+  (`Mode: none`, or a silent source). Off: such a node reads "no data".
 
 ### Energy today vs. energy lifetime
 
-Two cumulative counters can only be compared if they started counting at the same moment, and the ones on
-your system did not. A PDU's `energy` measurement comes from firmware and has been running since the unit
-was commissioned; a node's comes from whenever you bound its source. Put both on one diagram and the
-arithmetic breaks in a way that looks like a bug in the chart:
+| View | Counts from |
+| --- | --- |
+| `Energy, lifetime (kWh)` | Each counter's own start: PDU firmware commissioning, or when a node's source was bound. Not comparable across nodes. Used by Home Assistant and EmonCMS history. |
+| **Energy today (kWh)** | The period boundary (local midnight by default), for every node and outlet. Sums across tiers. |
+
+Selected in the Flow tab's *Show* selector.
+
+Example of lifetime counters that do not reconcile:
 
 ```
 EG4 FlexBoss 21 · 740 kWh  ──▶  Main Panel · 8,358.187 kWh  ──▶  Rack-PDU-1 · 7,371.006 kWh
                                                              └─▶  Rack-PDU-2 ·   987.181 kWh
 ```
-
-The right-hand side adds up exactly. The panel and its feeder disagree by a factor of eleven — not because
-anything is measured wrong, but because 740 and 8,358 are counted from different years.
-
-**Daily totals fix this.** Every node and outlet is re-based at local midnight, so every figure covers the
-same window and legitimately sums. Pick **"Energy today (kWh)"** in the Flow tab's *Show* selector; it is
-the energy view whose numbers reconcile. `Energy, lifetime (kWh)` is still there — it is what Home Assistant
-and EmonCMS have recorded history against, and it is unchanged.
 
 ```yaml
 EnergyFlow:
@@ -1294,73 +1295,52 @@ EnergyFlow:
     PeriodStartHour: 0              # 0 = midnight. 6 for a utility day that runs 06:00–06:00.
 ```
 
-All three are edited on the **Flow** tab, under *Energy roll-up* (`EnergyFlow` is hidden from the generic
-config form, since the Flow/Nodes editors replace it). `PeriodTimeZone` is a dropdown of the zones the server
-can actually resolve — one that isn't listed wouldn't resolve at runtime either. The server's own clock and
-the next rollover are shown right beneath it, and again on **Diagnostics**. Worth checking once: the boundary
-is the server's clock, not your browser's.
-
-Notes:
-
-- **Not an estimate.** For an outlet — or any node bound to a real `energy` source — the daily figure is the
-  *rise* of that counter since midnight: measured, not inferred, and independent of `Aggregation.Enabled`.
-  A node that reports only power is the exception: there is no counter to take a rise of, so it needs
-  `Aggregation.Enabled: true` to be integrated first. That stays opt-in because an integral of watts
-  genuinely is an estimate.
-- **Set `PeriodTimeZone`** (or `TZ` on the container). A day that rolls over at UTC midnight is not the day
-  you or your utility are looking at. Diagnostics flags it in amber while it's unset, and in red if the zone
-  you named doesn't exist on the server.
-- A counter that goes backwards — a PDU reboot, a firmware clear — is treated as a reset, and the energy
-  recorded before it is kept rather than subtracted.
-- Unlike integration, a gap loses nothing: if a PDU is unreachable for an hour its counter kept running, so
-  the whole hour arrives in the next reading.
-- Nodes bound today are only incomparable until the next rollover, not forever.
-- With `MqttExport` on, each tier also publishes `energy_today` and gets an **Energy today** sensor in Home
-  Assistant (`total_increasing`, so HA reads the midnight drop as the start of a new day).
-- Prometheus exports every tier as `rpdu2mqtt_flow_realpower`, `rpdu2mqtt_flow_energy` and
-  `rpdu2mqtt_flow_energytoday`, labelled `node` / `name` / `kind` / `tier`. A tier nothing determines is
-  **absent** from the scrape rather than scraped as `0`, so a dashboard shows a gap instead of a reading
-  nobody took.
-- Where two sides of a node still can't both be true, the diagram marks the node **⚠** and the hover card
-  says how much more leaves it than arrives. On lifetime energy that is expected; on `Energy today` it means
-  a feeder is missing or not reporting.
+- Edited on the **Flow** tab, *Energy roll-up*. `EnergyFlow` is hidden from the generic config form.
+- `PeriodTimeZone` is a dropdown of the zones the server can resolve.
+- The server clock and next rollover are shown below it and on **Diagnostics**. The boundary uses the
+  server's clock.
+- Set `PeriodTimeZone` (or `TZ` on the container). Diagnostics shows amber while unset, red if the zone does
+  not exist on the server.
+- Outlets and nodes bound to an `energy` source: the daily figure is the counter's rise since the boundary,
+  independent of `Aggregation.Enabled`.
+- Nodes with only power need `Aggregation.Enabled: true` (an integral estimate).
+- A counter that goes backwards (PDU reboot, firmware clear) is treated as a reset; energy before it is kept.
+- A gap loses nothing: the counter's rise arrives with the next reading.
+- Nodes bound today become comparable after the next rollover.
+- With `MqttExport`, each tier publishes `energy_today` and gets an **Energy today** Home Assistant sensor
+  (`total_increasing`).
+- Prometheus: `rpdu2mqtt_flow_realpower`, `rpdu2mqtt_flow_energy`, `rpdu2mqtt_flow_energytoday`, labelled
+  `node` / `name` / `kind` / `tier`. An undetermined tier is absent from the scrape.
+- A node whose outflow exceeds its inflow is marked **⚠**; the hover card shows the difference. On
+  `Energy today` this means a feeder is missing or not reporting.
 
 ### Panels and breakers
 
-The **Panel Schedule** page holds the panel directory: each breaker's number, rating, wire, what it feeds, and
-the CT clamp and monitor channel measuring it. Two things follow from that mapping on their own.
+The **Panel Schedule** page holds the panel directory: each breaker's number, rating, wire, what it feeds,
+and the CT clamp and monitor channel measuring it.
 
-**Every mapped breaker is a tier of the energy flow**, and never two nodes for one circuit:
+**Breakers as energy-flow tiers:**
 
-- A breaker measured by **one** channel **is** that channel. A tier above a single channel would carry the same
-  reading twice under two names, so the channel stays as the circuit and the panel feeds it directly. If the
-  channel is named after itself (`n30_1_5`), it takes the name of the breaker measuring it — an input number is
-  not a circuit — while a name someone has given it is left alone.
-- A breaker on **two** channels (a double-pole with a clamp per leg) is a node of its own,
-  `breaker:<panel>:<number>`, above both legs and worth their sum. With a leg not reading it is **unknown**,
-  never half of itself.
-- A breaker that **names a node** (`Node`) is that node, whatever measures it.
-- An identified breaker **nobody measures** is a tier of its own with no value, rather than a zero. An unused
-  slot is not a tier at all.
+| Breaker | Tier |
+| --- | --- |
+| Measured by **one** channel | The channel itself; the panel feeds it directly. A self-named channel (`n30_1_5`) takes the breaker's name; a user-given name is kept. |
+| Measured by **two** channels (double-pole, a clamp per leg) | Its own node `breaker:<panel>:<number>` above both legs, worth their sum. Unknown if a leg is not reading. |
+| Names a node (`Node`) | That node. |
+| Identified, not measured | Its own tier, no value. |
+| Unused slot | No tier. |
 
-Its label is what the directory says it feeds, so renaming the breaker renames the tier. Because these are
-ordinary nodes, per-breaker power and energy reach the diagram, Home Assistant, EmonCMS and Prometheus without
-being wired by hand. Where the schedule used to wire the panel straight to a channel, that link is dropped when
-a breaker sits in between, so nothing is counted twice.
+- The tier label is what the directory says the breaker feeds.
+- Per-breaker power and energy reach the diagram, Home Assistant, EmonCMS and Prometheus.
+- A direct panel → channel link is dropped when a breaker sits between them.
 
-**Which node a panel is.** The *This panel is* picker offers nodes of kind **panel** only — a channel or a
-breaker is not a panel — and not one another panel in the directory already is. A node already recorded stays
-in the list, marked, so opening the page never re-points a panel on its own.
+**This panel is** picker: nodes of kind **panel** not already assigned to another panel. An already-recorded
+node stays listed, marked.
 
-**What can measure a breaker.** The channel picker offers every node the bridge reads, including a subpanel —
-a breaker feeding one is measured by the CT on its feed. It does not offer the panels of the directory, the
-nodes feeding them, or a breaker's own tier, none of which read anything for the breaker. A channel already
-recorded that the bridge has stopped reading is kept in the list rather than dropped, so applying an edit never
-silently clears a mapping.
+**Channel picker:** every node the bridge reads, including subpanels. Excludes the directory's panels, the
+nodes feeding them, and breaker tiers. A recorded channel the bridge no longer reads stays listed.
 
-**The mapping is checked against itself and against the readings**, on the page and in Diagnostics
-(`panelFindings`). Each finding names the breakers and channels involved and leads to them; nothing is changed
-for you:
+**Checks** (on the page and in Diagnostics as `panelFindings`; each names the breakers and channels; nothing is
+changed automatically):
 
 - a channel mapped to more than one breaker,
 - a channel drawing power that no breaker is mapped to,
@@ -1371,37 +1351,38 @@ for you:
 - a panel fed from more than one place,
 - a circuit fed from somewhere besides its panel, so it hangs off the graph twice.
 
-**A panel is fed from one place.** Two feeders split its power across both on the diagram and count a supply
-that is not there. The wiring editor refuses a second feeder into a panel — drop the one that is there first —
-and the panel's own **Fed by** on the Panel Schedule page takes one. Any that are already in a config are
-reported rather than silently dropped, since nothing here rewrites your wiring for you.
+**One feeder per panel.** The wiring editor refuses a second feeder into a panel; the Panel Schedule **Fed by**
+takes one. Existing extra feeders are reported, not removed.
 
-**A directory you already keep can be pasted in.** **Import…** takes the panel directory as it is written —
-breaker number, wire label, monitor channel and what the breaker feeds, in whatever order the line carries
-them, with `????` for a circuit nobody has identified and `Unused` for an empty slot — and shows what every
-line was read as before anything is written: new, an update to the breaker already there, or a clash with a
-slot already held, which is left alone. A line that could not be read is shown and can be corrected in place,
-and a channel no node answers to is flagged rather than mapped. Applying writes into the directory the page is
-holding; nothing is kept until **Save**.
+**Import…** parses a pasted panel directory:
 
-**An unknown breaker can be traced.** **Trace…** records what every channel is drawing, waits while you switch
-the breaker off, and names the channel that went dark, with what it fell from and to. Taking the answer maps
-the breaker to it and marks it identified; a channel already recorded against another breaker is flagged
-rather than quietly taken, and a 240 V circuit drops both legs at once, so both can be taken together. A
-circuit drawing nothing when the baseline was taken cannot be told apart from one that is off, and the page
-says so instead of guessing — switch its load on and trace again. A channel that stopped reporting altogether
-is not a channel that went dark, so it is never offered as the answer.
+- Fields: breaker number, wire label, monitor channel, what it feeds, in any order. `????`: unidentified.
+  `Unused`: empty slot.
+- Preview per line: new, update, or clash with an occupied slot (left alone).
+- Unparsed lines can be corrected in place. A channel matching no node is flagged.
+- Applying writes into the page's directory; **Save** persists.
 
-**It prints for the inside of the panel door.** **Print…** lays the directory out as the panel is — odd slots
-down the left, even down the right, numbers up the middle — with each breaker's wire, rating and what it
-feeds. A slot nobody has identified prints as unknown rather than blank, and the second slot of a double-pole
-says which breaker holds it. A 42-slot panel fits one letter or A4 page.
+**Trace…** identifies a breaker's channel:
+
+1. Records every channel's draw.
+2. Waits while the breaker is switched off.
+3. Names the channel that went dark, with before/after values.
+
+- Accepting maps the breaker and marks it identified.
+- A channel already mapped to another breaker is flagged.
+- A 240 V circuit drops both legs; both can be accepted together.
+- A circuit drawing nothing at baseline cannot be traced; switch its load on and retry.
+- A channel that stopped reporting is never offered.
+
+**Print…** lays the directory out as the panel: odd slots left, even right, numbers in the middle, with each
+breaker's wire, rating and load. Unidentified slots print as unknown; a double-pole's second slot names its
+breaker. A 42-slot panel fits one letter or A4 page.
 
 ### Floor plans
 
 The **Floor Plans** page (under Energy Flow) draws each floor at real size: rooms and outdoor zones, doors and
-windows, the outlets, lights, appliances, panels, meters and utility poles placed on it, and the cable runs between
-them. **View** shades each room by what it draws now, today, or this week. **Edit** brings up a tool palette:
+windows, outlets, lights, appliances, panels, meters and utility poles, and cable runs. **View** shades each
+room by its draw now, today, or this week. **Edit** shows the tool palette:
 
 | Tool | Key | What it does |
 | --- | --- | --- |
@@ -1417,56 +1398,94 @@ them. **View** shades each room by what it draws now, today, or this week. **Edi
 | Constrain | K | Tap corners or walls, then hold them: two corners coincident; two walls in line, parallel or square; a wall level, plumb or at a fixed length; a corner at an angle. |
 | Measure | M | Tap two points to measure between them, and set the plan's scale from a distance you know. |
 
-The wheel zooms about the pointer and Shift+wheel pans; a pinch zooms on a tablet; the middle button, or holding Space, pans while any tool is in hand. **Floor settings › Arrange** centres the drawing on its plot, or fits the plot to the drawing. Ctrl+Z undoes and Ctrl+Y (or Ctrl+Shift+Z) redoes every change on the page; Delete removes the selection; Esc stops
-drawing. The page is built for a tablet carried round the house: pinch to zoom, drag to pan, and below a laptop's
-width the tools run across the top and the side panel drops below the plan.
+**Navigation and editing keys:**
 
-**Sizes.** Distances read in feet and inches or metres and centimetres, as **GUI › Distance units** says (`auto`
-follows the browser's language). Anywhere a length is typed, `12' 6"`, `12ft 6in`, `12 6`, `150"`, `3.75 m`,
-`3m 75cm` and `375 cm` all work; a bare number is feet or metres. A rectangular room is sized by width and depth; any
-other outline wall by wall. Tick **Sizes** to show every wall's length and each room's floor area.
+- Wheel: zoom about the pointer. Shift+wheel: pan. Pinch: zoom. Middle button or Space: pan with any tool.
+- Ctrl+Z: undo. Ctrl+Y or Ctrl+Shift+Z: redo. Delete: remove the selection. Esc: stop drawing.
+- **Floor settings › Arrange**: centre the drawing on its plot, or fit the plot to the drawing.
+- Below laptop width the tools run across the top and the side panel drops below the plan.
 
-**Scale.** Each floor keeps its drawing units per metre (`Scale`, default 100, so one unit is a centimetre). After
-uploading a plan image, use **Measure** on a wall or doorway you know and type its real length; every size on the
-floor then reads true.
+**Sizes.** Units follow **GUI › Distance units** (`auto` follows the browser's language). Accepted input:
+`12' 6"`, `12ft 6in`, `12 6`, `150"`, `3.75 m`, `3m 75cm`, `375 cm`; a bare number is feet or metres.
+Rectangular rooms are sized by width and depth, other outlines wall by wall. **Sizes** shows every wall's
+length and each room's floor area.
 
-**Outdoors.** An item placed outside every room is outdoors on its floor — an exterior light, a yard outlet, the
-meter, the pole — and counts toward the floor's total. Outdoor zones are rooms marked `Outdoor`, and count like one.
+**Scale.** `Scale`: drawing units per metre, default 100 (one unit = 1 cm). After uploading a plan image, use
+**Measure** on a known distance and enter its real length.
 
-**Circuits at a glance.** Tapping an item or a wire, in View or Edit, brings its whole circuit forward — every item and wire on it, and the rooms it serves — and fades the rest.
+**Outdoors.** An item outside every room is outdoors on its floor and counts toward the floor's total.
+Outdoor zones are rooms marked `Outdoor`.
 
-**GFCI outlets.** Tick *GFCI outlet* on an outlet (or keep *GFCI* on while placing them). Wires run from the supply side to the load side, shown by an arrow and reversible from the wire's panel, so what is downstream of a GFCI is everything its wires lead to. Selecting the GFCI lists and lights up everything it protects; a protected outlet says which GFCI protects it, and carries a green dot when the wiring is shown.
+**Circuits.** Tapping an item or wire (View or Edit) highlights its circuit: every item and wire on it and the
+rooms it serves.
 
-**Shared walls.** Corners that sit on top of one another belong to every room that meets there: dragging one moves it in all of them, and dragging a wall's middle dot slides the whole wall, with its neighbour following. Hold Alt to pull a shared corner apart. Double-click a wall's middle dot to add a corner.
+**GFCI outlets.** *GFCI outlet* on an outlet (or *GFCI* while placing).
 
-**Locks.** A room or area can be locked from its panel: it cannot then be moved, reshaped or deleted until it is unlocked. Single walls can be locked too — neither end moves.
+- Wires run supply side → load side, shown by an arrow, reversible from the wire's panel.
+- Everything downstream of a GFCI's wires is protected by it.
+- Selecting a GFCI highlights what it protects. A protected outlet names its GFCI and shows a green dot when
+  wiring is shown.
 
-**Constraints.** Kept on each floor (`Constraints`), and held as the plan is edited: whatever is dragged or typed stays where it was put and the rest gives way. Locked rooms and walls never give way. A constraint that cannot hold with the others is marked in red, and the floor says which. Each room lists its constraints, each removable; a wall's *Fix* button holds it at its length.
+**Shared walls.**
 
-**Surface colours.** A room's surface can be recoloured (`SurfaceColor`) — the carpet, the tile, the paint — keeping its pattern; with a plain surface the colour fills the room.
+- Coincident corners belong to every room meeting there; dragging one moves it in all.
+- Dragging a wall's middle dot slides the wall; the neighbour follows.
+- Alt: pull a shared corner apart.
+- Double-click a wall's middle dot: add a corner.
 
-**Export.** *Export…* downloads the floor as SVG or PNG, or every floor plan as one JSON file with its images inside, which *Import floor plans…* reads back here or on another bridge.
+**Locks.** A locked room or area cannot be moved, reshaped or deleted. A locked wall's ends do not move.
 
-**Storage warnings.** When no persistent plan storage is configured, or the configuration cannot be saved, the page says so in a banner above the plan.
+**Constraints** (`Constraints`, per floor):
 
-**Appliances at their real size.** The Item tool's *At real size* group places a washer, dryer, fridge, chest freezer, range, dishwasher, water heater, furnace, AC condenser, server rack or hot tub at its usual size (`Width`, `Depth`, `Rotation`, `Round`), drawn as seen from above — a washer's round lid, a range's burners, a condenser's fan (`Footprint`). Dropped near a wall it stands with its back to the wall, facing the room. Selected, its corner handle sizes it and the knob above it turns it (in 15° steps; Shift for any angle), or its panel takes exact measurements. Any item can be given a real size, or drawn as an icon again.
+- Held during edits; the dragged or typed value stays and the rest adjusts. Locked rooms and walls never
+  adjust.
+- An unsatisfiable constraint is marked red, and the floor names it.
+- Each room lists its constraints, each removable. A wall's *Fix* button holds its length.
+- The *Constraints* checkbox shows or hides the markers.
 
-**Right-click** anything on the plan for a menu about it: an item's circuit, trace, wiring, size, GFCI, duplicate or delete; a room's lock, redraw, duplicate or delete; a wall's corner, lock or held length; a corner or wire bend's removal; a wire's direction; and, on bare plot, adding a room or item there, the background image, or fitting the floor in view. While viewing, a choice that edits turns Edit on and does it, so nothing in the menu is dead.
+**Surface colours.** `SurfaceColor` recolours a room's surface, keeping its pattern; on a plain surface it
+fills the room.
 
-**Showing constraints.** The *Constraints* checkbox shows or hides the constraint markers.
+**Textures.** Rooms and outdoor zones: wood, tile, carpet, concrete, stone, grass, gravel, dirt, deck,
+pavers, water, snow, or stairs. Drawn at real size. Each floor has a ground around the rooms.
 
-**Wall-mounted items.** Outlets and switches placed near a wall sit on it, on the side of the room they were placed in, and keep facing that room (`Facing`, in degrees).
+**Appliances at real size.** The Item tool's *At real size* group: washer, dryer, fridge, chest freezer, range,
+dishwasher, water heater, furnace, AC condenser, server rack, hot tub (`Width`, `Depth`, `Rotation`, `Round`),
+drawn from above (`Footprint`).
 
-**Wiring.** A run between two items shows the path the cable takes, in its circuit's colour; selecting an item or a
-run brings its circuit forward and fades the rest. Wiring an item on no circuit to one on a known circuit puts it on
-that circuit (said on screen, and undoable). A run's length on the plan is shown with it.
+- Dropped near a wall: back to the wall, facing the room.
+- Corner handle: resize. Knob above: rotate in 15° steps (Shift: any angle). The panel takes exact values.
+- Any item can be given a real size, or reverted to an icon.
 
-**Textures.** Rooms and outdoor zones can have a surface — wood, tile, carpet, concrete, stone, grass, gravel, dirt,
-deck, pavers, water, snow, or stairs for a stairwell — drawn at its real size, and each floor a ground around the rooms.
+**Wall-mounted items.** Outlets and switches near a wall sit on it, on the side they were placed, facing that
+room (`Facing`, in degrees).
+
+**Wiring.** A run shows the cable path in its circuit's colour, with its length. Wiring an item with no
+circuit to one on a known circuit puts it on that circuit (shown on screen, undoable).
+
+**Context menu** (right-click):
+
+| Target | Items |
+| --- | --- |
+| Item | circuit, trace, wiring, size, GFCI, duplicate, delete |
+| Room | lock, redraw, duplicate, delete |
+| Wall | corner, lock, held length |
+| Corner / wire bend | remove |
+| Wire | direction |
+| Bare plot | add a room or item, background image, fit floor in view |
+
+In View mode, an editing choice switches to Edit and performs it.
+
+**Export.** *Export…*: the floor as SVG or PNG, or every floor plan as one JSON file with images embedded.
+*Import floor plans…* reads the JSON.
+
+**Storage warnings.** A banner above the plan when no persistent plan storage is configured or the
+configuration cannot be saved.
 
 ```yaml
 Gui:
   DistanceUnits: imperial            # auto, imperial or metric
+  TemperatureUnits: fahrenheit       # auto, celsius or fahrenheit
 EnergyFlow:
   Sites:
     - Id: home
@@ -1542,40 +1561,46 @@ EnergyFlow:
           Node: ""                   # the node that is this circuit; blank uses the one channel measuring it
 ```
 
-Ids are shared by sites, floors, rooms and areas, so each must be unique across all of them.
+Ids are shared by sites, floors, rooms and areas and must be unique across all of them.
 
-**Where a node is.** Its own `Location`; else an `AutoLocations` rule naming its exact id; else a placement metering
-it (its room, or its floor when it is outdoors); else a wildcard rule; else the rooms its circuit serves (a circuit
-serving two rooms counts toward the smallest place holding both — their area, or their floor). A node with none of
-these is where its feeder is.
+**Node location**, first match:
 
-**How a room is totalled.** What flows into the room from outside is counted and what flows back out is taken
-off, so a node between two others in the same room does not need a meter of its own. A total that needs a
-reading nobody has is **unknown** and shown as *no data* — never a partial sum, and never 0. A room with nothing
-metered in it is **unmetered**, which is drawn hatched and is not the same as drawing nothing. A room counts
-toward its areas, its floor and its site.
+1. The node's `Location`.
+2. An `AutoLocations` rule naming its exact id.
+3. A placement metering it (its room, or its floor when outdoors).
+4. A wildcard `AutoLocations` rule.
+5. The rooms its circuit serves (two rooms: the smallest place holding both — their area or floor).
+6. Its feeder's location.
 
-**Circuits.** A circuit lists the metered devices on it and its **unmetered remainder**: the circuit's reading
-less what is metered on it. The remainder is only reported when every part of it is known. When what is
-metered reads more than the circuit itself, it is flagged — a device is recorded against the wrong circuit or a
-CT is on the wrong wire — and the remainder is left negative rather than clamped. Linking a metered device to a
-circuit offers to place it beneath the circuit in the energy flow; nothing is moved without saying so.
+**Room totals:**
 
-**Tracing an outlet's circuit.** Select an item on an unknown circuit and choose *Trace its circuit*. Plug a
-load into it (or switch the fixture), then switch it on and off, tapping between: the channel that follows every
-switch is the circuit, and the page offers to link the item to that channel's breaker.
+- Inflow from outside the room minus outflow back out.
+- A total needing a missing reading is **unknown** (*no data*), not a partial sum or 0.
+- A room with nothing metered is **unmetered**, drawn hatched.
+- Rooms count toward their areas, floor and site.
 
-**Rooms from tags.** *Tools › Rooms from tags* lists every tag in use, suggests which read like rooms or areas,
-and shows exactly what each would become — places created, nodes placed, rules added, tags removed, and what is
-left alone — before anything is written.
+**Circuits:**
+
+- Lists the metered devices on the circuit and its **unmetered remainder** (circuit reading less metered
+  devices), reported only when every part is known.
+- Metered devices reading more than the circuit are flagged; the remainder is left negative.
+- Linking a metered device to a circuit offers to place it beneath the circuit in the energy flow.
+
+**Trace its circuit** (an item on an unknown circuit): plug in a load (or use the fixture), switch it on and
+off, tapping between. The channel that follows every switch is the circuit; the page offers to link the item
+to that channel's breaker.
+
+**Rooms from tags** (*Tools › Rooms from tags*): lists tags, suggests which are rooms or areas, and previews
+places created, nodes placed, rules added, tags removed and what is left alone before writing.
 
 #### Plan storage
 
-Upload an image from **Background**, or drop one anywhere on the plan. Plan images are never written into the configuration: a Kubernetes custom resource is stored in etcd with a
-limit of about 1.5 MB and is rewritten on every save. They go to plan storage instead, and the floor refers to
-them by id. Uploads are PNG, JPEG, WebP or SVG up to `PlanStorage.MaxMegabytes` (10 by default); a phone photo is
-decoded upright and shrunk in the browser before it is sent. A HEIC photo needs converting to JPEG first. A floor
-whose image is missing or unreadable is drawn on a grid and stays usable.
+- Upload from **Background**, or drop an image on the plan.
+- Images are stored in plan storage and referenced by id, not written into the configuration (a Kubernetes
+  custom resource is limited to about 1.5 MB).
+- Formats: PNG, JPEG, WebP, SVG. Max size: `PlanStorage.MaxMegabytes` (default 10).
+- Phone photos are rotated upright and shrunk in the browser. HEIC must be converted to JPEG first.
+- A floor whose image is missing or unreadable is drawn on a grid.
 
 ```yaml
 PlanStorage:
@@ -1591,46 +1616,32 @@ PlanStorage:
     PathStyle: true
 ```
 
-- **Kubernetes:** set `floorPlans.persistence.enabled: true` in the chart. It creates a PVC (kept on uninstall),
-  mounts it at `floorPlans.mountPath` on the pod serving the GUI, and points the bridge at it. Use
-  `floorPlans.persistence.existingClaim` for a claim you manage. For a bucket instead, put the secret key in
-  `credentials.plansSecretKey`.
-- **Docker Compose:** mount a volume and point `PlanStorage.Directory` (or `RPDU2MQTT_PLANS_DIRECTORY`) at it.
-- **Plain binary:** any directory the process can write.
-- **With the shared cache on** (`Cache.Enabled`, the chart's Valkey) and no directory or bucket named, images are kept
-  in the cache, so they survive a restart and are shared by replicas without a volume.
+| Deployment | Setup |
+| --- | --- |
+| Kubernetes | `floorPlans.persistence.enabled: true`: creates a PVC (kept on uninstall), mounted at `floorPlans.mountPath` on the GUI pod. `floorPlans.persistence.existingClaim` for your own claim. Bucket secret key: `credentials.plansSecretKey`. |
+| Docker Compose | Mount a volume; set `PlanStorage.Directory` or `RPDU2MQTT_PLANS_DIRECTORY`. |
+| Plain binary | Any writable directory. |
+| Shared cache on (`Cache.Enabled`, the chart's Valkey), no directory or bucket | Images stored in the cache; persist across restarts and are shared by replicas. |
 
 #### Rooms in Home Assistant
 
-- Every device this bridge publishes carries its room as `suggested_area` in MQTT discovery, so a new device
-  lands in the right area on its own. (Home Assistant only applies it when it first sees the device.)
-- With the MQTT export on, every room, area, floor and site is published as a tier of its own — power, lifetime
-  energy and energy today — with a device filed in the room's area, ready for the Energy dashboard. A place whose
-  total is unknown is not published.
-- *Tools › Publish rooms to Home Assistant* creates an area for each room, matches existing ones by name, and
-  renames an area it linked before when the room is renamed. It files this bridge's devices that have no area in
-  their room's area and leaves any device someone already put somewhere alone. Everything is previewed first.
-  Removing a room leaves its Home Assistant area in place, and the preview says so. It uses the URL and token
-  under **Home Assistant › Energy Dashboard**. Save afterwards so each room remembers its area.
+- Every published device carries its room as `suggested_area` in MQTT discovery. Home Assistant applies it
+  only when it first sees the device.
+- With the MQTT export on, every room, area, floor and site is a tier (power, lifetime energy, energy today)
+  with a device in the room's area. A place with an unknown total is not published.
+- *Tools › Publish rooms to Home Assistant*:
+  - creates an area per room, matching existing areas by name;
+  - renames a previously linked area when the room is renamed;
+  - files this bridge's area-less devices in their room's area; devices already in an area are left alone;
+  - previews everything first;
+  - removing a room leaves its Home Assistant area;
+  - uses the URL and token under **Home Assistant › Energy Dashboard**.
+  - Save afterwards so each room keeps its area.
 
 ## Example Configurations
 
-Here- are a few example configuration files.
-
-### Minimal Configuration
-
-This, represents the absolute minimum amount of configuration needed for functionality.
-
-[Minimal Configuration](./../Examples/Configuration/minimum-configuration-example.yaml)
-
-### Recommended Configuration
-
-This configuration changes the names, and default IDs for a few measurements.
-
-[Recommended Configuration](./../Examples/Configuration//recommended-configuration.yaml)
-
-### All Options / Configuration Spec
-
-This file, represents all of the currently documented configuration settings which can be changed.
-
-[Configuration Spec](./../Examples/Configuration/config.spec.yaml)
+| File | Contents |
+| --- | --- |
+| [Minimal Configuration](./../Examples/Configuration/minimum-configuration-example.yaml) | Minimum required configuration. |
+| [Recommended Configuration](./../Examples/Configuration//recommended-configuration.yaml) | Renamed measurements and custom IDs. |
+| [Configuration Spec](./../Examples/Configuration/config.spec.yaml) | Every documented setting. |

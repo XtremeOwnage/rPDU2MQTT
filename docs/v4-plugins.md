@@ -1,25 +1,11 @@
 # v4 — integrations as plugins
 
-Status: **landed**. This is the record of what v4 changed and why, in the same spirit as
-[v2](v2-architecture.md) and [v3](v3-orleans-migration.md). The working plan, with the parts that were
-deliberately not done, is [PLUGINS.md](../PLUGINS.md); the author's guide is
-[Examples/Plugins/README.md](../Examples/Plugins/README.md).
+Status: **landed**. Related: [v2](v2-architecture.md), [v3](v3-orleans-migration.md),
+[PLUGINS.md](../PLUGINS.md) (plan), [Examples/Plugins/README.md](../Examples/Plugins/README.md) (author's guide).
 
-## The problem
+## Capabilities
 
-Adding a destination edited thirteen files — the config class, the service, DI registration, a fault check,
-the startup banner, the status reporter, a GUI endpoint, a
-test button, the nav list, and two CRDs. Sixteen files named `modbus`, seven of them TypeScript.
-
-Nothing there was badly written. There was no seam, so every integration was filed by hand into fourteen
-places and any one of them could be forgotten with no failure to show for it. That is not hypothetical: the
-EmonCMS export shipped without its energy-flow half for its entire existence, because "send the hierarchy
-too" was something each destination remembered separately.
-
-## The shape
-
-An integration is a **vendor**, not a capability. EmonCMS is a destination *and* a history provider *and* a
-configuration publisher, on one config section, because that is how an operator thinks about it.
+An integration is one vendor on one config section, implementing any combination of:
 
 | Capability | What it does |
 | --- | --- |
@@ -34,57 +20,51 @@ configuration publisher, on one config section, because that is how an operator 
 | `IStatusProvider` | Decides what its own health means. |
 | `IConfigurablePlugin` | Carries its own settings section. |
 
-Ten integrations ship on this: Vertiv rPDU, MQTT (publish, energy-flow export, and ingest), Modbus, EmonCMS,
-Prometheus, Home Assistant (discovery, Energy Dashboard, entities as a source).
+Built-in integrations: Vertiv rPDU, MQTT (publish, energy-flow export, ingest), Modbus, EmonCMS (destination,
+history, configuration publisher), Prometheus, Home Assistant (discovery, Energy Dashboard, entities as a source).
 
-## Decisions worth keeping
+## Behaviour
 
-**`ExportPass` is built once per poll** and handed to every destination, so two cannot be given different
-views of the world and the flow graph is built once rather than once per destination. It carries the
-snapshots *unmerged* as well as merged: the hierarchy spans instances, but a reading has to be stamped with
-when its own device was polled, because that is what Home Assistant's `expire_after` is judged against.
-
-**Configuration is its own direction of travel.** Publishing structure — HA discovery documents, the Energy
-Dashboard, EmonCMS feeds — is not a footnote on sending measurements. It runs on its own slow cadence, it is
-what an operator triggers by hand, and its failure mode differs: a missing measurement is a gap, but missing
-configuration means every measurement after it lands somewhere wrong.
-
-**"Measurement", not "energy".** A PDU reports temperature, humidity and CO2 alongside power, and HA
-discovery carries all of them.
-
-**Unknown is never zero.** A tier with no determined value is absent from the pass; a device returning
-nothing leaves its previous snapshot to go stale rather than publishing an empty one, which downstream would
-read as every outlet having gone to zero.
-
-**Coordination never appears in a contract.** The one piece an integration may need is
-`ISingleOwnerLease` — "one owner of this key" — a plain interface in `Core` whose implementation the host
-supplies. It was grain-backed; it is `SoleOwnerLease` now; no integration noticed either time.
-
-**The device poll is inverted, not moved.** `DevicePollService` reads through `IDeviceReader`, so a plugin
-device inherits the poll cadence, the ownership lease and the write path that outlet control routes
-through, rather than reimplementing them under a parallel poller.
+- **`ExportPass`** is built once per poll and handed to every destination. It carries snapshots both merged
+  and unmerged; each reading is stamped with its own device's poll time (used by Home Assistant's
+  `expire_after`).
+- **Configuration publishing** (HA discovery documents, Energy Dashboard, EmonCMS feeds) runs on its own
+  cadence, separate from measurement export, and can be triggered manually.
+- **Measurements** include temperature, humidity and CO2 as well as power.
+- **Unknown values:** a tier with no value is absent from the pass. A device returning nothing keeps its
+  previous snapshot, which goes stale; no empty snapshot is published.
+- **Coordination:** `ISingleOwnerLease` ("one owner of this key") is a `Core` interface; the host supplies
+  `SoleOwnerLease`.
+- **Device polling:** `DevicePollService` reads through `IDeviceReader`. A plugin device uses the same poll
+  cadence, ownership lease and outlet-control write path.
+- **No TypeScript per integration:** a new destination needs a config class and an integration class.
+  `web/plugin.check.mjs` renders an unknown plugin and asserts it gets a nav entry, generated fields and its
+  buttons.
 
 ## External plugins
 
-An earlier draft ruled runtime loading out. Building the contracts showed the objection was mostly wrong:
-the GUI's form is drawn from a schema generated by **reflection at startup**, not compiled into the bundle,
-so a plugin's settings class becomes a rendered page with no TypeScript from the plugin at all. Its actions
-reach the API the same way, because routes are derived from the capabilities it declares.
+- Reference `rPDU2MQTT.Core`, implement `IIntegration` plus any capabilities, drop the DLL in `plugins/`.
+- The GUI settings form is generated by reflection at startup from the plugin's settings class.
+- API routes are derived from the declared capabilities.
+- Each plugin gets its own `AssemblyLoadContext`; host types resolve to the host's copy.
+- A plugin that fails to load is reported and skipped.
+- The CRD does not describe plugin settings. They live under the open `Plugins` map.
 
-Writing one is: reference `rPDU2MQTT.Core`, implement `IIntegration` plus whichever capabilities apply, drop
-the DLL in `plugins/`. Each gets its own `AssemblyLoadContext`; host types resolve to the host's copy, so a
-plugin loading its own `Core` cannot end up implementing an interface the runtime considers a different
-type. A plugin that will not load is reported and skipped — a third-party DLL must never stop the bridge
-starting.
+### Bundled plugins
 
-The one real limit is the **CRD**: it is a compile-time contract published to the API server and cannot
-describe a type that exists only on one operator's machine. Plugin settings live under the open `Plugins`
-map instead.
+| Plugin | Project | Output folder |
+|--------|---------|---------------|
+| Vertiv rPDU | `plugins/rPDU2MQTT.Plugin.Vertiv` | `bundled-plugins/vertiv/` |
+| EmonCMS | `plugins/rPDU2MQTT.Plugin.EmonCms` | `bundled-plugins/emoncms/` |
+| Floor Plans | `plugins/rPDU2MQTT.Plugin.FloorPlan` | `bundled-plugins/floorplan/` |
+| Tigo TAP | `plugins/rPDU2MQTT.Plugin.Tigo` | `bundled-plugins/tigo/` |
 
-## What this removed
-
-Four hosted services and five bespoke endpoints deleted; `NAV_GROUPS`, `SOURCE_TYPES`,
-`DestinationRequirements.EmonCms` and fifteen copies of a tick helper gone; two status stores merged into
-one. A new destination now needs a config class and an integration class, and no TypeScript at all — pinned
-by `web/plugin.check.mjs`, which renders a plugin the GUI has never heard of and asserts it gets a nav
-entry, generated fields and its buttons.
+- Each references only `rPDU2MQTT.Core`.
+- The host project builds them and copies each DLL into `bundled-plugins/<name>/` of its build and publish output.
+- They load through `PluginLoader`, the same as a third-party DLL, after the plugins in `/app/plugins` (or
+  `RPDU2MQTT_PLUGINS`). A DLL of the same name in that directory replaces the bundled one.
+- `DisabledPlugins` lists folder or DLL names to skip; a skipped plugin is never loaded. GUI: **System › Plugins**.
+- Vertiv is off when no PDU has a host.
+- EmonCMS keeps its `EmonCMS` config section in Core, so existing configs, the CRD and `RPDU2MQTT_EMONCMS_APIKEY` are unchanged.
+- Floor Plans is the page only. Locations, placements and runs (`EnergyFlow`), `/api/locations`, plan image storage
+  (`PlanStorage`, `/api/plans`) and the Home Assistant area sync stay in the host.

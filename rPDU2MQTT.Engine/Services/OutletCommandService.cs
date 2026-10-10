@@ -17,7 +17,8 @@ public class OutletCommandService : IHostedService
 {
     private readonly HiveMQClient mqtt;
     private readonly Config cfg;
-    private readonly PDU pdu;
+    private readonly MQTTServiceDependencies deps;
+    private Core.Integrations.IPduInstance pdu => deps.PDU ?? throw new InvalidOperationException("No PDU instance configured.");
     private readonly Core.LeaderState? leader;
     private readonly Abstractions.Pdu.IOutletControl? outletControl;
     private readonly string[] commandFilters;
@@ -28,7 +29,7 @@ public class OutletCommandService : IHostedService
         mqtt = deps.Mqtt as HiveMQClient
             ?? throw new InvalidOperationException("Expected a HiveMQClient instance for command handling.");
         cfg = deps.Cfg;
-        pdu = deps.PDU;
+        this.deps = deps;
         leader = deps.Leader;
         // When wired, outlet writes route through the single-owner write path; else call the PDU directly.
         this.outletControl = outletControl;

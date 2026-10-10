@@ -7,15 +7,17 @@ import { exportData } from '../overrides.js';
 import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.js';
 import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
-import { focusPath, clearFocus, focusedNode, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard } from '../flow-focus.js';
-import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, groupChips, viewSwitches, applyUnmeasuredPref, collapseGraph, ensureGroupState, explodeExpandedGroups, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
+import { focusPath, clearFocus, focusedNode, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard, updateNodeCard } from '../flow-focus.js';
+import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, groupChips, viewSwitches, applyUnmeasuredPref, collapseGraph, ensureGroupState, hideHiddenNodes, explodeExpandedGroups, nestExpandedGroups, toggleGroup, drawnMembers, expandMode, foldedInto, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
 import { editNodeOnNextOpen, flowCandidates, renderNodeManager, syncNodeModal, wouldLoop } from './nodes.js';
 import { renderNodeEditor } from './node-editor.js';
 import { makeMenu } from '../context-menu.js';
 import { openHistorySheet } from '../history-sheet.js';
 import { drawSunburst } from '../sunburst.js';
 import { drawTreemap } from '../treemap.js';
-import { flowCardRows } from '../flow-card.js';
+import { findHub } from '../flow-tree.js';
+import { sourceColor } from '../charts.js';
+import { flowCardRows, readingRows, refreshReadings } from '../flow-card.js';
 import { templateHelp } from '../template-field.js';
 import { COST_OF, currency, energyPrice, priceGraph } from '../cost.js';
 
@@ -51,8 +53,6 @@ const CONTRADICTION_SHARE = 0.25;
 
 export function addFlowSection(nav: any, sections: any) {
   const link = navLink(nav, "Flow", "⇄");
-  // Both tabs edit the shared EnergyFlow object, so their nav entries carry its unsaved-edit count.
-  link.dataset.section = "EnergyFlow";
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   // One line over the diagram: title, what is drawn, and two buttons for everything else. The paragraph, the
   // period row, the date row and two rows of view switches put the diagram half way down the screen.
@@ -175,11 +175,10 @@ export function addFlowSection(nav: any, sections: any) {
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
   // Each job below the diagram gets its own page under Energy Flow, so the Flow page is the diagram.
-  const subPage = (label: string, icon: string, desc: string) => {
+  const subPage = (label: string, icon: string, desc: string, paths?: string) => {
     const l = navLink(nav, label, icon);
     l.classList.add('nav-child');
-    // These edit the same EnergyFlow document as the Flow and Nodes pages, so they carry its edit count.
-    l.dataset.section = 'EnergyFlow';
+    if (paths) l.dataset.section = paths;
     const s = document.createElement('div'); s.className = 'section'; sections.appendChild(s);
     s.appendChild(el('h2', { text: label }));
     s.appendChild(el('div', { class: 'desc', text: desc }));
@@ -191,10 +190,10 @@ export function addFlowSection(nav: any, sections: any) {
     'What each node rolls up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
   const treePanel = treePage.body;
   const edPage = subPage('Hierarchy', '⑃',
-    'How the nodes are wired together. Energy flows left → right.');
+    'How the nodes are wired together. Energy flows left → right.', 'EnergyFlow.Links,EnergyFlow.Parents');
   const ed: any = edPage.body;
   const settingsPage = subPage('Settings', '⚙',
-    'Everything that governs the energy roll-up and its export. These were scattered across the pages they affected.');
+    'Energy roll-up and export settings.', 'EnergyFlow.*');
   let lastGraph: any = null;
   // Bindings the server is dropping on purpose.
   let withheldSources: any[] = [];
@@ -271,6 +270,8 @@ export function addFlowSection(nav: any, sections: any) {
   // The zoom and where the pane is scrolled to belong to the reader, not to the drawing: a live reading
   // arriving must not throw away the view they are reading from (#492).
   let zoom: any = null;
+  // The sunburst/treemap panes' zooms, one per chart, kept across live repaints the same way.
+  let treeZooms: any[] = [];
   // Drawing one node and what is beneath it, and nothing else (#493). Held across redraws, like the view.
   let drillTo: string | null = null;
   let refit = false;
@@ -315,6 +316,17 @@ export function addFlowSection(nav: any, sections: any) {
     redrawBoth();
   };
 
+  /// A hover card with the node's other readings, fetched on hover and filled into the card when they arrive.
+  let cardFor: string | null = null;
+  const withReadings = (id: string, build: (readings: any[]) => any[]) => {
+    cardFor = id;
+    // A past diagram is not described by live readings.
+    if (historyQuery(hist)) return build([]);
+    refreshReadings(withInstance('/api/flow/readings', instSel))
+      .then(fresh => { if (fresh && cardFor === id) updateNodeCard(build(readingRows(id, measured()))); });
+    return build(readingRows(id, measured()));
+  };
+
   // Letting go of a control draws whatever arrived while it was in use.
   sec.addEventListener('focusout', () => setTimeout(() => {
     if (!heldGraph || menu.isOpen() || busyInSection(sec)) return;
@@ -333,6 +345,10 @@ export function addFlowSection(nav: any, sections: any) {
     if (held) wrap.style.minHeight = held + 'px';
     // Read off the pane that is about to be replaced: once it is detached it measures nothing.
     const keptView = zoom?.view?.();
+    const keptTreeViews = treeZooms.map(z => z.view?.());
+    // The old panes' listeners (some are on window) go with them.
+    [zoom, ...treeZooms].forEach(z => { try { if (typeof z === 'function') z(); } catch { /* already gone */ } });
+    treeZooms = [];
     // Measured before the clear, off a container that is not emptied, so the reading is of a laid-out page.
     const paneW = Math.round(Number((sec as any).clientWidth) || Number((wrap as any).clientWidth) || 0);
     wrap.innerHTML = '';
@@ -342,9 +358,11 @@ export function addFlowSection(nav: any, sections: any) {
     if (drillTo && !(graph.nodes || []).some((n: any) => n.id === drillTo)) drillTo = null;
     graph = drilled(graph, drillTo);
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
-    const collapsed = collapseGraph((graph.nodes || []).slice(), (graph.links || []).slice());
+    const visible = hideHiddenNodes((graph.nodes || []).slice(), (graph.links || []).slice());
+    const collapsed = collapseGraph(visible.nodes, visible.links);
     // ...then substitute the members for the anchor on any group left expanded.
-    const expanded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
+    const exploded = explodeExpandedGroups(collapsed.nodes, collapsed.links);
+    const expanded = nestExpandedGroups(exploded.nodes, exploded.links);
     // ...then honour the unmetered-remainder view switch...
     const shown = applyUnmeasuredPref(expanded.nodes, expanded.links);
     // ...and finally drop the branches carrying nothing, if that switch is on.
@@ -385,18 +403,53 @@ export function addFlowSection(nav: any, sections: any) {
         onOpen: (id: string) => drill(id),
         // Out one level: to what feeds the node drilled into, or to the whole diagram.
         onOut: () => drill(drillTo ? ((whole.links || []).find((l: any) => l.target === drillTo)?.source || null) : null),
-        card: (id: string, place: any) => flowCardRows(nodes.find((n: any) => n.id === id) || { id }, place,
-          { units: graph.units || '', metric: metricSel.value, nodes, links }),
+        card: (id: string, place: any) => withReadings(id, (readings) => flowCardRows(nodes.find((n: any) => n.id === id) || { id }, place,
+          { units: graph.units || '', metric: metricSel.value, nodes, links, readings })),
         host: sec,
       };
       const sunburst = modeSel.value === 'sunburst';
-      const view = sunburst ? drawSunburst(nodes, links, viewOpts)
-        : drawTreemap(nodes, links, { ...viewOpts, width: wrap.clientWidth || sec.clientWidth || 1000 });
+      const paneWidth = wrap.clientWidth || sec.clientWidth || 1000;
+      const pair = !!findHub(nodes, links).hub;
+      const side = pair && paneWidth >= 900;
+      const half = side ? Math.floor((paneWidth - 6) / 2) : paneWidth;
+      // Each chart sits in its own pane that pans and zooms like the Sankey.
+      const zooms: any[] = [];
+      const one = (dir: 'in' | 'out') => {
+        const pane = el('div', { class: 'tree-zoom' });
+        if (sunburst) {
+          const svg = drawSunburst(nodes, links, { ...viewOpts, dir });
+          const base = Math.min(half - 4, 760);
+          pane.appendChild(svg);
+          zooms.push(attachZoom(pane, svg, base, base, true));
+        } else {
+          const map = drawTreemap(nodes, links, { ...viewOpts, dir, width: half, height: side ? Math.round(Math.min(half * 1.1, 700)) : undefined });
+          pane.appendChild(map);
+          const base = half - 4;
+          zooms.push(attachZoom(pane, map, base, base, true, (z) => { map.style.width = `${Math.round(base * z)}px`; }));
+        }
+        return pane;
+      };
+      const view = pair
+        ? el('div', { class: 'flow-tree-pair' + (side ? ' is-side' : '') + (sunburst ? '' : ' is-tight') },
+            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Sources' }), one('in')),
+            el('div', { class: 'flow-tree-half' }, el('div', { class: 'flow-tree-title', text: 'Destinations' }), one('out')))
+        : one('out');
       stage = el('div', { class: 'flow-stage ' + (sunburst ? 'sunburst-stage' : 'treemap-stage') }, view, menu.el);
       wrap.appendChild(stage);
-      wrap.appendChild(el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px' },
-        text: sunburst ? 'Hover for details · click an arc to centre on it · click the middle to go back out.'
-          : 'Hover for details · click a box to open it · click the top bar to go back out.' }));
+      treeZooms = zooms;
+      if (!refit) zooms.forEach((z, i) => { if (keptTreeViews[i]) z.setView(keptTreeViews[i]); });
+      const zoomAll = (act: (z: any) => void) => () => zooms.forEach(act);
+      const zb = (label: string, title: string, act: () => void) => { const b = btn(label); b.title = title; b.onclick = act; return b; };
+      stage.appendChild(el('div', { class: 'flow-zoom' },
+        zb('+', 'Zoom in', zoomAll(z => z.zoomBy(1.2))),
+        zb('−', 'Zoom out', zoomAll(z => z.zoomBy(1 / 1.2))),
+        zb('⤢', 'Fit to the page', zoomAll(z => z.fit()))));
+      const hints = el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } });
+      hints.appendChild(el('span', { text: sunburst ? 'Hover for details · click an arc to centre on it · click the middle to go back out.'
+        : 'Hover for details · click a box to open it · click the top bar to go back out.' }));
+      hints.appendChild(el('span', { class: 'on-touch', text: 'Swipe to pan · pinch to zoom.' }));
+      hints.appendChild(el('span', { class: 'on-mouse', text: 'Drag to pan · Ctrl/⌘ + scroll to zoom.' }));
+      wrap.appendChild(hints);
       zoom = null;
       refit = false;
       count.textContent = `${nodes.length} node(s)`;
@@ -455,7 +508,14 @@ export function addFlowSection(nav: any, sections: any) {
     // text where it is. Where the width cannot be measured (the DOM stub the checks run against) it falls
     // back to 960, so the geometry those checks pin is unchanged.
     const W = Math.max(960, Math.min(paneW ? paneW - 8 : 960, 2400));
-    const padTop = 22, nodeW = 12, usableH = 520;
+    const shownIds = new Set<string>(nodes.map((n: any) => n.id));
+    const outlined = (d: any) => !collapsedGroups.has(d.Id) && !foldedInto(d) && expandMode(d) === 'replace' && !shownIds.has(d.Id) && drawnMembers(d, shownIds).length > 0;
+    const levels = (x: any, seen: Set<string>): number => Math.max(0, ...flowGroups()
+      .filter((d: any) => d.Parent === x.Id && !seen.has(d.Id) && outlined(d))
+      .map((d: any) => 1 + levels(d, new Set([...seen, d.Id]))));
+    const outlines = flowGroups().filter(outlined);
+    const outlineTop = outlines.length ? 14 + 13 * Math.max(...outlines.map((g: any) => levels(g, new Set([g.Id])))) : 0;
+    const padTop = 22 + outlineTop, nodeW = 12, usableH = 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
     const leftPad = 16, rightGutter = 232;
     // What the node has to be tall enough to carry: its own reading.
@@ -693,7 +753,10 @@ export function addFlowSection(nav: any, sections: any) {
     const totalH = Math.ceil(Math.max(padTop + usableH, bottom)) + padTop;
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${totalH}`, width: W, height: totalH, class: 'sankey-svg', style: 'display:block' });
     const colors = ['#49f', '#4f9', '#fa4', '#f49', '#9f4', '#4ff', '#f94', '#a9f'];
-    const tintOf = (id: string) => colors[colMemo[id] % colors.length];
+    const kindOf: Record<string, string> = {};
+    nodes.forEach((n: any) => { kindOf[n.id] = n.kind; });
+    const feedsOut = new Set(links.map((l: any) => l.source));
+    const tintOf = (id: string) => sourceColor(kindOf[id], !feedsOut.has(id)) || colors[colMemo[id] % colors.length];
     // Clicking the empty canvas is the natural "never mind"; a redraw starts unfocused either way.
     svg.addEventListener('click', () => { menu.close(); clearFocus(svg); });
     // …and on bare canvas, back out to the whole diagram.
@@ -711,6 +774,22 @@ export function addFlowSection(nav: any, sections: any) {
       ]);
     });
 
+    const nodeHistory = (n: any, window?: string) => {
+      const named = n.label || n.id;
+      openHistorySheet({
+        title: named,
+        nodes: [n.id],
+        lineLabel: named,
+        labelOf: (id: string) => byId[id]?.label || id,
+        metric: measured(),
+        empty: 'Nothing is measuring this node, so there is nothing to chart.',
+        // What it feeds, each on a strip of its own: where a tier's power went, over the same window.
+        parts: (outgoing[n.id] || []).map((l: any) => l.target),
+        partsLabel: 'What it feeds',
+        window,
+      });
+    };
+
     /// What a right-click offers over a node: what it has been drawing, where its supply comes from, and
     /// the node itself. A history is only worth offering for something the bridge actually reads.
     const nodeMenu = (e: any, n: any) => {
@@ -719,20 +798,9 @@ export function addFlowSection(nav: any, sections: any) {
       const named = n.label || n.id;
       menu.open(e, [
         { label: named, head: true },
-        {
-          label: 'History…',
-          run: () => openHistorySheet({
-            title: named,
-            nodes: [n.id],
-            lineLabel: named,
-            labelOf: (id: string) => byId[id]?.label || id,
-            metric: measured(),
-            empty: 'Nothing is measuring this node, so there is nothing to chart.',
-            // What it feeds, each on a strip of its own: where a tier's power went, over the same window.
-            parts: (outgoing[n.id] || []).map((l: any) => l.target),
-            partsLabel: 'What it feeds',
-          }),
-        },
+        { label: 'Trace its supply', run: () => focusPath(svg, incoming, n.id) },
+        { label: 'Last 7 days…', run: () => nodeHistory(n, 'days=7&step=3600') },
+        { label: 'History…', run: () => nodeHistory(n) },
         {
           label: 'Drill into this',
           // Only what carries something: an end load drilled into is one node on its own.
@@ -743,8 +811,7 @@ export function addFlowSection(nav: any, sections: any) {
           { label: 'Out one level', disabled: !(incoming[drillTo] || []).length, run: () => drill((incoming[drillTo!] || [])[0]?.source || null) },
           { label: 'Show the whole diagram', run: () => drill(null) },
         ] : []),
-        { label: 'Trace its supply', run: () => focusPath(svg, incoming, n.id) },
-        { label: 'Clear the trace', run: () => clearFocus(svg) },
+        { label: 'Clear the trace', disabled: !focusedNode, run: () => clearFocus(svg) },
         {
           label: 'Edit this node',
           // Only a node of the config has an editor; a PDU or outlet the bridge derives has none.
@@ -876,6 +943,33 @@ export function addFlowSection(nav: any, sections: any) {
     const groupById: Record<string, any> = {};
     flowGroups().forEach((g: any) => { groupById[g.Id] = g; (g.Members || []).forEach((m: string) => { memberGroup[m] = g; }); });
 
+    // Outline around the members of each expanded 'replace' group, with a collapse tab.
+    outlines.forEach((g: any) => {
+      const ids = drawnMembers(g, shownIds).filter(id => pos[id]);
+      if (!ids.length) return;
+      const lvl = levels(g, new Set([g.Id])), padX = 3 + 3 * lvl, padY = 3 + 13 * lvl;
+      const cols: Record<string, { top: number, bottom: number, x: number }> = {};
+      ids.forEach(id => {
+        const p = pos[id], c = cols[p.x] || (cols[p.x] = { top: p.y, bottom: p.y + p.h, x: p.x });
+        c.top = Math.min(c.top, p.y); c.bottom = Math.max(c.bottom, p.y + p.h);
+      });
+      const collapse = () => { toggleGroup(g); redrawBoth(); };
+      Object.values(cols).forEach((c, i) => {
+        const box = svgEl('rect', { x: c.x - padX, y: c.top - padY, width: nodeW + 2 * padX, height: c.bottom - c.top + 2 * padY, rx: 4,
+          fill: 'none', stroke: 'var(--muted)', 'stroke-dasharray': '4 3', 'stroke-width': '1', 'pointer-events': 'stroke', class: 'flow-group-outline' });
+        const t = svgEl('title'); t.textContent = `${g.Label || g.Id}. Click to collapse.`; box.appendChild(t);
+        box.style.cursor = 'pointer'; box.addEventListener('click', collapse);
+        svg.appendChild(box);
+        if (i) return;
+        const tab = svgEl('text', { x: c.x - padX, y: c.top - padY - 3, fill: 'var(--fg)', 'font-size': '10', 'font-weight': '600',
+          'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round', class: 'flow-group-tab' });
+        tab.textContent = `▾ ${g.Label || g.Id}`;
+        const tt = svgEl('title'); tt.textContent = 'Click to collapse'; tab.appendChild(tt);
+        tab.style.cursor = 'pointer'; tab.addEventListener('click', collapse);
+        svg.appendChild(tab);
+      });
+    });
+
     // Nodes + labels, to the right of each node and vertically centered, with a bg halo over ribbons.
     const contradicted: { id: string, label: string, share: number }[] = [];
     nodes.forEach((n: any) => {
@@ -946,7 +1040,7 @@ export function addFlowSection(nav: any, sections: any) {
       svg.appendChild(labGroup);
 
         // Hovering a node explains it: what it is, what it reads, what feeds it and what it feeds.
-      const card = () => {
+      const card = (readings: any[]) => {
         const rows: any[] = [];
         rows.push(el('div', { class: 'nh-title', text: n.label }));
         rows.push(el('div', { class: 'nh-sub', text: `${n.kind || 'node'} · ${n.id}` }));
@@ -965,6 +1059,7 @@ export function addFlowSection(nav: any, sections: any) {
         if (n.throughput != null)
           rows.push(el('div', { class: 'desc', style: { margin: '2px 0 0' },
             text: `its sensor covers this leg; ${formatMeasure(n.throughput, units)} passes through the node` }));
+        rows.push(...readings);
 
         const side = (title: string, ls: any[], other: (l: any) => string) => {
           if (!ls.length) return;
@@ -976,17 +1071,6 @@ export function addFlowSection(nav: any, sections: any) {
         side('Fed by', incoming[n.id] || [], (l: any) => l.source);
         side('Feeds', outgoing[n.id] || [], (l: any) => l.target);
 
-        // What the node is bound to, so a wrong topic or register is visible from the diagram itself.
-        const cfg = (state.data?.EnergyFlow?.Nodes || []).find((x: any) => x.Id === n.id);
-        const bound = (cfg?.Sources || []).concat(cfg?.Mqtt ? cfg.Mqtt.map((m: any) => ({ Type: 'mqtt', ...m })) : []);
-        if (bound.length) {
-          rows.push(el('div', { class: 'nh-head', text: 'Bound sources' }));
-          bound.forEach((s: any) => rows.push(el('div', { class: 'nh-row' },
-            el('span', { class: 'nh-name', text: metricLabel(s.Metric) }),
-            el('span', { class: 'nh-src', text: s.Type === 'modbus' ? `${s.Connection || 'modbus'} reg ${s.Register}` : (s.Topic || '') }))));
-        } else if (cfg) {
-          rows.push(el('div', { class: 'nh-head', text: cfg.Value != null ? 'Fixed value' : 'No source bound' }));
-        }
         return rows;
       };
       [rect, lab].forEach((elm: any) => {
@@ -995,34 +1079,35 @@ export function addFlowSection(nav: any, sections: any) {
         elm.addEventListener('dblclick', (e: any) => {
           e.preventDefault?.();
           e.stopPropagation?.();
+          menu.close();
           if (drillTo === n.id) { drill((incoming[n.id] || [])[0]?.source || null); return; }
           if ((outgoing[n.id] || []).length) drill(n.id);
         });
-        elm.addEventListener('mouseenter', (e: any) => showNodeCard(sec, e, card()));
+        elm.addEventListener('mouseenter', (e: any) => showNodeCard(sec, e, withReadings(n.id, card)));
         elm.addEventListener('mousemove', (e: any) => moveNodeCard(e));
         elm.addEventListener('mouseleave', hideNodeCard);
       });
 
-      // Click to trace where this node's supply comes from: everything upstream stays lit, the rest dims.
+      // A click opens the node's menu, as a right-click does.
       if (!(n.group || memberGroup[n.id] || groupById[n.id])) {
         [rect, lab].forEach((elm: any) => {
           elm.style.cursor = 'pointer';
-          elm.addEventListener('click', (e: any) => { e.stopPropagation?.(); focusPath(svg, incoming, n.id); });
+          elm.addEventListener('click', (e: any) => nodeMenu(e, n));
         });
       }
 
     // Group node (collapsed), an anchor node (expanded), or a member: make the node the expand/collapse control.
-      const grp = n.group ? n : (memberGroup[n.id] || groupById[n.id]);
+      const anchorOf = groupById[n.id] && (groupById[n.id].Members || []).length ? groupById[n.id] : null;
+      const grp = n.group ? groupById[n.id] : (memberGroup[n.id] || anchorOf);
       if (grp) {
-        const gid = n.group ? n.id : grp.Id;
-        const toggle = () => { collapsedGroups.has(gid) ? collapsedGroups.delete(gid) : collapsedGroups.add(gid); redrawBoth(); };
+        const toggle = () => { toggleGroup(grp); redrawBoth(); };
         [rect, lab].forEach(elm => { elm.style.cursor = 'pointer'; elm.addEventListener('click', toggle); });
         const hint = svgEl('title');
-        hint.textContent = n.group ? `“${n.label}” groups ${(grp.Members || []).length} node(s) — click to expand`
-          : grp.Id === n.id ? `Group of ${(grp.Members || []).length} node(s) — click to collapse`
-          : `In group “${grp.Label || grp.Id}” — click to collapse`;
+        hint.textContent = n.group && !n.expanded ? `${n.label}: ${(grp.Members || []).length} node(s). Click to expand.`
+          : grp.Id === n.id ? `${grp.Label || grp.Id}. Click to collapse.`
+          : `In ${grp.Label || grp.Id}. Click to collapse.`;
         rect.appendChild(hint);
-        if (n.group) lab.textContent = '▸ ' + lab.textContent;   // an affordance that this node opens up
+        if (n.group || anchorOf) lab.textContent = (n.group && !n.expanded ? '▸ ' : '▾ ') + lab.textContent;
       }
     });
 

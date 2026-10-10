@@ -19,6 +19,7 @@ const { sandbox, getEl } = makeDom({
     }
     return url.includes('/api/schema') ? schema
       : url.includes('/api/instances') ? { ok: true, instances: [] }
+      : url.includes('/api/integrations') ? { ok: true, integrations: [{ id: 'emoncms' }] }
       : url.includes('/api/config') ? { EmonCMS: { Enabled: true, Url: 'http://emon', Node: 'rpdu2mqtt' }, History: { Enabled: false } }
       : { ok: true };
   },

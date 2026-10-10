@@ -64,4 +64,18 @@ public class HaStaleDevicesTests
         var d = new HaDevice("1", "Dual", ["some_other_id", "energyflow_grid"], 0, ["mqtt1"]);
         Assert.Single(HaStaleDevices.Stale([d]));
     }
+
+    [Fact]
+    public void OursWithOnlyEntitiesNoLongerProvided_IsStale()
+    {
+        var d = new HaDevice("1", "Office Minisplit", ["energyflow_breaker_sub_panel_1_5"], 3, ["mqtt1"], OrphanedEntityCount: 3);
+        Assert.Single(HaStaleDevices.Stale([d]));
+    }
+
+    [Fact]
+    public void OneLiveEntityKeepsTheDevice()
+    {
+        var d = new HaDevice("1", "Grid", ["energyflow_grid"], 6, ["mqtt1"], OrphanedEntityCount: 1);
+        Assert.Empty(HaStaleDevices.Stale([d]));
+    }
 }

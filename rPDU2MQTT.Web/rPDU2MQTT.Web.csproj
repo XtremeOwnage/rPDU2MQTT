@@ -23,9 +23,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<!-- GUI assets are embedded so the binary serves them without a wwwroot on disk. app.js + styles.css
-		     are BUILT from web/src/*.ts + web/styles.css by BuildGuiAssets (committed so a node-less build
-		     still works); index.html is authored directly. -->
+		<!-- app.js and styles.css are built from web/ by BuildGuiAssets; index.html is authored directly. -->
 		<EmbeddedResource Include="wwwroot\index.html" />
 		<EmbeddedResource Include="wwwroot\styles.css" />
 		<EmbeddedResource Include="wwwroot\app.js" />
@@ -34,35 +32,22 @@
 	<ItemGroup>
 		<GuiSource Include="web\src\**\*.ts" />
 		<GuiSource Include="web\styles.css" />
-		<!-- Every check and the DOM stub: a check edited on its own still re-runs the GUI build and checks. -->
 		<GuiSource Include="web\*.mjs" />
 		<GuiSource Include="web\schema.fixture.json" />
+		<GuiSource Include="..\plugins\rPDU2MQTT.Plugin.Tigo\wwwroot\*" />
 	</ItemGroup>
 
-	<!-- Build the GUI bundle (TypeScript ES modules -> wwwroot/app.js + minified styles.css) using only the
-	     node binary (no npm; Node's built-in type-stripping). Skips gracefully when node isn't installed,
-	     leaving the committed outputs in place. -->
+	<!-- Builds the GUI bundle and runs its checks; skipped when node is not installed. -->
 	<Target Name="BuildGuiAssets" BeforeTargets="BeforeBuild" Inputs="@(GuiSource)" Outputs="wwwroot\app.js;wwwroot\styles.css">
 		<Exec Command="node --version" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
 			<Output TaskParameter="ExitCode" PropertyName="_NodeExitCode" />
 		</Exec>
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/build.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- Run the bundle's smoke test against the real schema: it builds every section in a stubbed DOM,
-		     so a broken cross-module reference fails the build here instead of blanking a tab at runtime. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/smoke.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- Layout regressions render fine and mean nothing: the hierarchy left-justified a feeder away from
-		     what it powers, and a night-time (all-zero) solar chain sank to the bottom of the chart joined by
-		     invisible ribbons. Both are asserted on the real bundle's rendered geometry. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/layout.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/sankey.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- The auto-update notice has no click behind it, so its only test is this transition table: #304
-		     shipped one in prose and the case it missed (a moving channel, where the tag never changes) was
-		     exactly the one that broke. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/update.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- Motion is a claim: an unknown link and a measured zero must stay still, or "no data" looks
-		     busier than a real reading. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/animation.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- A gauge is only as honest as the ceiling it is drawn against, so it must never invent one. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/gauge.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/contradiction.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/tags.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
@@ -83,64 +68,41 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/pages.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/balance.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/floorplan.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/solar.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/groupnest.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/navbadge.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/managednodes.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowhub.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/timeline.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- A fixed list is the set the build ships: no Add, no Remove, and the field that names an entry is
-		     its heading rather than something to edit. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/fixedlist.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- A plugin is a drop-in DLL only for as long as no TypeScript names one. This renders a plugin the
-		     GUI has never heard of and asserts it gets a nav entry, generated fields and its buttons. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/plugin.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- The chart on a phone: opened at its natural width inside a ~390px screen, with the only zoom
-		     gesture being Ctrl/⌘ + wheel — neither half of which a touch device has. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/plugins.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/mobile.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- The tiles' trends: drawn from readings the backend has, absent when it has none, and a gap left
-		     as a gap rather than joined through. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/sparkline.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- Clicking a tile has to chart the nodes that tile's figure came from, not whatever Trends was
-		     showing — an answer about different nodes is worse than no link. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/drilldown.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- The bindings table carries its own width, and a column nothing on the node uses is not a column. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/nodesheet.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/template.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- "Hide empty" must clear switched-off outlets without hiding a node nothing measures, or cutting a
-		     zero chain off the live thing it feeds. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/hideempty.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/hidesmall.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowview.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/hidenodata.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- A binding worked out from other bindings can be complete in itself and still produce nothing, so
-		     the row has to say what it is still waiting for. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/derived.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- An EmonCMS binding names a feed on someone else's server, so a typo produces a row that looks
-		     complete and a node that never has a value. The row has to check the name and say. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/emoncms.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- A reading is shown at a scale a person reads: watts step to kW past a thousand, and a unit with
-		     no ladder is left alone. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/emoncmsplan.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/units.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- A ribbon is a filled outline, so a routing that offsets both sides the same way does not merely
-		     look odd: the outline crosses itself and the band renders as a bow tie. -->
+		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/tempunits.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/ribbons.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/sunburst.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/treemap.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- Two rules the layout owes the eye: nothing in a column closer than a row of text, and no two
-		     ribbons crossing the same gap. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/nocross.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- The diagram lays out to its pane rather than to a fixed 960px. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowwidth.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- The Flow page's controls pack onto shared lines rather than stacking down the page. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowcontrols.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/hierarchy.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/feeders.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- A refresh rebuilds the diagram without collapsing the page and losing the reader's place. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/flowscroll.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- The landing page: what it says has to be what was measured, and a component in trouble has to be
-		     impossible to scroll past. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/overview.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- An alert that reports a count has to open onto what the count is of; the reason was already known. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/withheld-detail.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- A tag that decides what reaches Home Assistant has to be visible on the page it decides for. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/tagvisible.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- Defining a tag, and seeing both what carries it and what it decides. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/tagspage.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/pdutags.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/emoncmscleanup.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
@@ -148,9 +110,6 @@
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/explorer.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/maprow.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/reconnect.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
-		<!-- Layout rules a DOM stub cannot see: a sticky table header trapped inside its own table looked
-		     fine in Firefox and sat on top of the first row in Chrome. -->
-		<!-- The editing dialog on a phone: it must not clip what it cannot fit. -->
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/phonedialog.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Exec Condition="'$(_NodeExitCode)' == '0'" Command="node web/css.check.mjs" WorkingDirectory="$(MSBuildProjectDirectory)" />
 		<Warning Condition="'$(_NodeExitCode)' != '0'" Text="node not found; using the committed wwwroot/app.js + styles.css. Install Node 22+ to rebuild the GUI from web/src." />

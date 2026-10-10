@@ -15,15 +15,20 @@ public class GuiConfig
     [FeatureToggle]
     public bool Enabled { get; set; }
 
-    /// <summary>Show the link back to the project's GitHub page in the GUI footer.</summary>
+    /// <summary>Show the documentation and GitHub links in the GUI footer.</summary>
     [DefaultValue(true)]
-    [Description("Show a link to the project's GitHub page in the GUI. Turn off for a cleaner look on a shared screen.")]
+    [Description("Show links to the documentation and the GitHub page in the GUI. Turn off for a cleaner look on a shared screen.")]
     public bool ShowProjectLink { get; set; } = true;
 
     [DefaultValue("auto")]
     [AllowedValues("auto", "imperial", "metric")]
     [Description("How distances and sizes are shown on the floor plans: imperial (feet and inches), metric (metres and centimetres), or auto to follow the browser's language.")]
     public string DistanceUnits { get; set; } = "auto";
+
+    [DefaultValue("auto")]
+    [AllowedValues("auto", "celsius", "fahrenheit")]
+    [Description("How temperatures are shown: celsius, fahrenheit, or auto to follow the browser's language.")]
+    public string TemperatureUnits { get; set; } = "auto";
 
     [Display(Name = "Price per kWh")]
     [Description("What a kWh of energy costs, in your currency. When set, the Trends pages can chart energy as cost. Leave blank to not offer cost.")]

@@ -64,6 +64,8 @@ const bodies = (url) =>
   url.includes('/api/flow/live') ? liveValues :
   url.includes('/api/schema') ? schema :
   url.includes('/api/instances') ? { ok: true, instances: [] } :
+  url.includes('/api/integrations') ? { ok: true, integrations: [{ id: 'vertiv', name: 'Vertiv rPDU', pages: [] }, { id: 'emoncms', name: 'EmonCMS', pages: [] }] } :
+  url.includes('/api/plugins') ? [{ key: 'vertiv', name: 'Vertiv rPDU', bundled: true, disabled: false, integrations: ['vertiv'] }] :
   url.includes('/api/config') ? config :
   url.includes('/api/flow') ? flowGraph :
   { ok: true };
@@ -173,10 +175,10 @@ if (!query(activeSec(), 'rect', true).some(r => r.attrs['data-node']))
 
 // The roll-up table, the wiring editor and the roll-up settings are three pages of their own under Energy
 // Flow, reachable without going through the diagram first.
-for (const [label, marker] of [['Roll-up', 'Rolled-up values'], ['Hierarchy', 'Drag from a node'], ['Settings', 'Track daily totals']]) {
+for (const [label, marker, paths] of [['Roll-up', 'Rolled-up values', undefined], ['Hierarchy', 'Drag from a node', 'EnergyFlow.Links,EnergyFlow.Parents'], ['Settings', 'Track daily totals', 'EnergyFlow.*']]) {
   const l = navLinksNow().find(a => a.dataset.label === label);
   if (!l) fail(`no ${label} page under Energy Flow`);
-  if (l.dataset.section !== 'EnergyFlow') fail(`the ${label} page does not carry EnergyFlow's unsaved-edit count`);
+  if (l.dataset.section !== paths) fail(`the ${label} page counts ${l.dataset.section}, not ${paths}`);
   l.click();
   await new Promise(r => setTimeout(r, 50));
   if (!activeSec().textContent.includes(marker)) fail(`the ${label} page rendered nothing ("${marker}" missing)`);
@@ -294,13 +296,19 @@ nodeRect.dispatch("mouseleave", {});
 if (cardEl.classList.contains("show")) fail("the hover card stayed up after the pointer left");
 
 // --- Focus a supply path -------------------------------------------------------------------------
-// Clicking a node lights what feeds it and dims the rest; clicking it again restores.
+// A click on a node opens its menu; tracing from it lights what feeds it and dims the rest, and again restores.
 const sankeyNodes = query(getEl('sections'), 'rect', true).filter(r => r.attrs['data-node']);
 if (!sankeyNodes.length) fail('no Sankey node carries a data-node tag for focusing');
 const panelRect = sankeyNodes.find(r => r.attrs['data-node'] === 'panel');
 if (!panelRect) fail('the fixture graph did not render its "panel" node');
 
-panelRect.dispatch('click', { stopPropagation() {} });
+const trace = () => {
+  panelRect.dispatch('click', { stopPropagation() {} });
+  const entry = query(getEl('sections'), '.ctx-menu-item', true).find(x => x.textContent === 'Trace its supply');
+  if (!entry) fail('a click on a node did not offer to trace its supply');
+  entry.onclick();
+};
+trace();
 const focusSvg = query(getEl('sections'), 'svg', true).find(x => x.classList.contains('flow-focus'));
 if (!focusSvg) fail('clicking a node did not focus its supply path');
 // solar feeds panel, so both are on the path.
@@ -310,8 +318,8 @@ for (const want of ['panel', 'solar', 'mppt'])
 if (!query(focusSvg, 'path', true).some(p => p.classList.contains('on-path')))
   fail('the ribbon feeding the focused node was not lit');
 
-panelRect.dispatch('click', { stopPropagation() {} });
-if (focusSvg.classList.contains('flow-focus')) fail('clicking the focused node again did not restore the view');
+trace();
+if (focusSvg.classList.contains('flow-focus')) fail('tracing the focused node again did not restore the view');
 // --- Node Data page ------------------------------------------------------------------------------
 // Freshness is the reason this page exists: an expired reading must still be listed, and marked as such.
 const dataLink = navLinksNow().find(a => a.dataset.label === 'Node Data');

@@ -1,0 +1,7 @@
+{
+  "name": "rpdu2mqtt-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": { "smoke": "node smoke.mjs" },
+  "devDependencies": { "playwright": "1.64.0" }
+}

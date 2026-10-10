@@ -27,58 +27,54 @@ using rPDU2MQTT.Startup.ConfigSources;
 
 namespace rPDU2MQTT.Services.Gui;
 
-/// <summary>
-/// Optional embedded web GUI for viewing, editing and testing the configuration.
-/// Hosts a small Kestrel app (Basic-auth protected) only when Gui.Enabled is set.
-/// </summary>
+/// <summary>Embedded web GUI for viewing, editing and testing the configuration.</summary>
 public sealed partial class GuiService : IHostedService, IAsyncDisposable
 {
     private readonly Config config;
     private readonly IHiveMQClient mqtt;
-    private readonly PDU pdu;
     private readonly DiscoveryCoordinator discovery;
     private readonly IConfigSource configSource;
     private readonly IHostApplicationLifetime lifetime;
     private readonly HealthState health;
-    private readonly PduInstanceFactory pduFactory;
-    private readonly PduInstanceRegistry registry;
-    private readonly InstanceManager instances;
-    private readonly EmonCmsStatus emonCmsStatus;
+    private readonly Core.Integrations.IPduInstances registry;
+    private readonly Core.Integrations.IntegrationStatus? integrationStatus;
     private readonly Core.IProcessRestarter? restarter;
     private readonly Core.ISnapshotCache snapshots;
     private readonly Core.HostRole hostRoles;
     private readonly HaEnergyDashboardSync haEnergy;
     private readonly Core.Flow.IFlowValueSource? live;
-    // Config sections contributed by externally loaded plugins, so the GUI renders a page for each.
+    // Config sections contributed by loaded plugins.
     private readonly PluginSchemaSections? pluginSections;
-    // Every integration this build carries, built-in or loaded from plugins/.
+    // Every plugin found at startup, loaded or not.
+    private readonly rPDU2MQTT.Plugins.PluginCatalog? pluginCatalog;
+    // Every integration, built-in or from plugins.
     private readonly Core.Integrations.IntegrationRegistry? integrations;
-    // The write seam. Routes to the PDU that reported the device, or to the plugin that owns it.
+    // Write seam: routes to the owning PDU or plugin.
     private readonly Abstractions.Pdu.IOutletControl? outletControl;
-    // Anything that can offer nodes to adopt — the broker index today, a plugin tomorrow.
+    // Sources of nodes to adopt.
     private readonly IReadOnlyList<Core.Integrations.INodeProvider> nodeProviders;
-    // The Status board, held in this process.
     private readonly Core.Status.StatusBoard? statusBoard;
     private readonly Core.Diagnostics.ProcessRegistry? processes;
     private readonly Core.Discovery.TopicIndex topicIndex;
     private readonly Core.Flow.IMeasurementHistory? history;
     private readonly Core.History.LocalSeriesStore? localHistory;
     private readonly HistoryCopyService? historyCopy;
-    // What the last save could not apply to this process. Reported on the status card and in the header.
+    // Settings the last save could not apply to this process.
     private readonly Core.RestartPending pending;
     private static readonly HttpClient testHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
     private WebApplication? app;
-    // Created on the first /api/events connection; the pump only runs while a tab is watching.
+    // Created on the first /api/events connection.
     private GuiEventHub? events;
     private readonly object eventsGate = new();
 
-    // The deployment operator, when this build runs somewhere it can roll itself (Kubernetes).
+    // Deployment operator, when running under Kubernetes.
     private readonly Core.Operator.IOperatorControl? deployOperator;
-    // What each Modbus device last did, for the diagnostics page.
+    // Last outcome per Modbus device, for diagnostics.
     private readonly Core.Modbus.ModbusDevices? modbusDevices;
 
-    public GuiService(Config config, IHiveMQClient mqtt, PDU pdu, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, PduInstanceFactory pduFactory, PduInstanceRegistry registry, InstanceManager instances, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null)
+    public GuiService(Config config, IHiveMQClient mqtt, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, Core.Integrations.IPduInstances registry, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null, rPDU2MQTT.Plugins.PluginCatalog? pluginCatalog = null, Core.Integrations.IntegrationStatus? integrationStatus = null)
     {
+        this.pluginCatalog = pluginCatalog;
         this.live = live;
         this.pluginSections = pluginSections;
         this.integrations = integrations;
@@ -95,15 +91,12 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         this.modbusDevices = modbusDevices;
         this.config = config;
         this.mqtt = mqtt;
-        this.pdu = pdu;
         this.discovery = discovery;
         this.configSource = configSource;
         this.lifetime = lifetime;
         this.health = health;
-        this.pduFactory = pduFactory;
         this.registry = registry;
-        this.instances = instances;
-        this.emonCmsStatus = emonCmsStatus;
+        this.integrationStatus = integrationStatus;
         this.restarter = restarter;
         this.snapshots = snapshots;
         this.hostRoles = hostRoles;
@@ -111,31 +104,29 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         this.haEnergy = haEnergy;
     }
 
-    /// <summary>
-    /// Current data for an instance, preferring the shared snapshot cache (filled by the local poller, or
-    /// by the MQTT bus bridge on a consumer-only node) and falling back to a direct poll when the cache is
-    /// still cold. This is the read seam that lets a UI/API role serve a worker's data without polling.
-    /// </summary>
-    private async Task<Models.PDU.PduData> ResolveData(string id, PDU pdu, CancellationToken ct) =>
-        snapshots.Get(id)?.Data ?? await pdu.GetRootData_Public(ct);
+    private const string NoPdu = "No PDU instance configured.";
 
-    /// <summary>The instance id a request targets — a usable (registry) instance, else the primary's.</summary>
+    /// <summary>Current data for an instance from the snapshot cache, else a direct poll.</summary>
+    private async Task<Models.PDU.PduData> ResolveData(string id, Core.Integrations.IPduInstance? pdu, CancellationToken ct) =>
+        snapshots.Get(id)?.Data ?? (pdu is null ? new Models.PDU.PduData() : await pdu.ReadAsync(ct));
+
+    /// <summary>The instance id a request targets, else the primary's.</summary>
     private string ResolveInstanceId(string? requested) =>
         !string.IsNullOrEmpty(requested) && registry.All.ContainsKey(requested)
             ? requested
-            : (registry.All.ContainsKey(Config.DefaultInstanceKey) ? Config.DefaultInstanceKey : registry.All.Keys.First());
+            : registry.PrimaryId ?? Config.DefaultInstanceKey;
 
-    /// <summary>Resolve the PDU + its config for a request, from <c>?instance=</c> (GET) or a body field (POST).</summary>
-    private (string Id, PDU Pdu, Models.Config.PduConfig Cfg) ResolveInstance(string? requested)
+    /// <summary>Resolve the PDU and its config from <c>?instance=</c> or a body field.</summary>
+    private (string Id, Core.Integrations.IPduInstance? Pdu, Models.Config.PduConfig Cfg) ResolveInstance(string? requested)
     {
         var id = ResolveInstanceId(requested);
-        return (id, registry.Get(id), config.Pdus[id]);
+        return (id, registry.Get(id), config.Pdus.TryGetValue(id, out var c) ? c : new());
     }
 
-    /// <summary>Authentication is turned off entirely (Gui.AuthType = None).</summary>
+    /// <summary>Gui.AuthType is None.</summary>
     private bool AuthDisabled => config.Gui.AuthType == GuiAuthType.None;
 
-    /// <summary>OIDC is selected and the minimum settings (authority + client id) are present.</summary>
+    /// <summary>OIDC is selected with authority and client id set.</summary>
     private bool UseOidc => config.Gui.AuthType == GuiAuthType.Oidc
         && !string.IsNullOrWhiteSpace(config.Gui.Oidc.Authority)
         && !string.IsNullOrWhiteSpace(config.Gui.Oidc.ClientId);
@@ -164,10 +155,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = Array.Empty<string>() });
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls($"http://*:{gui.Port}");
-        // Kestrel's default 32 KB request-header cap returns 431 once cookies pile up.
+        // Raise Kestrel's 32 KB header cap; cookies otherwise trigger 431.
         builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestHeadersTotalSize = 64 * 1024);
 
-        // Before auth is wired: the cookie handler takes the key ring as it is at build time.
+        // Must precede auth wiring: the cookie handler captures the key ring at build time.
         ConfigureDataProtection(builder);
 
         if (UseOidc)
@@ -177,7 +168,6 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
         if (UseOidc)
         {
-            // The GUI typically runs behind an ingress/gateway terminating TLS.
             var fwd = new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost };
             fwd.KnownIPNetworks.Clear();
             fwd.KnownProxies.Clear();
@@ -198,9 +188,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         Log.Information($"Configuration GUI listening on http://*:{gui.Port} ({how}).");
     }
 
-    /// <summary>
-    /// Keep the key that encrypts auth cookies across restarts.
-    /// </summary>
+    /// <summary>Persist the auth-cookie encryption key across restarts.</summary>
     private void ConfigureDataProtection(WebApplicationBuilder builder)
     {
         var keys = builder.Services.AddDataProtection().SetApplicationName("rPDU2MQTT");
@@ -221,7 +209,6 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                // Falling through to disk is better than refusing to start the GUI; say why.
                 Log.Warning($"Could not keep sign-in keys in the cache ({ex.Message}); falling back to local disk. "
                           + "Sessions will not survive a container that keeps no volume, or move between replicas.");
             }
@@ -241,7 +228,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         }
     }
 
-    /// <summary>Wire cookie + OpenID Connect authentication and require an authenticated user.</summary>
+    /// <summary>Wire cookie + OpenID Connect authentication.</summary>
     private static void ConfigureOidc(WebApplicationBuilder builder, OidcConfig oidc)
     {
         builder.Services.AddAuthentication(o =>
@@ -256,7 +243,6 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             o.ClientId = oidc.ClientId;
             o.ClientSecret = oidc.ClientSecret;
             o.ResponseType = "code";
-            // Code flow defaults to form_post (a cross-site POST callback).
             o.ResponseMode = "query";
             o.UsePkce = true;
             o.CallbackPath = oidc.CallbackPath;
@@ -266,18 +252,17 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             foreach (var scope in (oidc.Scopes ?? "openid profile email").Split(' ', StringSplitOptions.RemoveEmptyEntries))
                 o.Scope.Add(scope);
 
-            // Some providers (e.g. Authentik with no signing certificate) sign the id_token with HS256, whose key is not in JWKS.
+            // Some providers sign the id_token with HS256, whose key is not in JWKS.
             if (!string.IsNullOrEmpty(oidc.ClientSecret))
                 o.TokenValidationParameters.IssuerSigningKey =
                     new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(Encoding.UTF8.GetBytes(oidc.ClientSecret));
 
-            // The default correlation/nonce cookies are SameSite=None.
             o.CorrelationCookie.SameSite = SameSiteMode.Lax;
             o.CorrelationCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
             o.NonceCookie.SameSite = SameSiteMode.Lax;
             o.NonceCookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
 
-            // Surface the real reason instead of a bare 500 on a failed callback.
+            // Surface the real failure reason instead of a bare 500.
             o.Events.OnRemoteFailure = ctx =>
             {
                 Log.Error(ctx.Failure, $"OIDC sign-in failed: {ctx.Failure?.Message}");
@@ -293,14 +278,13 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             };
         });
 
-        // Everything requires an authenticated user unless explicitly AllowAnonymous.
         builder.Services.AddAuthorizationBuilder()
             .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        // Stop pushing before the host goes down, so open SSE connections end cleanly.
+        // Stop pushing before shutdown so SSE connections end cleanly.
         if (events is not null)
             await events.DisposeAsync();
 
@@ -317,21 +301,16 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             await app.DisposeAsync();
     }
 
-    /// <summary>
-    /// The push hub, built on the first /api/events connection so nothing runs in a GUI nobody has opened.
-    /// Each feed is one of the payload builders below on its own cadence — see <see cref="GuiEventHub"/>.
-    /// </summary>
+    /// <summary>The push hub, built on the first /api/events connection.</summary>
     private GuiEventHub EventHub()
     {
         lock (eventsGate)
             return events ??= new GuiEventHub(ConfigSchema.Json,
-                // The header: version, MQTT, config writability, operator update.
                 new GuiEventHub.Feed("status", TimeSpan.FromSeconds(5), (_, ct) => BuildStatusAsync(null, ct)),
-                // The Status board's cards.
                 new GuiEventHub.Feed("board", TimeSpan.FromSeconds(3), (_, _) => BuildBoardAsync()),
-                // Readings for one instance ("livedata:<instance>"; bare "livedata" = the primary).
+                // "livedata:<instance>"; bare "livedata" is the primary.
                 new GuiEventHub.Feed("livedata", TimeSpan.FromSeconds(2), BuildLiveDataAsync),
-                // The energy-flow graph, keyed "flow:<metric>" or "flow:<metric>|<instance>".
+                // "flow:<metric>" or "flow:<metric>|<instance>".
                 new GuiEventHub.Feed("flow", TimeSpan.FromSeconds(2), (arg, ct) =>
                 {
                     var parts = (arg ?? "").Split('|');
@@ -339,16 +318,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 }));
     }
 
-    // --- Payload builders --------------------------------------------------------------------------
-
-    /// <summary>Header state: version, config source/writability, MQTT, and the operator's update report.</summary>
-    /// <summary>
-    /// This process, as opposed to this build. A restart on the same image keeps the version, and during a
-    /// rolling update the old process keeps answering until the new one takes over; the page waits for a
-    /// different instance before it says the restart is done.
-    /// </summary>
+    /// <summary>Identifies this process, distinct from the build version.</summary>
     private static readonly string Instance = Guid.NewGuid().ToString("N")[..12];
 
+    /// <summary>Header state: version, config, MQTT and operator update report.</summary>
     private async Task<object> BuildStatusAsync(string? user, CancellationToken ct) => new
     {
         version = Version,
@@ -362,15 +335,12 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         auth = AuthDisabled ? "none" : UseOidc ? "oidc" : "basic",
         showProjectLink = config.Gui.ShowProjectLink,
         user,
-        // Operator update state (#210) for the header indicator; null when no operator is reporting.
         update = await ReadOperatorUpdateAsync(configSource as KubernetesConfigSource, ct),
-        // Settings that were saved but cannot reach this process until it restarts.
+        // Settings saved but waiting on a restart.
         restart = new { required = pending.Required, settings = pending.Settings },
     };
 
-    /// <summary>
-    /// Retained discovery configs under our own device-id prefix that this build would not publish today.
-    /// </summary>
+    /// <summary>Retained discovery configs under our prefix that this build would not publish today.</summary>
     private async Task<IReadOnlyList<string>> OrphanedDiscoveryAsync()
     {
         var prefix = config.HASS.DiscoveryTopic;
@@ -380,7 +350,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         index.Renew(prefix.Trim().Trim('/') + "/#");
         var retained = (index.Search(null, 5000)).Select(t => t.Topic).ToList();
 
-        // What the exporter would publish right now: every non-synthetic tier not already covered by native PDU discovery.
+        // What the exporter would publish now: non-synthetic tiers not covered by native PDU discovery.
         var merged = new Models.PDU.PduData();
         foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
 
@@ -389,13 +359,12 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         var graph = Core.Flow.FlowGraphBuilder.Build(merged, config.EnergyFlow, Core.Flow.FlowGraphBuilder.DefaultMetric, live);
         var native = Core.Flow.FlowExport.NativeEnergyUniqueIds(merged, energyMetric);
 
-        // The same rule the exporter applies.
         var current = Core.Flow.FlowExport.ExportedDeviceIds(graph, config.EnergyFlow.MqttExportTags, native)
             .Concat(Core.Flow.LocationExport.DeviceIds(config.EnergyFlow)).ToList();
 
         var orphans = Core.Flow.FlowExport.OrphanedDiscoveryTopics(retained, current, prefix).ToList();
 
-        // Native PDU discovery too, which the energyflow sweep deliberately does not touch.
+        // Include native PDU discovery too.
         var published = discovery.PublishedDevices?.Invoke();
         if (published is { HasPublished: true, Ids.Count: > 0 })
         {
@@ -410,7 +379,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     {
         try
         {
-            // In-memory board: evaluated when someone looks, so an "…ago" cannot be stale.
+            // Evaluated on read so "ago" text is never stale.
             var board = statusBoard?.Board() ?? [];
             var cards = board.Select(c => new
             {
@@ -427,7 +396,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         catch (Exception ex) { return new { ok = false, message = ex.Message }; }
     }
 
-    /// <summary>Current readings for one instance, both flat and pivoted, plus OneView group rollups.</summary>
+    /// <summary>Current readings for one instance, flat and pivoted, plus OneView group rollups.</summary>
     private async Task<object> BuildLiveDataAsync(string? instance, CancellationToken ct)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -444,7 +413,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 .Select(r => new { device = r.Device, source = r.Source, type = r.Type, value = r.Value, units = r.Units })
                 .ToList();
 
-            // Pivoted view: one row per outlet/entity with its measurements as columns + state.
+            // One row per outlet/entity, measurements as columns.
             var types = readingList.Select(r => r.Type).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t).ToList();
             var units = readingList.GroupBy(r => r.Type, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.Select(r => r.Units).FirstOrDefault(u => !string.IsNullOrEmpty(u)) ?? "", StringComparer.OrdinalIgnoreCase);
@@ -454,7 +423,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             {
                 foreach (var o in device.Outlets.OrderBy(o => o.Key))
                     entities.Add(BuildLiveEntity(device.Entity_DisplayName, o.Entity_DisplayName, "outlet", o.Key + 1,
-                        pdu.ResolveOutletState(device.Key, o.Key, o.State), o.Measurements));
+                        pdu?.ResolveOutletState(device.Key, o.Key, o.State) ?? o.State, o.Measurements));
                 foreach (var e in device.Entity)
                     entities.Add(BuildLiveEntity(device.Entity_DisplayName, e.Entity_DisplayName, "entity", null, null, e.Measurements));
             }
@@ -485,12 +454,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         }
     }
 
-    /// <summary>
-    /// One value per node per day across a window — the daily totals, kept apart rather than summed.
-    /// </summary>
+    /// <summary>One value per node per day across a window.</summary>
     private async Task<object> BuildSeriesAsync(string? instance, string metric, IReadOnlyList<DateTime> when,
                                                 IReadOnlyList<string>? labels, string? partialLabel, CancellationToken ct,
-                                                int? requestedStepSeconds = null)
+                                                int? requestedStepSeconds = null, IReadOnlyCollection<string>? only = null)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(60));
@@ -502,12 +469,12 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             var (id, pdu, _) = ResolveInstance(instance);
             var data = await ResolveData(id, pdu, cts.Token);
 
-            // The shape of the graph comes from the live build — its nodes, labels and kinds.
             var shape = FlowGraphBuilder.Build(data, config.EnergyFlow, metric, live);
             var lanes = FlowLanes.For(shape.Nodes);
+            // ?nodes=a,b limits the series to those nodes, for a caller that charts only a few.
+            if (only is { Count: > 0 }) lanes = lanes.Where(l => only.Contains(l.Id, StringComparer.OrdinalIgnoreCase)).ToList();
             if (lanes.Count == 0) return new { ok = false, message = "No nodes to chart yet." };
 
-            // One request where the backend can answer a range.
             var perDay = await history.SeriesAsync(lanes.Select(l => l.Id).ToList(), metric, when, cts.Token);
 
             var drawn = lanes
@@ -519,19 +486,17 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     tags = n.Tags,
                     values = perDay.Select(day => day.TryGetValue(n.Id, out var v) ? (double?)v : null).ToList(),
                 })
-                // A node with nothing across the whole window is not a line on a chart.
+                // Skip nodes with no data in the window.
                 .Where(s => s.values.Any(v => v is not null))
                 .ToList();
 
-            // Which of these a page may add together: a node another one already holds — a group's member, a
-            // node beneath another — would be counted twice in a per-kind total (#491).
+            // Nodes already held by another node, which a per-kind total would count twice.
             var topology = FlowTopology.For(data, config.EnergyFlow);
-            // A return lane (…#in) belongs to the same node its own lane does, so it is judged by that node
-            // and answers with the holder's matching lane.
+            // A return lane (…#in) is judged by its own node.
             static (string Id, string Suffix) Lane(string id) => id.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal)
                 ? (id[..^FlowMetricKey.InSuffix.Length], FlowMetricKey.InSuffix) : (id, "");
             var ids = drawn.Select(s => Lane(s.node).Id).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            // The total each counts toward, from the same rule the live graph uses: a return lane is its node's.
+            // The total each counts toward; a return lane counts toward its node's.
             var balance = shape.Nodes.Where(n => !n.Synthetic)
                 .ToDictionary(n => n.Id, n => n.Balance, StringComparer.OrdinalIgnoreCase);
             var series = drawn
@@ -557,13 +522,12 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 metric,
                 units = FlowUnits.Canonical(metric),
                 source = history.Id,
-                // A day is named by the period key the counters re-base on — a server concept.
+                // Day key the counters re-base on.
                 days = labels,
                 at = when.Select(w => DateTime.SpecifyKind(w, DateTimeKind.Utc)).ToList(),
                 // The last bar is a period still in progress.
                 partial = partialLabel,
                 stepSeconds = when.Count > 1 ? (int)(when[1] - when[0]).TotalSeconds : 0,
-                // Differs from stepSeconds when the window held more instants than one request samples.
                 requestedStepSeconds,
                 series,
             };
@@ -571,7 +535,32 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         catch (Exception ex) { return new { ok = false, message = $"Could not build the series: {ex.Message}" }; }
     }
 
-    /// <summary>The energy-flow graph for one instance + metric (the Sankey / Energy Overview source).</summary>
+    private static readonly string[] ReadingMetrics = ["realpower", "apparentpower", "current", "voltage", "powerfactor", "frequency"];
+
+    /// <summary>Each node's value for every metric, one graph per metric.</summary>
+    private async Task<object> BuildReadingsAsync(string? instance, CancellationToken ct)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            var (id, pdu, _) = ResolveInstance(instance);
+            var data = await ResolveData(id, pdu, cts.Token);
+            var nodes = ReadingMetrics.Concat(FlowTiers.Metrics(config))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(m => FlowGraphBuilder.Build(data, config.EnergyFlow, m, live))
+                .SelectMany(g => g.Nodes
+                    .Where(n => !n.Synthetic && n.Value is not null)
+                    .Select(n => new { node = n.Id, metric = g.Metric, value = n.Value!.Value, units = g.Units, derivation = n.Derivation }))
+                .GroupBy(x => x.node, StringComparer.OrdinalIgnoreCase)
+                .Select(g => new { node = g.Key, readings = g.Select(x => new { x.metric, x.value, x.units, x.derivation }).ToArray() })
+                .ToArray();
+            return new { ok = true, nodes };
+        }
+        catch (Exception ex) { return new { ok = false, message = $"Could not read the node readings: {ex.Message}" }; }
+    }
+
+    /// <summary>The energy-flow graph for one instance + metric.</summary>
     private async Task<object> BuildFlowAsync(string? instance, string? metric, CancellationToken ct, DateTime? atUtc = null, int spanDays = 1)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -582,11 +571,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             var data = await ResolveData(id, pdu, cts.Token);
             var m = string.IsNullOrEmpty(metric) ? FlowGraphBuilder.DefaultMetric : metric;
 
-            // A past moment is the same graph built from the values of that instant (#372).
+            // A past moment: the graph built from that instant's values.
             var values = live;
             if (atUtc is { } at)
             {
-                // Read the live flag, not whether a provider was wired at startup.
                 if (!config.History.Enabled || history is null)
                     return new { ok = false, message = "History is not enabled. Turn it on under Features and set a backend." };
 
@@ -601,7 +589,6 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     if (m != FlowSpan.SpannableMetric)
                         return new { ok = false, message = $"A span of days only means something for the daily total ({FlowSpan.SpannableMetric}); '{m}' cannot be added across days." };
 
-                    // The same two rules the Trends page uses, for the same reason.
                     var zone = EnergyPeriod.Resolve(config.EnergyFlow.Aggregation.PeriodTimeZone);
                     var when = EnergyPeriod.RecentPeriodEnds(at, zone, config.EnergyFlow.Aggregation.PeriodStartHour, spanDays);
                     var perDay = await history.SeriesAsync(ids, m, when.Select(w => w.AtUtc).ToList(), cts.Token);
@@ -615,7 +602,6 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     {
                         ok = true, graphOverDays.Nodes, graphOverDays.Links, graphOverDays.Metric, graphOverDays.Units,
                         at = atUtc, historical = true, source = history.Id, spanDays,
-                        // Days a node was missing are days missing from its total.
                         incomplete = FlowSpan.Incomplete(covered, spanDays).Select(x => new { node = x.Node, days = x.Days }).ToList(),
                     };
                 }
@@ -677,7 +663,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         return FixedEquals(user, config.Gui.Username) && FixedEquals(pass, config.Gui.Password ?? "");
     }
 
-    // Length-independent constant-time-ish comparison to avoid leaking the password via timing.
+    // Constant-time comparison.
     private static bool FixedEquals(string a, string b)
     {
         var ba = Encoding.UTF8.GetBytes(a);
@@ -693,7 +679,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         app.MapGet("/styles.css", () => Results.Content(LoadAsset("styles.css") ?? "", "text/css"));
         app.MapGet("/app.js", () => Results.Content(LoadAsset("app.js") ?? "", "text/javascript"));
 
-        // OIDC sign-out (clears the local cookie and ends the IdP session).
+        // OIDC sign-out: clears the cookie and ends the IdP session.
         if (UseOidc)
             app.MapGet("/logout", async (HttpContext ctx) =>
             {
@@ -703,17 +689,15 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
         app.MapGet("/api/schema", () =>
         {
-            // A runtime-loaded plugin's settings class becomes a page here, with no UI shipped by the
-            // plugin: the form is drawn from this schema, which is generated by reflection rather than
-            // compiled into the bundle.
+            // Settings schema for plugin config pages, generated by reflection.
             var schema = ConfigSchema.Build(pluginSections?.Sections ?? []);
-            // Under Kubernetes, logging is driven by the platform (stdout + the pod spec).
+            // Under Kubernetes, logging is driven by the platform.
             if (configSource is KubernetesConfigSource)
                 schema = schema.Where(n => n.Key != "Logging").ToList();
             return Results.Json(schema, ConfigSchema.Json);
         });
 
-        // Reflect the current source (file on disk or the CR), which may have been edited.
+        // Re-read the current source, which may have been edited.
         app.MapGet("/api/config", () =>
         {
             Config current;
@@ -742,32 +726,29 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
             try
             {
-                // What this process is running, before any of it is replaced below.
-                var stranded = ConfigApply.NeedingRestart(config, parsed);
+                // Config this process is running, before replacement.
+                var pageSettings = (integrations?.All ?? []).OfType<Core.Integrations.IGuiPageProvider>()
+                    .SelectMany(p => p.PageSettings.Select(k => $"Plugins.{((Core.Integrations.IIntegration)p).Id}.{k}"));
+                var stranded = ConfigApply.NeedingRestart(config, parsed, pageSettings);
 
                 await configSource.SaveAsync(parsed, ctx.RequestAborted);
                 Log.Information($"Configuration saved via GUI to {configSource.Describe}.");
 
-                // Re-read the just-saved config so live-readable settings take effect without a restart.
+                // Re-read the saved config so live-readable settings apply without a restart.
                 var reloaded = configSource.Load();
-                // The energy-flow hierarchy is read fresh on every /api/flow request.
                 config.EnergyFlow = reloaded.EnergyFlow;
-                // Likewise the HA Energy-Dashboard settings (URL/token/enable).
                 config.HASS.EnergyDashboard = reloaded.HASS.EnergyDashboard;
-                // And the EmonCMS feed-provisioning settings.
                 config.EmonCMS.Feeds = reloaded.EmonCMS.Feeds;
-                // And the history backend: FlowHistoryRouter reads the provider and its settings per call.
                 config.History = reloaded.History;
-                // Plan storage is rebuilt on the next image request, and distance units are only read by the page.
                 config.PlanStorage = reloaded.PlanStorage;
                 config.Gui.DistanceUnits = reloaded.Gui.DistanceUnits;
 
-                // Apply PDU instance add/remove live: refresh the instance set from the saved config.
+                // Apply PDU instance add/remove live.
                 var instanceMessage = "";
                 try
                 {
                     config.Pdus = reloaded.Pdus;
-                    await instances.ReconcileAsync();
+                    await registry.ReconcileAsync();
                     instanceMessage = " PDU instances were applied live.";
                 }
                 catch (Exception ex)
@@ -785,20 +766,18 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     ok = true,
                     message,
                     gitops = configSource.IsGitOpsManaged,
-                    // So the GUI can offer the restart then and there, and name what is waiting on it.
                     restartRequired = stranded.Count > 0,
                     restartSettings = stranded,
                 }, ConfigSchema.Json);
             }
             catch (Exception ex)
             {
-                // A rejection the API server explained is reported in words; anything else as it came.
                 var explained = Startup.ConfigSources.KubernetesSaveError.Explain(ex);
                 return Results.Json(new { ok = false, message = explained ?? $"Failed to save config: {ex.Message}" }, statusCode: 500);
             }
         });
 
-        // Export the current (edited) config as an RpduConfig CR manifest, secrets redacted.
+        // Export the current config as an RpduConfig CR manifest, secrets redacted.
         app.MapPost("/api/config/manifest", async (HttpContext ctx) =>
         {
             using var reader = new StreamReader(ctx.Request.Body);
@@ -813,16 +792,14 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // A handler taking HttpContext must use a statement body with `return` (see the RouteHandlersReturnTheirResults test).
         app.MapGet("/api/status", async (HttpContext ctx) =>
         {
             return Results.Json(await BuildStatusAsync(UseOidc ? ctx.User?.Identity?.Name : null, ctx.RequestAborted), ConfigSchema.Json);
         });
 
-        // One push channel for the whole GUI (#281): the browser opens a single EventSource.
+        // Single SSE push channel for the whole GUI.
         app.MapGet("/api/events", (HttpContext ctx) => EventHub().StreamAsync(ctx, ctx.Request.Query["topics"].ToString()));
 
-        // "Check now" from the header: the operator runs in a separate process.
         app.MapPost("/api/operator/check", async (HttpContext ctx) =>
         {
             if (configSource is not KubernetesConfigSource)
@@ -835,7 +812,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request a check: {ex.Message}" }, ConfigSchema.Json); }
         });
 
-        // Tags available for the deployed image, so the Operator page can offer a channel/version switch.
+        // Tags available for the deployed image.
         app.MapGet("/api/operator/tags", async (HttpContext ctx) =>
         {
             if (configSource is not KubernetesConfigSource)
@@ -846,7 +823,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             {
                 var host = image.Registry == Updates.ImageReference.DefaultRegistry ? "registry-1.docker.io" : image.Registry;
                 var tags = await new Services.Operator.ContainerRegistryClient().ListTagsAsync(host, image.Repository, ctx.RequestAborted);
-                // Offer the moving channels that actually exist, then release versions newest-first.
+                // Existing moving channels first, then release versions newest-first.
                 var channels = new[] { "stable", "latest", "edge", "dev", "unstable" }.Where(tags.Contains).ToArray();
                 var versions = tags.Where(t => Updates.SemVer.TryParse(t, out _))
                     .Select(t => { Updates.SemVer.TryParse(t, out var v); return (Tag: t, Ver: v!); })
@@ -857,7 +834,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not list tags: {ex.Message}" }, ConfigSchema.Json); }
         });
 
-        // Switch the deployed image tag (channel or version). The operator rolls the Deployment(s) to it.
+        // Switch the deployed image tag.
         app.MapPost("/api/operator/set-tag", async (HttpContext ctx) =>
         {
             if (configSource is not KubernetesConfigSource)
@@ -873,7 +850,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the switch: {ex.Message}" }, ConfigSchema.Json); }
         });
 
-        // Force update: re-pull the currently-deployed tag now.
+        // Force update: re-pull the currently-deployed tag.
         app.MapPost("/api/operator/redeploy", async (HttpContext ctx) =>
         {
             if (configSource is not KubernetesConfigSource)
@@ -886,11 +863,11 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not request the update: {ex.Message}" }, ConfigSchema.Json); }
         });
 
-        // Configured PDU instances (the per-tab instance selector on Live Data / Control reads this).
+        // Configured PDU instances.
         app.MapGet("/api/instances", () =>
         {
             var primaryId = ResolveInstanceId(null);
-            // Only usable (pollable) instances — registry skips entries missing a Connection.Host.
+            // Only pollable instances.
             var instances = registry.All.Keys.Select(id => new
             {
                 id,
@@ -900,13 +877,12 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             return Results.Json(new { ok = true, instances }, ConfigSchema.Json);
         });
 
-        // What time the SERVER thinks it is, and when the energy day next rolls over.
+        // Server time and the next energy-day rollover.
         app.MapGet("/api/time", () =>
         {
             var agg = config.EnergyFlow.Aggregation;
             var now = DateTime.UtcNow;
             var configured = agg.PeriodTimeZone;
-            // Resolve without warning: the log has already said so once at startup.
             var zone = EnergyPeriod.Resolve(configured);
             var resolved = string.IsNullOrWhiteSpace(configured) || string.Equals(zone.Id, configured.Trim(), StringComparison.OrdinalIgnoreCase);
             var startHour = agg.PeriodStartHour is >= 0 and <= 23 ? agg.PeriodStartHour : 0;
@@ -935,9 +911,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     nextRolloverUtc = next,
                     nextRolloverLocal = EnergyPeriod.Local(next, zone),
                     secondsUntilRollover = (int)Math.Max(0, (next - now).TotalSeconds),
-                    // Whether today's figures actually cover today. A restart with nothing in the store
-                    // starts them again, and a tile reading "0 kWh since the day rolled over" is then a
-                    // claim about a day that was never measured.
+                    // Whether today's figures cover the whole day.
                     carriedOver = (live as Core.Flow.IPeriodTotalsOrigin)?.CarriedOverNodes ?? 0,
                     accumulatingSinceUtc = (live as Core.Flow.IPeriodTotalsOrigin)?.AccumulatingSinceUtc,
                     store = (live as Core.Flow.IPeriodTotalsOrigin)?.StoreKind,
@@ -945,45 +919,43 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }, ConfigSchema.Json);
         });
 
-        // Ready-made energy-flow device templates the Nodes tab can import (EG4 inverters, meters, …).
+        // Energy-flow device templates the Nodes tab can import.
         app.MapGet("/api/node-templates", () =>
             Results.Json(new { ok = true, templates = rPDU2MQTT.NodeTemplates.NodeTemplateCatalog.All }, ConfigSchema.Json));
 
-        // The Status board: every hop's card as the board judged it. The verdicts —
+        // The Status board: every hop's card.
         app.MapGet("/api/status/board", async () => Results.Json(await BuildBoardAsync(), ConfigSchema.Json));
 
-        // Diagnostics: versions, uptime, runtime, and Kubernetes context for the Diagnostics page.
+        // Diagnostics: versions, uptime, runtime, Kubernetes context.
         app.MapGet("/api/diagnostics", async (HttpContext ctx) =>
         {
             var k8s = configSource as KubernetesConfigSource;
 
-            // Operator update report (#210), if the operator has written one to the CR status.
             var update = await ReadOperatorUpdateAsync(k8s, ctx.RequestAborted);
 
-            // The process list (the registry, replacing the MQTT heartbeat).
+            // Process list from the registry.
             var processList = processes?.Active() ?? [];
 
-            // What the panel mapping contradicts, or the live readings do (#457).
+            // Panel-mapping and live-reading contradictions.
             var panelFindings = Core.Flow.PanelAudit.Check(config.EnergyFlow, live,
                 config.EnergyFlow.Nodes.Where(n => !string.IsNullOrWhiteSpace(n.Id)).Select(n => n.Id))
                 .Select(f => new { kind = f.Kind, severity = f.Severity, message = f.Message, breakers = f.Breakers, channels = f.Channels })
                 .ToArray();
 
-            // EmonCMS export health. The exporter runs only on the worker.
-            object? emonStatus = null;
-            if (config.EmonCMS.Enabled)
-            {
-                if (emonCmsStatus.HasAttempted)
-                    emonStatus = emonCmsStatus.Snapshot();
-                else
-                    emonStatus = processList
-                        .Where(p => p.EmonCms is not null && (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= Core.Diagnostics.ProcessRegistry.StaleAfterSeconds)
-                        .OrderByDescending(p => p.TimestampUtc)
-                        .Select(p => (object?)p.EmonCms)
-                        .FirstOrDefault() ?? emonCmsStatus.Snapshot();
-            }
+            var reported = Core.Diagnostics.IntegrationReports.Local(integrationStatus);
+            var integrationList = (integrations?.All ?? [])
+                .Where(i => i is Core.Integrations.IMeasurementDestination or Core.Integrations.IConfigurationPublisher
+                                 or Core.Integrations.IDeviceSourcePlugin)
+                .Where(i => i.Enabled(config))
+                .Select(i => new
+                {
+                    id = i.Id,
+                    name = i.DisplayName,
+                    status = reported.TryGetValue(i.Id, out var mine) ? mine : Core.Diagnostics.IntegrationReports.Freshest(processList, i.Id),
+                })
+                .ToArray();
 
-            // Modbus source health: for each configured connection.
+            // Modbus source health per configured connection.
             var modbus = new List<object>();
             foreach (var conn in config.Modbus.Connections)
             {
@@ -1015,7 +987,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 mqttHost = $"{mqtt.Options.Host}:{mqtt.Options.Port}",
                 configSource = configSource.Describe,
                 lastPollUtc = health.LastPollUtc,
-                // Component health: which workloads this process runs.
+                // Workloads this process runs.
                 roles = Enum.GetValues<Core.HostRole>()
                     .Where(r => r is Core.HostRole.Worker or Core.HostRole.Api or Core.HostRole.Ui && hostRoles.HasFlag(r))
                     .Select(r => r.ToString().ToLowerInvariant())
@@ -1033,9 +1005,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                         };
                     })
                     .ToArray(),
-                // What the panel mapping contradicts (#457).
+                // Panel-mapping contradictions.
                 panelFindings,
-                // Other role processes in the cluster (split deployments). Empty for a single-node "all".
+                // Other role processes in a split deployment.
                 processes = processList
                     .OrderBy(p => string.Join(',', p.Roles)).ThenBy(p => p.Host)
                     .Select(p =>
@@ -1054,18 +1026,11 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 kubernetes = k8s is not null,
                 pod = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME"),
                 ns = k8s?.Namespace,
-                emoncms = config.EmonCMS.Enabled
-                    ? new { enabled = true, transport = (string?)config.EmonCMS.Transport.ToString().ToLowerInvariant(), status = emonStatus }
-                    : new { enabled = false, transport = (string?)null, status = (object?)null },
+                integrations = integrationList,
             }, ConfigSchema.Json);
         });
 
         // Each configured node's rolled-up value, per metric.
-        //
-        // This used to be served by a parallel roll-up recomputing the same
-        // hierarchy the graph builder computes, whose ONLY consumer was this endpoint. Two implementations
-        // of one calculation, and the one nobody else read was the one shown on the diagnostics panel — so
-        // a disagreement between them would have surfaced here as the truth.
         app.MapGet("/api/flow/tree", (HttpContext ctx) =>
         {
             try
@@ -1090,11 +1055,17 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // The panel directory, resolved: each breaker's chain to the channel measuring it, and its power (#453/#454).
+        // Every reading per node, for the diagram's hover card.
+        app.MapGet("/api/flow/readings", async (HttpContext ctx) =>
+        {
+            return Results.Json(await BuildReadingsAsync(ctx.Request.Query["instance"], ctx.RequestAborted), ConfigSchema.Json);
+        });
+
+        // Resolved panel directory: each breaker's chain to its measuring channel, and its power.
         object PanelsPayload(Models.Config.EnergyFlowConfig flow, string metric)
         {
             var map = Core.Flow.PanelMap.For(flow);
-            // Every node the bridge reads, so a channel drawing power that no breaker claims can be named (#457).
+            // Every node the bridge reads, to name unclaimed channels.
             var channels = flow.Nodes.Where(n => !string.IsNullOrWhiteSpace(n.Id)).Select(n => n.Id).ToList();
             var findings = Core.Flow.PanelAudit.Check(flow, live, channels, metric);
             var nodes = Core.Flow.PanelNodes.For(flow).ToDictionary(b => Core.Flow.Circuits.RefOf(b.Chain), b => b, StringComparer.OrdinalIgnoreCase);
@@ -1105,10 +1076,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 slots = panel.Slots,
                 rows = panel.Rows,
                 node = panel.Node,
-                // What the panel is drawing, read from the node that is the panel. Null is a gap, not a zero.
+                // Panel draw; null is a gap, not a zero.
                 incoming = !string.IsNullOrWhiteSpace(panel.Node) && live is not null
                     && live.TryGetValue(panel.Node, metric, out var incoming) ? incoming : (double?)null,
-                // The mains voltage, when whatever measures the panel reports one.
+                // Mains voltage, when reported.
                 volts = !string.IsNullOrWhiteSpace(panel.Node) && live is not null
                     && live.TryGetValue(panel.Node, "voltage", out var volts) ? volts : (double?)null,
                 breakers = map.Chains.Where(c => ReferenceEquals(c.Panel, panel)).Select(chain =>
@@ -1127,13 +1098,12 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                         conductor = chain.Breaker.Conductor,
                         description = chain.Breaker.Description,
                         state = Models.Config.BreakerState.Of(chain.Breaker.State),
-                        // The breaker as a tier of the energy flow (#458): its own node, or the one it names.
+                        // Breaker as a flow tier: its own node or the one it names.
                         node = nodes.TryGetValue(Core.Flow.Circuits.RefOf(chain), out var bn) ? bn.Id : null,
                         derived = nodes.TryGetValue(Core.Flow.Circuits.RefOf(chain), out var dn) && dn.Derived,
-                        // Null power is a gap, never a zero: `gap` says which link of the chain is missing.
+                        // Null power is a gap; `gap` names the missing link.
                         power,
-                        // What it is drawing in amps, so the panel can show that instead and say how close to
-                        // the breaker's rating it is. Read, never inferred from watts.
+                        // Measured amps, never inferred from watts.
                         current = Core.Flow.PanelMap.Power(chain, live, "current"),
                         gap = gap.ToString().ToLowerInvariant(),
                         legs = chain.Legs.Select(l => new
@@ -1164,8 +1134,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // The same, for a directory that has not been saved yet: the schedule page draws what is on screen,
-        // so a breaker added or re-mapped there shows its chain and power before Save.
+        // Same, for an unsaved directory.
         app.MapPost("/api/panels/resolve", async (HttpContext ctx) =>
         {
             try
@@ -1181,8 +1150,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         MapLocationEndpoints(app);
         MapCircuitFinderEndpoints(app);
 
-        // A pasted panel directory, read as far as it can be (#455). Reading only: the page shows the preview,
-        // and nothing is written until the operator applies it and saves.
+        // Parse a pasted panel directory for preview; writes nothing.
         app.MapPost("/api/panels/import", async (HttpContext ctx) =>
         {
             try
@@ -1200,7 +1168,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     line = r.Line, number = r.Number, slot = r.Slot, poles = r.Poles, half = r.Half, wire = r.Wire,
                     amps = r.Amps, channel = r.Channel, description = r.Description, state = r.State, note = r.Note,
                     effect = Core.Flow.PanelDirectoryImport.Effect(panel, r),
-                    // A channel the line names that the bridge does not read is kept, and said to be unknown.
+                    // Unknown channels are kept and flagged.
                     channelKnown = r.Channel.Length == 0 || known.Contains(r.Channel),
                 }).ToArray();
                 return Results.Json(new { ok = true, rows }, ConfigSchema.Json);
@@ -1208,14 +1176,13 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // Restart a tier — or everything.
+        // Restart a tier, or everything.
         app.MapPost("/api/restart", async (HttpContext ctx) =>
         {
             var target = (ctx.Request.Query["target"].FirstOrDefault() ?? "local").Trim().ToLowerInvariant();
 
             if (target is "" or "local")
             {
-                // #192: the restarter decides how — replacing the pod under Kubernetes, stopping otherwise.
                 if (restarter is not null)
                 {
                     var message = await restarter.RestartAsync("GUI request");
@@ -1239,7 +1206,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 catch (Exception ex) { return Results.Json(new { ok = false, message = $"Rollout restart failed: {ex.Message}" }, ConfigSchema.Json); }
             }
 
-            // Non-Kubernetes: ask the matching process(es) to restart over the bus.
+            // Non-Kubernetes: restart matching processes over the bus.
             try
             {
                 var cmd = new Core.RestartCommand(target, DateTime.UtcNow);
@@ -1253,7 +1220,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = $"Could not publish restart: {ex.Message}" }, ConfigSchema.Json); }
         });
 
-        // What can be restarted, and how, so the Diagnostics page renders the right buttons.
+        // Restartable targets, for the Diagnostics page buttons.
         app.MapGet("/api/restart/targets", async (HttpContext ctx) =>
         {
             if (configSource is KubernetesConfigSource kube)
@@ -1261,7 +1228,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var targets = new List<object> { new { id = "all", label = "Everything" } };
                 try
                 {
-                    // Only the tiers of a split deployment need their own button.
+                    // Only split-deployment tiers get their own button.
                     foreach (var d in (await AppDeploymentsAsync(kube, ctx.RequestAborted)).OrderBy(d => d.Metadata?.Name))
                     {
                         var comp = ComponentOf(d);
@@ -1272,7 +1239,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = true, method = "rollout", targets }, ConfigSchema.Json);
             }
 
-            // Non-Kubernetes: offer whole roles seen in the cluster (split deployment), else just this process.
+            // Non-Kubernetes: roles seen in the cluster, else this process.
             var procs = processes?.Active() ?? [];
             var roles = procs.SelectMany(p => p.Roles).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(r => r).ToList();
             if (procs.Count > 1 && roles.Count > 0)
@@ -1284,7 +1251,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             return Results.Json(new { ok = true, method = "local", targets = new[] { new { id = "local", label = "This process" } } }, ConfigSchema.Json);
         });
 
-        // Tail of this pod's container logs (Kubernetes config source only).
+        // Tail of this pod's container logs (Kubernetes only).
         app.MapGet("/api/diagnostics/logs", async (HttpContext ctx) =>
         {
             if (configSource is not KubernetesConfigSource k8s)
@@ -1304,7 +1271,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // Recent Kubernetes events for this pod (Kubernetes config source only).
+        // Recent Kubernetes events for this pod.
         app.MapGet("/api/diagnostics/events", async (HttpContext ctx) =>
         {
             if (configSource is not KubernetesConfigSource k8s)
@@ -1334,7 +1301,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // Browse what's on the broker, for the Nodes editor's topic autocomplete.
+        // Browse the broker, for topic autocomplete.
         app.MapGet("/api/ha/devices/stale", async () =>
         {
             try
@@ -1353,10 +1320,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         {
             try
             {
-                // Re-read rather than trusting a list the browser has been holding.
                 var stale = await haEnergy.StaleDevicesAsync();
 
-                // An optional id list lets the caller work through them in batches.
+                // Optional id list for batching.
                 System.Text.Json.Nodes.JsonNode? body = null;
                 try
                 {
@@ -1379,13 +1345,12 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // Retained Home Assistant discovery configs this build would no longer publish — and, on POST.
+        // Retained HA discovery configs this build would no longer publish; POST removes them.
         async Task<IReadOnlyList<Core.Discovery.TopicSample>> ScanAsync(string filter, CancellationToken ct)
         {
             var index = topicIndex;
             return await Core.Flow.TopicIndexScan.SettleAsync<Core.Discovery.TopicSample>(
-                // The index is synchronous now, so these adapt it to the helper's async shape rather than
-                // the helper pretending an in-memory dictionary needs awaiting.
+                // Adapt the synchronous index to the helper's async shape.
                 renew: () => { index.Renew(filter); return Task.CompletedTask; },
                 search: () => Task.FromResult<IReadOnlyList<Core.Discovery.TopicSample>>(index.Search(null, 5000)),
                 delay: d => Task.Delay(d, ct),
@@ -1395,7 +1360,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 ct: ct);
         }
 
-        // Power/energy readings other integrations already announce over Home Assistant MQTT discovery.
+        // Power/energy readings other integrations announce via HA MQTT discovery.
         app.MapGet("/api/mqtt/importable", async (HttpContext ctx) =>
         {
             try
@@ -1436,7 +1401,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // Readings matched by topic shape, for publishers that do not announce Home Assistant discovery.
+        // Readings matched by topic shape, for publishers without HA discovery.
         app.MapGet("/api/mqtt/importable/pattern", async (HttpContext ctx) =>
         {
             try
@@ -1472,7 +1437,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // One profile's full definition, for copying a built-in into MQTT.ImportProfiles to edit.
+        // One profile's full definition, for copying into MQTT.ImportProfiles.
         app.MapGet("/api/mqtt/profile", (HttpContext ctx) =>
         {
             var p = Core.Flow.MqttTopicProfile.Resolve(ctx.Request.Query["id"].ToString(), config.MQTT.ImportProfiles);
@@ -1509,7 +1474,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var found = await OrphanedDiscoveryAsync();
-                // An empty retained payload is how MQTT deletes a retained message.
+                // An empty retained payload deletes a retained message.
                 foreach (var topic in found)
                     await mqtt.PublishAsync(new MQTT5PublishMessage(topic, QualityOfService.AtLeastOnceDelivery)
                     {
@@ -1529,13 +1494,30 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var index = topicIndex;
-                // The filter to browse (default '#'); a restricted broker can narrow it, e.g. 'solar_assistant/#'.
+                // Browse filter, default '#'.
                 var filter = ctx.Request.Query["filter"].FirstOrDefault();
                 var state = index.Renew(filter);
                 var q = ctx.Request.Query["q"].FirstOrDefault();
                 var limit = int.TryParse(ctx.Request.Query["limit"].FirstOrDefault(), out var n) ? n : 50;
 
-                var topics = (index.Search(q, limit)).Select(t =>
+                // The explorer asks for everything once, then only what changed after its cursor.
+                if (long.TryParse(ctx.Request.Query["since"].FirstOrDefault(), out var since))
+                {
+                    var changes = index.Changes(since, ctx.Request.Query["epoch"].FirstOrDefault());
+                    var st = changes.State;
+                    return Results.Json(new
+                    {
+                        ok = true, listening = st.Listening, indexed = st.Topics, capacity = st.Capacity, filter = st.Filter, granted = st.Granted,
+                        cursor = changes.Cursor, epoch = changes.Epoch, reset = changes.Reset,
+                        topics = changes.Topics.Select(t => Describe(index, t)).ToArray(),
+                    }, ConfigSchema.Json);
+                }
+
+                var topics = (index.Search(q, limit)).Select(t => Describe(index, t)).ToArray();
+
+                return Results.Json(new { ok = true, listening = state.Listening, indexed = state.Topics, capacity = state.Capacity, filter = state.Filter, granted = state.Granted, topics }, ConfigSchema.Json);
+
+                static object Describe(Core.Discovery.TopicIndex index, Core.Discovery.TopicSample t)
                 {
                     var hint = Core.Flow.TopicSampleAnalyzer.Analyze(t.Topic, t.Payload);
                     return new
@@ -1543,28 +1525,27 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                         topic = t.Topic,
                         payload = t.Payload,
                         seenUtc = t.SeenUtc,
+                        messages = t.Messages,
                         metric = hint.Metric,
                         unit = hint.Unit,
                         value = hint.Value,
                         isJson = hint.IsJson,
                         fields = hint.Fields,
+                        trend = index.Trend(t.Topic),
                     };
-                }).ToArray();
-
-                // "listening" tells the editor whether anything is feeding the index yet.
-                return Results.Json(new { ok = true, listening = state.Listening, indexed = state.Topics, capacity = state.Capacity, filter = state.Filter, granted = state.Granted, topics }, ConfigSchema.Json);
+                }
             }
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // One topic's last payload and what it implies — the metric/unit to bind.
+        // One topic's last payload and the metric/unit it implies.
         app.MapGet("/api/mqtt/topic", async (HttpContext ctx) =>
         {
             try
             {
                 var topic = ctx.Request.Query["topic"].FirstOrDefault() ?? "";
                 var index = topicIndex;
-                index.Renew(null);   // keep the current browse filter alive; we only want one topic's detail
+                index.Renew(null);   // keep the current browse filter alive
                 var sample = index.Get(topic);
                 if (sample is null)
                     return Results.Json(new { ok = false, message = "Nothing has been seen on that topic yet." }, ConfigSchema.Json);
@@ -1587,7 +1568,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // Read a block of registers off a Modbus device — the explorer behind "Browse registers".
+        // Read a block of registers off a Modbus device.
         app.MapPost("/api/modbus/scan", async (HttpContext ctx) =>
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
@@ -1602,7 +1583,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var count = Math.Clamp(req.Count <= 0 ? 32 : req.Count, 1, 125);   // Modbus caps a read at 125 registers
                 var bank = string.IsNullOrWhiteSpace(req.RegisterType) ? "holding" : req.RegisterType!;
 
-                // Each register is read as uint16 and int16, and each pair additionally as float32/int32.
+                // Each register as uint16/int16, and each pair as float32/int32.
                 var items = new List<EnergyFlowSource>();
                 for (var i = 0; i < count; i++)
                 {
@@ -1615,7 +1596,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var (ok, message, readings) = await Task.Run(() => EnergyFlowModbusSourceService.Probe(
                     req.Host, req.Port <= 0 ? 502 : req.Port, req.UnitId <= 0 ? 1 : req.UnitId, req.Framing, req.TimeoutMs, items), cts.Token);
 
-                // Fold the four decodings of each register back into one row.
+                // Fold the four decodings of each register into one row.
                 var rows = new List<object>();
                 for (var i = 0; i < count; i++)
                 {
@@ -1637,7 +1618,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // Probe a Modbus TCP device: connect, and optionally read a set of register specs.
+        // Probe a Modbus TCP device: connect and optionally read register specs.
         app.MapPost("/api/modbus/probe", async (HttpContext ctx) =>
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
@@ -1657,7 +1638,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // Current live value per (node, metric) as the running ingests hold it.
+        // Current live value per (node, metric).
         app.MapPost("/api/flow/live", async (HttpContext ctx) =>
         {
             try
@@ -1665,7 +1646,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var reqs = await System.Text.Json.JsonSerializer.DeserializeAsync<List<LiveValueQuery>>(
                     ctx.Request.Body, ProbeJson, ctx.RequestAborted) ?? new();
 
-                // ?at=<ISO-8601> answers from history instead: what each was at that moment (#514).
+                // ?at=<ISO-8601> answers from history.
                 if (DateTime.TryParse(ctx.Request.Query["at"].ToString(), null,
                         System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var at))
                 {
@@ -1686,7 +1667,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     return Results.Json(new { ok = true, historical = true, at, source = history.Id, values = past }, ConfigSchema.Json);
                 }
 
-                // `value` keeps its meaning exactly: the reading only if it can still be believed.
+                // `value` is the reading only if still trustworthy.
                 var diag = live as Core.Flow.IFlowValueDiagnostics;
                 var values = reqs.Select(q =>
                 {
@@ -1711,9 +1692,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // Does the history backend actually answer?
-        // The directories this process writes to, and the room left where each sits. A volume that did not
-        // mount, or one that is full, otherwise looks like readings quietly not being kept.
+        // Does the history backend answer?
+        // Data directories this process writes to, and free space on each.
         app.MapGet("/api/diagnostics/storage", (HttpContext ctx) =>
         {
             var entries = Core.StorageUsage.Locations(config, localHistory?.Root, global::rPDU2MQTT.Plugins.PluginLoader.DefaultDirectory);
@@ -1724,17 +1704,15 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 entries = entries.Select(e => new
                 {
                     e.Name, e.Path, e.Exists, e.Writable, e.Bytes, e.Files, e.Mount, e.TotalBytes, e.FreeBytes,
-                    // The same verdict the Status card uses, so the table cannot call fine what the card calls full.
+                    // Same verdict as the Status card.
                     state = Core.StorageUsage.StateOf(e).ToString(),
-                    // How full the volume is on its own, for colouring the Used column — plugins included,
-                    // whose directory is only read and so never makes the state above worse than Ok.
+                    // Volume fullness alone, for colouring the Used column.
                     room = Core.StorageUsage.Room(e.FreeBytes, e.TotalBytes).ToString(),
                 }).ToList(),
             }, ConfigSchema.Json);
         });
 
-        // Where the readings are actually being written, which the LocalPath setting does not say when it is
-        // empty: the directory then comes from RPDU2MQTT_HISTORY_DIRECTORY or falls back beside the program.
+        // Where readings are actually written, resolving an empty LocalPath.
         app.MapGet("/api/history/store", (HttpContext ctx) =>
         {
             if (localHistory is null) return Results.Json(new { ok = false, message = "No local history store in this process." }, ConfigSchema.Json);
@@ -1763,7 +1741,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }, ConfigSchema.Json);
         });
 
-        // Copying history between backends: which can be read and written, how far a copy has got, and starting one.
+        // Copying history between backends: capabilities, progress, and start.
         app.MapGet("/api/history/copy", () => historyCopy is null
             ? Results.Json(new { ok = false, message = "History copying is not available in this process." }, ConfigSchema.Json)
             : Results.Json(new { ok = true, backends = historyCopy.Backends(), status = historyCopy.Status() }, ConfigSchema.Json));
@@ -1785,10 +1763,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 return Results.Json(new { ok = false, message = "No history backend is wired in this process." }, ConfigSchema.Json);
             try
             {
-                // Asks a question no single integration can: "is the backend the History setting SELECTED
-                // answering?" — the answer changes when that setting changes, not when an integration does.
-                // But it is not a second implementation: the selected provider is an integration, so its own
-                // probe is what runs, and this endpoint only resolves which one that is.
+                // Probes the integration selected by the History setting.
                 var selected = integrations?.ById(config.History.Provider);
                 if (selected is not null)
                 {
@@ -1802,7 +1777,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // HA Energy Mapping (#128): push the current hierarchy into HA's Energy Dashboard now, or clear it.
+        // Push the hierarchy into HA's Energy Dashboard, or clear it.
         app.MapPost("/api/ha-energy/sync", async (HttpContext ctx) =>
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
@@ -1839,13 +1814,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // --- Integrations: one route shape for every one of them, built-in or plugin ------------------
-        // What an integration can do is derived from the capabilities it declares (probe / publish / sweep)
-        // plus whatever it adds through IIntegrationApi — so a plugin dropped into plugins/ is reachable
-        // here without a line of routing written for it.
+        // Integrations: one route shape for built-in and plugin integrations.
 
-        // Everything that can offer nodes to adopt, asked at once. Discovery only — this never writes a
-        // node; what is adopted and what it is called stay the operator's.
+        // Nodes offered for adoption by every provider; discovery only.
         app.MapGet("/api/discover/nodes", async (HttpContext ctx) =>
         {
             var search = ctx.Request.Query["q"].ToString();
@@ -1859,12 +1830,14 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 }
                 catch (Exception ex)
                 {
-                    // One provider that cannot answer must not empty the picker for the others.
+                    // One failing provider must not empty the picker.
                     Log.Debug($"Node discovery from {provider.GetType().Name} failed: {ex.Message}");
                 }
             }
             return Results.Json(new { ok = true, nodes = found }, ConfigSchema.Json);
         });
+
+        app.MapGet("/api/plugins", () => Results.Json(pluginCatalog?.Plugins ?? [], ConfigSchema.Json));
 
         app.MapGet("/api/integrations", () =>
         {
@@ -1881,8 +1854,25 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 {
                     name = a.Name, title = a.Title, description = a.Description, effect = a.Effect.ToString().ToLowerInvariant(),
                 }),
+                pages = i is Core.Integrations.IGuiPageProvider p && i.Enabled(config)
+                    ? p.Pages.Select(g => new { id = g.Id, title = g.Title, group = g.Group, icon = g.Icon, configSection = g.ConfigSection })
+                    : null,
+                managedNodes = i is Core.Integrations.INodeManager m && i.Enabled(config)
+                    ? m.ManagedNodes.Select(r => new { sourceType = r.SourceType, tag = r.Tag })
+                    : null,
             });
             return Results.Json(new { ok = true, integrations = list }, ConfigSchema.Json);
+        });
+
+        // Serves a plugin page's script and stylesheet.
+        app.MapGet("/api/integrations/{id}/pages/{file}", (string id, string file) =>
+        {
+            if (integrations?.ById(id) is not Core.Integrations.IGuiPageProvider provider
+                || !provider.Pages.Any(g => file == g.Id + ".js" || file == g.Id + ".css"))
+                return Results.NotFound();
+            var text = provider.PageAsset(file);
+            if (text is null) return file.EndsWith(".css", StringComparison.Ordinal) ? Results.Content("", "text/css") : Results.NotFound();
+            return Results.Content(text, file.EndsWith(".css", StringComparison.Ordinal) ? "text/css" : "text/javascript");
         });
 
         app.MapPost("/api/integrations/{id}/{action}", async (string id, string action, HttpContext ctx) =>
@@ -1895,7 +1885,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             var found = Core.Integrations.IntegrationActions.Find(integration, action, CurrentPass);
             if (found is null) return Results.Json(new { ok = false, message = $"'{integration.DisplayName}' has no action called '{action}'." }, ConfigSchema.Json);
 
-            // Query string and form fields, flattened — an action never sees HttpContext.
+            // Query string and form fields, flattened.
             var args = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
             foreach (var (k, v) in ctx.Request.Query) args[k] = v.ToString();
             if (ctx.Request.HasFormContentType)
@@ -1912,7 +1902,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // Live discovered structure (keys + current names) for the Overrides editor.
+        // Live discovered structure for the Overrides editor.
         app.MapGet("/api/live", async (HttpContext ctx) =>
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
@@ -1922,7 +1912,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var (id, pdu, _) = ResolveInstance(ctx.Request.Query["instance"]);
                 var data = await ResolveData(id, pdu, cts.Token);
 
-                // The raw PDU label/name plus the currently-discovered display name and object_id.
+                // Raw PDU label plus discovered display name and object_id.
                 var devices = data.Devices.Select(d => new
                 {
                     key = d.Key,
@@ -1932,7 +1922,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     objectId = d.Entity_Name,
                     outlets = d.Outlets.OrderBy(o => o.Key).Select(o => new
                     {
-                        // 1-based: matches the PDU UI and the outlet override keys (Outlets.<n>).
+                        // 1-based, matching outlet override keys (Outlets.<n>).
                         index = o.Key + 1,
                         label = o.Label,
                         name = o.Name,
@@ -1966,7 +1956,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // Live readings pulled from the PDU(s), for the read-only "Live Data" view.
+        // Live readings for the Live Data view.
         app.MapGet("/api/livedata", async (HttpContext ctx) =>
         {
             return Results.Json(await BuildLiveDataAsync(ctx.Request.Query["instance"], ctx.RequestAborted), ConfigSchema.Json);
@@ -1989,10 +1979,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // Power/energy flow graph (PDU -> outlets) for the Sankey "Flow" tab.
+        // Energy-flow graph for the Flow tab.
         app.MapGet("/api/flow", async (HttpContext ctx) =>
         {
-            // ?at=<ISO-8601> renders the moment instead of now.
+            // ?at=<ISO-8601> renders that moment.
             DateTime? at = DateTime.TryParse(ctx.Request.Query["at"].ToString(), null,
                 System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed)
                 ? parsed : null;
@@ -2001,14 +1991,15 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             return Results.Json(await BuildFlowAsync(ctx.Request.Query["instance"], ctx.Request.Query["metric"].ToString(), ctx.RequestAborted, at, span), ConfigSchema.Json);
         });
 
-        // One value per node per day over a window — what the Trends page charts.
+        // One value per node per day over a window, for the Trends page.
         app.MapGet("/api/flow/series", async (HttpContext ctx) =>
         {
+            var only = ctx.Request.Query["nodes"].ToString().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             DateTime end = DateTime.TryParse(ctx.Request.Query["at"].ToString(), null,
                 System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var parsed)
                 ? parsed : DateTime.UtcNow;
 
-            // A stretch picked on a timeline: any two instants, sampled at a step that fits them.
+            // A timeline selection: two instants at a fitting step.
             DateTime? Instant(string key) => DateTime.TryParse(ctx.Request.Query[key].ToString(), null,
                 System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var instant)
                 ? instant : null;
@@ -2017,20 +2008,19 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var stepPicked = SeriesWindow.ClampStep(int.TryParse(ctx.Request.Query["step"].ToString(), out var sp) ? sp : null, 300);
                 var metricPicked = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
                 return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricPicked,
-                    SeriesWindow.Instants(picked.From, picked.To, stepPicked), null, null, ctx.RequestAborted, stepPicked), ConfigSchema.Json);
+                    SeriesWindow.Instants(picked.From, picked.To, stepPicked), null, null, ctx.RequestAborted, stepPicked, only), ConfigSchema.Json);
             }
 
-            // Two shapes of question, and they are not the same question.
             if (ctx.Request.Query["today"] == "1")
             {
                 var dayZone = EnergyPeriod.Resolve(config.EnergyFlow.Aggregation.PeriodTimeZone);
-                // ?back=<n> charts a whole earlier period instead — yesterday is back=1.
+                // ?back=<n> charts an earlier period; yesterday is back=1.
                 var back = int.TryParse(ctx.Request.Query["back"].ToString(), out var bk) ? Math.Clamp(bk, 0, 366) : 0;
                 (var began, end) = EnergyPeriod.Window(end, dayZone, config.EnergyFlow.Aggregation.PeriodStartHour, back);
                 var stepToday = SeriesWindow.ClampStep(int.TryParse(ctx.Request.Query["step"].ToString(), out var ts) ? ts : null, 300);
                 var metricToday = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
                 return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricToday,
-                    SeriesWindow.Instants(began, end, stepToday), null, null, ctx.RequestAborted, stepToday), ConfigSchema.Json);
+                    SeriesWindow.Instants(began, end, stepToday), null, null, ctx.RequestAborted, stepToday, only), ConfigSchema.Json);
             }
 
             if (int.TryParse(ctx.Request.Query["minutes"].ToString(), out var mins))
@@ -2038,37 +2028,33 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var step = SeriesWindow.ClampStep(int.TryParse(ctx.Request.Query["step"].ToString(), out var st) ? st : null, 300);
                 var span = TimeSpan.FromMinutes(Math.Clamp(mins, 5, SeriesWindow.MaxMinutes));
                 var metricNow = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowGraphBuilder.DefaultMetric : ctx.Request.Query["metric"].ToString();
-                // No labels: a moment within a day is named in the viewer's zone.
                 return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metricNow,
-                    SeriesWindow.Instants(end - span, end, step), null, null, ctx.RequestAborted, step), ConfigSchema.Json);
+                    SeriesWindow.Instants(end - span, end, step), null, null, ctx.RequestAborted, step, only), ConfigSchema.Json);
             }
 
-            // Up to a year: "this year" is a period people ask for, and 92 days silently answered a different
-            // question than the one the button said.
+            // Up to a year.
             var days = int.TryParse(ctx.Request.Query["days"].ToString(), out var d) ? Math.Clamp(d, 2, 366) : 30;
             var metric = string.IsNullOrWhiteSpace(ctx.Request.Query["metric"]) ? FlowSpan.SpannableMetric : ctx.Request.Query["metric"].ToString();
 
             var zone = EnergyPeriod.Resolve(config.EnergyFlow.Aggregation.PeriodTimeZone);
 
-            // A step asks for samples through the days rather than one total per day.
+            // A step samples within days instead of one total per day.
             if (int.TryParse(ctx.Request.Query["step"].ToString(), out var sd))
             {
                 var stepDays = SeriesWindow.ClampStep(sd, 3600);
                 var (from, _) = EnergyPeriod.Window(end, zone, config.EnergyFlow.Aggregation.PeriodStartHour, days - 1);
                 return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metric,
-                    SeriesWindow.Instants(from, end, stepDays), null, null, ctx.RequestAborted, stepDays), ConfigSchema.Json);
+                    SeriesWindow.Instants(from, end, stepDays), null, null, ctx.RequestAborted, stepDays, only), ConfigSchema.Json);
             }
 
-            // Each day read at its own rollover, not at whatever time of day it happens to be now.
+            // Each day read at its own rollover.
             var periods = EnergyPeriod.RecentPeriodEnds(end, zone, config.EnergyFlow.Aggregation.PeriodStartHour, days);
             return Results.Json(await BuildSeriesAsync(ctx.Request.Query["instance"], metric,
                 periods.Select(p => p.AtUtc).ToList(), periods.Select(p => p.Day).ToList(),
-                periods[^1].Complete ? null : periods[^1].Day, ctx.RequestAborted), ConfigSchema.Json);
+                periods[^1].Complete ? null : periods[^1].Day, ctx.RequestAborted, null, only), ConfigSchema.Json);
         });
 
-        // Which metrics history can be asked for, so the page offers the ones that were actually exported
-        // rather than a hardcoded guess. Units come with them: whether a bar is a rate or a quantity decides
-        // what arithmetic the page is allowed to do on it.
+        // Exported history metrics with units.
         app.MapGet("/api/flow/metrics", () => Results.Json(new
         {
             ok = true,
@@ -2076,9 +2062,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 .Select(m => new { metric = m, units = FlowUnits.Canonical(m), epoch = FlowUnits.Epoch(m) }),
         }, ConfigSchema.Json));
 
-        // The relations a calculated binding can use. Served rather than restated in TypeScript: the editor
-        // has to name the pairs that would work, and a second copy of the electrics is a second thing to be
-        // wrong about.
+        // Relations a calculated binding can use.
         app.MapGet("/api/flow/derivations", () => Results.Json(new
         {
             ok = true,
@@ -2091,7 +2075,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }),
         }, ConfigSchema.Json));
 
-        // Readings the bridge is deliberately dropping, and why.
+        // Readings the bridge drops, and why.
         app.MapGet("/api/flow/withheld", (HttpContext ctx) =>
         {
             var withheld = (live as Core.Flow.IWithheldSources)?.Withheld ?? Array.Empty<Core.Flow.WithheldSource>();
@@ -2102,7 +2086,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }, ConfigSchema.Json);
         });
 
-        // Preview the generated paths with the posted (unsaved) config applied.
+        // Preview the generated paths with the posted (unsaved) config.
         app.MapPost("/api/paths/preview", async (HttpContext ctx) =>
         {
             using var reader = new StreamReader(ctx.Request.Body);
@@ -2116,7 +2100,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             cts.CancelAfter(TimeSpan.FromSeconds(20));
             try
             {
-                var data = await pduFactory.Create(parsed.Primary, parsed).GetRootData_Public(cts.Token);
+                if (registry.Preview(parsed) is not { } preview)
+                    return Results.Json(new { ok = false, message = NoPdu }, ConfigSchema.Json);
+                var data = await preview.ReadAsync(cts.Token);
                 return Results.Json(BuildPaths(data, parsed), ConfigSchema.Json);
             }
             catch (Exception ex)
@@ -2125,7 +2111,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // Outlets available for control, with their current state (drives the Control tab).
+        // Outlets available for control, with current state.
         app.MapGet("/api/control/outlets", async (HttpContext ctx) =>
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted);
@@ -2133,6 +2119,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var (id, pdu, instanceCfg) = ResolveInstance(ctx.Request.Query["instance"]);
+                if (pdu is null) return Results.Json(new { ok = false, message = NoPdu }, ConfigSchema.Json);
                 var data = await ResolveData(id, pdu, cts.Token);
                 var outlets = data.Devices.SelectMany(d => d.Outlets.OrderBy(o => o.Key).Select(o => new
                 {
@@ -2141,7 +2128,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     index = o.Key,        // raw key the control API expects
                     number = o.Key + 1,   // 1-based, matching the PDU UI
                     name = o.Entity_DisplayName,
-                    // Resolve through the pending-write latch so a value just set here shows immediately.
+                    // Resolve through the pending-write latch so a just-set value shows.
                     label = pdu.ResolveOutletConfig(d.Key, o.Key, "label", o.Label ?? ""),
                     state = pdu.ResolveOutletState(d.Key, o.Key, o.State),
                     onDelay = pdu.ResolveOutletConfig(d.Key, o.Key, "onDelay", o.OnDelay.ToString()),
@@ -2149,7 +2136,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     rebootDelay = pdu.ResolveOutletConfig(d.Key, o.Key, "rebootDelay", o.RebootDelay.ToString()),
                     poaAction = pdu.ResolveOutletConfig(d.Key, o.Key, "poaAction", o.PoaAction ?? ""),
                 })).ToList();
-                // Member-outlet lookup (deviceId, index) so each group can show per-member state.
+                // Member-outlet lookup (deviceId, index) for per-member state.
                 var outletByKey = data.Devices
                     .SelectMany(d => d.Outlets.Select(o => (dev: d, outlet: o)))
                     .ToDictionary(x => (x.dev.Key, x.outlet.Key));
@@ -2169,7 +2156,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                         };
                     }).ToList(),
                 }).ToList();
-                // PDUs and their circuits (breaker entities), with editable labels.
+                // PDUs and their circuits, with editable labels.
                 var devices = data.Devices.Select(d => new
                 {
                     deviceId = d.Key,
@@ -2193,7 +2180,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // Apply a control action to every outlet in a OneView group (fan-out). Gated by ActionsEnabled.
+        // Control every outlet in a OneView group. Gated by ActionsEnabled.
         app.MapPost("/api/control/group", async (HttpContext ctx) =>
         {
             GroupControlRequest? req;
@@ -2203,6 +2190,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 return Results.BadRequest(new { ok = false, message = "groupKey and action are required." });
 
             var (_, pdu, instanceCfg) = ResolveInstance(req.Instance);
+            if (pdu is null)
+                return Results.Json(new { ok = false, message = NoPdu }, statusCode: 404);
             if (!instanceCfg.ActionsEnabled)
                 return Results.Json(new { ok = false, message = "Write actions are disabled for this PDU instance (ActionsEnabled is false)." }, statusCode: 409);
 
@@ -2223,7 +2212,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // Issue an outlet control action (on/off/reboot). Gated by PDU.ActionsEnabled.
+        // Outlet control action (on/off/reboot). Gated by PDU.ActionsEnabled.
         app.MapPost("/api/control/outlet", async (HttpContext ctx) =>
         {
             ControlRequest? req;
@@ -2233,6 +2222,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 return Results.BadRequest(new { ok = false, message = "deviceId, index and action are required." });
 
             var (_, pdu, instanceCfg) = ResolveInstance(req.Instance);
+            if (pdu is null)
+                return Results.Json(new { ok = false, message = NoPdu }, statusCode: 404);
             if (!instanceCfg.ActionsEnabled)
                 return Results.Json(new { ok = false, message = "Write actions are disabled for this PDU instance (ActionsEnabled is false)." }, statusCode: 409);
 
@@ -2246,13 +2237,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             {
                 if (action == "resetstats")
                     await pdu.ResetOutletStatsAsync(req.DeviceId, req.Index, cts.Token);
-                // Through the write seam, not the Vertiv client directly: the seam is what routes a
-                // plugin-supplied device's outlet to the plugin that owns it. Calling the client meant this
-                // page could only ever switch a Vertiv PDU, however the device got here.
+                // Via the write seam, which routes plugin devices to their plugin.
                 else if (outletControl is not null)
                 {
-                    // Report what the write DID. Answering ok to a refusal is how a button that does
-                    // nothing looks like it worked, and the outlet is still on when the page refreshes.
+                    // Report what the write actually did.
                     var wrote = await outletControl.Control(req.DeviceId, req.Index, action, cts.Token);
                     return Results.Json(
                         new { ok = wrote.Ok, message = wrote.Ok ? $"Outlet {req.Index + 1} → {action}." : wrote.Message },
@@ -2268,7 +2256,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // Write an outlet's label on the PDU itself (cmd "set"). Gated by PDU.ActionsEnabled.
+        // Write an outlet's label on the PDU. Gated by PDU.ActionsEnabled.
         app.MapPost("/api/control/label", async (HttpContext ctx) =>
         {
             LabelRequest? req;
@@ -2278,11 +2266,13 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 return Results.BadRequest(new { ok = false, message = "A label request body is required." });
 
             var (_, pdu, instanceCfg) = ResolveInstance(req.Instance);
+            if (pdu is null)
+                return Results.Json(new { ok = false, message = NoPdu }, statusCode: 404);
             if (!instanceCfg.ActionsEnabled)
                 return Results.Json(new { ok = false, message = "Write actions are disabled for this PDU instance (ActionsEnabled is false)." }, statusCode: 409);
 
             var target = (req.Target ?? "outlet").Trim().ToLowerInvariant();
-            // Group labels target the OneView master, not a specific device; everything else needs a deviceId.
+            // Group labels target the OneView master; others need a deviceId.
             if (target != "group" && string.IsNullOrWhiteSpace(req.DeviceId))
                 return Results.BadRequest(new { ok = false, message = "deviceId is required." });
 
@@ -2318,7 +2308,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // Render the current form state as YAML (for copy/paste into a ConfigMap, source control, etc.).
+        // Render the current form state as YAML.
         app.MapPost("/api/config/import", async (HttpContext ctx) =>
         {
             try
@@ -2332,7 +2322,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     ? Core.ConfigImportMode.Replace
                     : Core.ConfigImportMode.Merge;
 
-                // Merge against what the form currently holds (which may be unsaved), not against the file.
+                // Merge against the form state, not the file.
                 var current = string.IsNullOrWhiteSpace(req.Current) ? config : ConfigSchema.FromJson(req.Current!);
                 var result = Core.ConfigImport.Apply(current, req.Yaml ?? "", mode);
 
@@ -2362,7 +2352,6 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
         app.MapPost("/api/discovery/rediscover", async () =>
         {
-            // The live flag, not whether a service happens to be registered.
             if (!config.HASS.DiscoveryEnabled)
                 return Results.Json(new { ok = false, message = "Home Assistant discovery is turned off. Turn it on and save; no restart needed." }, ConfigSchema.Json);
 
@@ -2372,12 +2361,12 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
         app.MapPost("/api/discovery/clear", async () =>
         {
-            // Deliberately NOT gated on DiscoveryEnabled.
+            // Not gated on DiscoveryEnabled.
 
-            // First the services' own clear: each forgets and retracts what it published this run.
+            // First each service clears what it published.
             await discovery.RequestClearAsync(CancellationToken.None);
 
-            // Then everything else of ours still retained on the broker.
+            // Then any of our other retained configs on the broker.
             var swept = 0;
             var message = "Cleared the retained Home Assistant discovery messages.";
             try
@@ -2386,7 +2375,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var root = (prefix ?? "").Trim().Trim('/');
                 var index = topicIndex;
 
-                // The index only fills while someone is reading it.
+                // The index only fills while being read.
                 var state = index.Renew(root + "/#");
                 for (var i = 0; i < 30 && !(state.Listening && state.Granted != false); i++)
                 {
@@ -2397,9 +2386,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                     throw new InvalidOperationException($"the broker refused a subscription to '{root}/#', so what is retained there cannot be read");
                 if (!state.Listening)
                     throw new InvalidOperationException("no process is feeding the topic index, so what is retained on the broker cannot be read");
-                await Task.Delay(2000);   // retained messages arrive in a burst; let it finish
+                await Task.Delay(2000);   // let the retained burst arrive
 
-                // Uncapped on purpose: Search caps at 200 and orders by topic length.
+                // Uncapped: Search caps at 200.
                 var retained = index.TopicsUnder(root + "/");
 
                 foreach (var topic in Core.HomeAssistant.HaDiscoveryTopics.Owned(retained, prefix))
@@ -2419,7 +2408,6 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
             catch (Exception ex)
             {
-                // The services' own clear already succeeded.
                 Log.Warning($"Clear discovery: the broker sweep failed ({ex.Message}); only this run's topics were cleared.");
                 message = "Cleared this run's discovery messages, but could not sweep the broker for older ones: " + ex.Message;
             }
@@ -2428,16 +2416,16 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         });
     }
 
-    /// <summary>Body of a POST /api/control/outlet request.</summary>
+    /// <summary>Body of POST /api/control/outlet.</summary>
     private sealed record ControlRequest(string DeviceId, int Index, string Action, string? Instance = null);
 
-    /// <summary>Body of a POST /api/control/label request.</summary>
+    /// <summary>Body of POST /api/control/label.</summary>
     private sealed record LabelRequest(string DeviceId, string? Target, int Index, string? EntityKey, string? GroupKey, string Label, string? Instance = null);
 
-    /// <summary>Body of a POST /api/control/group request.</summary>
+    /// <summary>Body of POST /api/control/group.</summary>
     private sealed record GroupControlRequest(string GroupKey, string Action, string? Instance = null);
 
-    /// <summary>One pivoted live-view row: an outlet/entity with its numeric measurements + state.</summary>
+    /// <summary>One pivoted live-view row: an outlet/entity with its measurements + state.</summary>
     private static object BuildLiveEntity(string device, string source, string kind, int? number, string? state, IEnumerable<Models.PDU.Measurement> measurements)
     {
         var values = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
@@ -2447,11 +2435,11 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         return new { device, source, kind, number, state, values };
     }
 
-    /// <summary>Parse a PDU measurement string to a number (null if missing/unparseable).</summary>
+    /// <summary>Parse a measurement string to a number, or null.</summary>
     private static double? ParseMeasure(string? s)
         => double.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
 
-    /// <summary>Project a poll's measurements into the generated MQTT/Prometheus/EmonCMS paths.</summary>
+    /// <summary>Project measurements into the generated MQTT/Prometheus/EmonCMS paths.</summary>
     private static object BuildPaths(Models.PDU.PduData data, Config config)
     {
         var promEnabled = config.Prometheus.Exporter || config.Prometheus.Pushgateway.Enabled;
@@ -2473,7 +2461,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
     private static string Version => rPDU2MQTT.Helpers.AppInfo.Version;
 
-    /// <summary>Render a config as an RpduConfig CR manifest (secrets redacted) for GitOps re-import.</summary>
+    /// <summary>Render a config as an RpduConfig CR manifest, secrets redacted.</summary>
     private static string BuildManifest(Config config)
     {
         var spec = ConfigSchema.ToYaml(ConfigSchema.RedactSecrets(config));
@@ -2491,7 +2479,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     private static string LoadIndexHtml()
         => LoadAsset("index.html") ?? "<html><body><h1>rPDU2MQTT</h1><p>GUI assets missing.</p></body></html>";
 
-    /// <summary>Read an embedded wwwroot asset by file-name suffix (e.g. "app.js").</summary>
+    /// <summary>Read an embedded wwwroot asset by file-name suffix.</summary>
     private static string? LoadAsset(string endsWith)
     {
         var asm = Assembly.GetExecutingAssembly();
@@ -2504,10 +2492,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         return reader.ReadToEnd();
     }
 
-    /// <summary>
-    /// Read the operator's update report from the CR <c>.status.update</c> (#210), or null if none. Bounded
-    /// by a short timeout so a slow/unreachable API server can never hang the header's /api/status call.
-    /// </summary>
+    /// <summary>Read the operator update report from the CR <c>.status.update</c>, with a short timeout.</summary>
     private async Task<object?> ReadOperatorUpdateAsync(KubernetesConfigSource? k8s, CancellationToken ct)
     {
         if (k8s is null) return null;   // operator only runs with the Kubernetes config source
@@ -2515,27 +2500,22 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         catch (Exception ex) { Log.Debug($"Could not read the operator's status: {ex.Message}"); return null; }
     }
 
-    /// <summary>
-    /// Ask the operator, or answer for it. There is no operator outside Kubernetes, so every caller needs
-    /// the same "it isn't here" answer — stated once, rather than each endpoint inventing its own.
-    /// </summary>
+    /// <summary>Ask the operator, or return <c>absent</c> outside Kubernetes.</summary>
     private Task<T> Operator<T>(Func<Core.Operator.IOperatorControl, Task<T>> ask, T absent)
         => deployOperator is null ? Task.FromResult(absent) : ask(deployOperator);
 
-    // --- Kubernetes rollout restart ------------------------------------------------------------
-
-    /// <summary>Deployment's component (tier) label, or "" — Metadata.Labels is IDictionary (no GetValueOrDefault).</summary>
+    /// <summary>Deployment's component label, or "".</summary>
     private static string ComponentOf(V1Deployment d)
         => d.Metadata?.Labels is { } l && l.TryGetValue("app.kubernetes.io/component", out var c) ? c : "";
 
-    /// <summary>This app's Deployments, found via the running pod's own labels so we only touch our own.</summary>
+    /// <summary>This app's Deployments, found via the running pod's labels.</summary>
     private async Task<IList<V1Deployment>> AppDeploymentsAsync(KubernetesConfigSource kube, CancellationToken ct)
     {
         var list = await kube.Client.AppsV1.ListNamespacedDeploymentAsync(kube.Namespace, labelSelector: await AppSelectorAsync(kube, ct), cancellationToken: ct);
         return list.Items;
     }
 
-    /// <summary>Label selector scoping to this release — read off this pod, else a sensible default.</summary>
+    /// <summary>Label selector for this release, from this pod or a default.</summary>
     private static async Task<string> AppSelectorAsync(KubernetesConfigSource kube, CancellationToken ct)
     {
         var podName = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME");
@@ -2555,11 +2535,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         return "app.kubernetes.io/name=rpdu2mqtt";
     }
 
-    /// <summary>
-    /// Roll restart the Deployment(s) matching <paramref name="target"/> ("all" or a component/role) by
-    /// stamping the pod template's <c>restartedAt</c> annotation — exactly what <c>kubectl rollout restart</c>
-    /// does, so pods cycle gracefully and re-pull the image. Returns the names actually patched.
-    /// </summary>
+    /// <summary>Rollout-restart matching Deployments via the <c>restartedAt</c> annotation; returns names patched.</summary>
     private async Task<List<string>> RolloutRestartAsync(KubernetesConfigSource kube, string target, CancellationToken ct)
     {
         var restarted = new List<string>();
@@ -2578,26 +2554,22 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         return restarted;
     }
 
-    // Case-insensitive so the GUI can post {host,...} or {Host,...}; Items map onto EnergyFlowSource's fields.
+    // Case-insensitive property binding.
     private static readonly System.Text.Json.JsonSerializerOptions ProbeJson = new() { PropertyNameCaseInsensitive = true };
 
-    /// <summary>Body of POST /api/modbus/probe: a device to reach + the register specs to read.</summary>
+    /// <summary>Body of POST /api/modbus/probe.</summary>
     private sealed record ModbusProbeRequest(string Host, int Port, int UnitId, string? Framing, int TimeoutMs, List<EnergyFlowSource>? Items);
 
-    /// <summary>Body of POST /api/config/import: the pasted YAML, how to apply it, and the form's current state.</summary>
+    /// <summary>Body of POST /api/config/import.</summary>
     private sealed record ConfigImportRequest(string? Yaml, string? Mode, string? Current);
 
-    /// <summary>Body of POST /api/modbus/scan: a device to reach + the block of registers to browse.</summary>
+    /// <summary>Body of POST /api/modbus/scan.</summary>
     private sealed record ModbusScanRequest(string Host, int Port, int UnitId, string? Framing, int TimeoutMs, int Start, int Count, string? RegisterType);
 
-    /// <summary>One (node, metric) whose current live value the Nodes editor wants.</summary>
+    /// <summary>A (node, metric) whose live value the Nodes editor wants.</summary>
     private sealed record LiveValueQuery(string? Node, string? Metric);
 
-    /// <summary>
-    /// The export pass as it stands right now, for actions that need to know what exists — publishing
-    /// configuration describes the nodes and devices there are. Null when nothing has been polled and no
-    /// hierarchy is configured, so a publish declines rather than telling the far end everything is gone.
-    /// </summary>
+    /// <summary>The current export pass, or null when nothing is polled or configured.</summary>
     private Core.Integrations.ExportPass? CurrentPass()
     {
         try

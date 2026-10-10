@@ -3,10 +3,8 @@
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 		<TargetFramework>net10.0</TargetFramework>
-		<Version>1.0.0</Version>
-		<!-- Human-readable app version surfaced in the GUI / MQTT discovery / heartbeat.
-		     Overridden at build time via /p:InformationalVersion=... (see Dockerfile + docker-publish.yml).
-		     Releases get a clean semver; dev builds get a traceable pre-release string. -->
+		<Version>2.0.0</Version>
+		<!-- App version shown in GUI / MQTT discovery / heartbeat; overridden via /p:InformationalVersion. -->
 		<InformationalVersion>0.0.0-local</InformationalVersion>
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
 		<ImplicitUsings>enable</ImplicitUsings>
@@ -29,15 +27,18 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<!-- Composition root references every layer. -->
 		<ProjectReference Include="..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" />
 		<ProjectReference Include="..\rPDU2MQTT.Engine\rPDU2MQTT.Engine.csproj" />
 		<ProjectReference Include="..\rPDU2MQTT.Api\rPDU2MQTT.Api.csproj" />
 		<ProjectReference Include="..\rPDU2MQTT.Web\rPDU2MQTT.Web.csproj" />
+		<!-- Bundled plugins: built with the bridge, not referenced by it. -->
+		<ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.EmonCms\rPDU2MQTT.Plugin.EmonCms.csproj" ReferenceOutputAssembly="false" Private="false" />
+		<ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.FloorPlan\rPDU2MQTT.Plugin.FloorPlan.csproj" ReferenceOutputAssembly="false" Private="false" />
+		<ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.Tigo\rPDU2MQTT.Plugin.Tigo.csproj" ReferenceOutputAssembly="false" Private="false" />
+		<ProjectReference Include="..\plugins\rPDU2MQTT.Plugin.Vertiv\rPDU2MQTT.Plugin.Vertiv.csproj" ReferenceOutputAssembly="false" Private="false" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<!-- Host composition (DI wiring) + logging setup use HiveMQ + Serilog directly. -->
 		<PackageReference Include="HiveMQtt" Version="0.47.1" />
 		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
 		<PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
@@ -53,4 +54,23 @@
 		</None>
 	</ItemGroup>
 
+
+	<!-- Copy each bundled plugin's DLL to bundled-plugins/<name>/ in the build and publish output. -->
+	<ItemGroup>
+		<BundledPlugin Include="..\plugins\rPDU2MQTT.Plugin.EmonCms\rPDU2MQTT.Plugin.EmonCms.csproj" PluginDir="emoncms" />
+		<BundledPlugin Include="..\plugins\rPDU2MQTT.Plugin.FloorPlan\rPDU2MQTT.Plugin.FloorPlan.csproj" PluginDir="floorplan" />
+		<BundledPlugin Include="..\plugins\rPDU2MQTT.Plugin.Tigo\rPDU2MQTT.Plugin.Tigo.csproj" PluginDir="tigo" />
+		<BundledPlugin Include="..\plugins\rPDU2MQTT.Plugin.Vertiv\rPDU2MQTT.Plugin.Vertiv.csproj" PluginDir="vertiv" />
+	</ItemGroup>
+	<Target Name="ResolveBundledPlugins">
+		<MSBuild Projects="@(BundledPlugin)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+			<Output TaskParameter="TargetOutputs" ItemName="BundledPluginDll" />
+		</MSBuild>
+	</Target>
+	<Target Name="CopyBundledPlugins" AfterTargets="Build" DependsOnTargets="ResolveBundledPlugins">
+		<Copy SourceFiles="@(BundledPluginDll)" DestinationFolder="$(OutDir)bundled-plugins\%(BundledPluginDll.PluginDir)" SkipUnchangedFiles="true" />
+	</Target>
+	<Target Name="PublishBundledPlugins" AfterTargets="Publish" DependsOnTargets="ResolveBundledPlugins">
+		<Copy SourceFiles="@(BundledPluginDll)" DestinationFolder="$(PublishDir)bundled-plugins\%(BundledPluginDll.PluginDir)" SkipUnchangedFiles="true" />
+	</Target>
 </Project>

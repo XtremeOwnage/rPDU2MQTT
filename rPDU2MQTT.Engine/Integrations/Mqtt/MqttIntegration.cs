@@ -142,8 +142,11 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             // entire lifetime counter lands on one day's bar.
             // …and never a figure below one already published: a roll-up dips whenever a contributor goes
             // stale, because the sum only covers the links that are known.
-            double? energy = cumulative.Publish($"{node.Id}|energy",
-                FlowExport.TryNodeValue(energyGraph, node.Id, out var e) ? e : null);
+            // The bridge's own running total where it keeps one; the roll-up only for tiers it does not.
+            double? energy = !periodsReady ? null
+                : live is not null && live.TryGetValue(node.Id, FlowMetricKey.OwnEnergyTotal, out var own)
+                    ? cumulative.Continue($"{node.Id}|energy", own)
+                    : cumulative.Publish($"{node.Id}|energy", FlowExport.TryNodeValue(energyGraph, node.Id, out var e) ? e : null);
             // Only feeders that are themselves being exported.
             var parents = FlowExport.Parents(graph, node.Id)
                 .Where(pid => graph.Nodes.FirstOrDefault(n => string.Equals(n.Id, pid, StringComparison.OrdinalIgnoreCase)) is not { } pn
@@ -151,9 +154,11 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
                 .ToList();
 
             // The in-direction (charge/export) energy, when this node declares one and a fresh value exists.
-            double? energyIn = cumulative.Publish($"{node.Id}|energy_in",
-                energyInNodes.Contains(node.Id) && live is not null
-                && live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null);
+            double? energyIn = !periodsReady || !energyInNodes.Contains(node.Id) || live is null ? null
+                : live.TryGetValue(node.Id, FlowMetricKey.For(FlowMetricKey.OwnEnergyTotal, "in"), out var ownIn)
+                    ? cumulative.Continue($"{node.Id}|energy_in", ownIn)
+                    : cumulative.Publish($"{node.Id}|energy_in",
+                        live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null);
 
             // On a bidirectional node the roll-up above is one direction of two, so it is published under its
             // own name and `energy` becomes what passed through the node either way. Both are monotonic, so
@@ -205,7 +210,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             {
                 var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability,
                     includeEnergyIn: energyInNodes.Contains(node.Id), includeSoc: socNodes.Contains(node.Id),
-                    includeEnergyDaily: energyDaily is not null, area: rooms.GetValueOrDefault(node.Id));
+                    area: rooms.GetValueOrDefault(node.Id));
                 await publisher.PublishAsync(configTopic, doc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
             }
         }
@@ -285,7 +290,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
                 if (!publishDiscovery) continue;
                 var pconfig = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(nodeId)}/config";
                 var pdoc = FlowExport.DiscoveryDocument(placeNode, null, ptopic, energyGraph.Units, graph.Units, availability,
-                    includeEnergyDaily: pdaily is not null, area: place.Kind == LocationKind.Room ? place.Label : null);
+                    area: place.Kind == LocationKind.Room ? place.Label : null);
                 await publisher.PublishAsync(pconfig, pdoc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
             }
         }

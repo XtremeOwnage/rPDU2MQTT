@@ -14,6 +14,9 @@ public static class FlowMetricKey
     /// <summary>Suffix marking an in-direction reading. Chosen so it can't collide with a real metric name.</summary>
     public const string InSuffix = "#in";
 
+    /// <summary>The bridge's own running energy total for a node (kWh), whatever feeds it.</summary>
+    public const string OwnEnergyTotal = "energy_total";
+
     /// <summary>
     /// How a return lane is named: the node's own label, plus what flowing back in means for its kind. One
     /// rule, because the graph and a history chart naming the same lane differently is a bug report.

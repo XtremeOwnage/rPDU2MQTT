@@ -1,5 +1,5 @@
 using rPDU2MQTT.Core.History;
-using rPDU2MQTT.Integrations.EmonCms;
+using rPDU2MQTT.Plugin.EmonCms;
 using Xunit;
 
 namespace rPDU2MQTT.Tests;
@@ -27,7 +27,7 @@ public class LocalHistoryImportTests : IDisposable
         {
             var file = SeriesFile.Open(path)!;
             var slot = file.SlotOf(at);
-            if (slot >= 0 && file.TimeOf(slot) <= at && file.TimeOf(slot + 1) > at) return file.Read(slot, 1)[0];
+            if (slot >= 0 && slot < file.Slots() && file.TimeOf(slot) <= at && file.TimeOf(slot + 1) > at) return file.Read(slot, 1)[0];
         }
         return double.NaN;
     }

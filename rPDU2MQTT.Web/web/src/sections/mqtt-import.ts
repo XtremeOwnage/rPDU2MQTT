@@ -328,8 +328,7 @@ function renderDiscoverPanel(flow: any, rerender: () => void): HTMLElement {
 
 export function addMqttImportSection(nav: any, sections: any) {
   const link = navLink(nav, 'MQTT Import', '⇤');
-  // Adding nodes edits the shared EnergyFlow document, so this page carries its unsaved-edit count.
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'MQTT.ImportProfiles,EnergyFlow.Nodes,EnergyFlow.Links';
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'MQTT Import' }));
   sec.appendChild(el('div', {

@@ -15,14 +15,15 @@ const config = {
   Modbus: { Connections: [{ Id: 'meter_gw', Name: 'Meter gateway', Host: '10.0.0.5', Port: 502, UnitId: 1 }] },
   EnergyFlow: { Nodes: [{ Id: 'taken', Label: 'Taken', Mode: 'none' }], Links: [] },
 };
+const asked = [];
 const { sandbox, getEl } = makeDom({
-  bodies: (url) =>
+  bodies: (url) => (asked.push(url), 0) ||
     url.includes('/api/schema') ? schema
     : url.includes('/api/instances') ? { ok: true, instances: [] }
     : url.includes('/api/config') ? config
     : url.includes('/api/mqtt/topics') ? { ok: true, listening: true, indexed: 2, capacity: 1000, filter: '#', topics: [
-        { topic: 'solar/pv/power', value: 4200, unit: 'W', metric: 'realpower' },
-        { topic: 'solar/pv/energy', value: 12.5, unit: 'kWh', metric: 'energy' },
+        { topic: 'solar/pv/power', value: 4200, unit: 'W', metric: 'realpower', trend: [4100, 4150, 4200], messages: 7, seenUtc: new Date(Date.now() - 30000).toISOString() },
+        { topic: 'solar/pv/energy', value: 12.5, unit: 'kWh', metric: 'energy', messages: 2, seenUtc: new Date(Date.now() - 5000).toISOString() },
         { topic: 'solar/inverter/temperature/state', value: 41, unit: '°C' },
         // A JSON payload: the topic list reports its numeric fields as dotted paths, not objects.
         { topic: 'shelly/em/status', payload: '{"volts":230.5,"amps":4.25,"watts":975.6,"hertz":60.01}', isJson: true,
@@ -66,6 +67,36 @@ if (!/3 topic\(s\)/.test(treeRow('solar').textContent)) fail(`a branch does not 
 if (!treeRow('inverter/temperature/state')) fail(`a single-child chain was not condensed into one row; rows: ${query(explorer, 'tr', true).map(r => query(r, 'code')?.textContent).join(', ')}`);
 if (treeRow('inverter') || treeRow('temperature')) fail('a condensed chain still has a row per segment');
 if (!button(explorer, 'Create node').disabled) fail('Create node is enabled with nothing ticked');
+
+// It browses on open, asking for what changed since its cursor, not a capped search.
+if (!asked.some(u => u.includes('/api/mqtt/topics?since=0'))) fail(`the explorer did not ask for the topics incrementally: ${asked.filter(u => u.includes('mqtt')).join(', ')}`);
+// Finding a topic narrows the tree in place, with every match on show.
+const find = query(explorer, 'input', true).find(i => (i.attrs.placeholder || i.placeholder) === 'find a topic…');
+find.value = 'temperature'; find.oninput();
+if (!treeRow('solar/inverter/temperature/state') || treeRow('pv')) fail('finding a topic did not narrow the tree to it');
+find.value = ''; find.oninput();
+// ⌖ on a branch browses only that branch, and it is remembered as a recent filter.
+const focus = query(treeRow('solar'), 'button', true).find(b => b.textContent === '⌖');
+if (!focus) fail('a branch has no way to browse only it');
+focus.onclick();
+await wait(50);
+if (!asked.some(u => u.includes('filter=' + encodeURIComponent('solar/#')))) fail('browsing a branch did not subscribe to it');
+if (!button(explorer, 'solar/#')) fail('the branch was not offered as a recent filter');
+button(explorer, 'Everything').onclick();
+await wait(50);
+// Browsing what is already browsed refreshes in place rather than emptying the tree first.
+const before = asked.length;
+button(explorer, 'Browse').onclick();
+if (!treeRow('solar')) fail('pressing Browse on the current filter emptied the tree');
+await wait(20);
+if (asked.length === before) fail('pressing Browse on the current filter did not refresh');
+await wait(50);
+// When each topic was last heard from, and how often; a branch shows its freshest and its total.
+if (!/30s ago/.test(treeRow('power').textContent) || !/7/.test(treeRow('power').textContent)) fail(`a topic does not say when it was last seen and how many messages: ${treeRow('power').textContent}`);
+if (!/5s ago/.test(treeRow('pv').textContent) || !/9/.test(treeRow('pv').textContent)) fail(`a branch does not sum its messages or show its freshest topic: ${treeRow('pv').textContent}`);
+// A numeric topic draws its recent readings.
+if (!query(treeRow('power'), 'svg', true).length) fail('a numeric topic with readings has no sparkline');
+if (query(treeRow('energy'), 'svg', true).length) fail('a topic with no readings drew a sparkline');
 
 // A JSON payload is readable in full: 48 truncated characters say nothing, and there is nowhere else to look.
 const jsonRow = treeRow('shelly/em/status');
@@ -151,6 +182,12 @@ if (sheet('MQTT explorer') || sheet('Create node')) fail('the explorer or dialog
 sec = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
 if (!query(sec, 'h2', true).some(h => h.textContent === 'Energy Nodes')) fail('creating a node did not go to the Nodes page');
 if (!sheet('Edit node — pv_array')) fail('the new node did not open in the node editor');
+
+// The explorer is also a page of its own under MQTT.
+sec = await navTo('MQTT Explorer');
+if (!query(sec, 'h2', true).some(h => h.textContent === 'MQTT Explorer')) fail('the MQTT Explorer page did not open');
+await wait(50);
+if (!query(sec, 'tr', true).some(r => query(r, 'code', true).some(c => c.textContent === 'solar'))) fail('the MQTT Explorer page shows no topic tree');
 
 // Modbus: tick one decoded register and create a node from it.
 sec = await navTo('Modbus TCP');

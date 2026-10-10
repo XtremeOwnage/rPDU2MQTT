@@ -3,7 +3,7 @@ using System.Net;
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Core.History;
-using rPDU2MQTT.Integrations.EmonCms;
+using rPDU2MQTT.Plugin.EmonCms;
 using rPDU2MQTT.Integrations.HomeAssistant;
 using rPDU2MQTT.Integrations.Local;
 using rPDU2MQTT.Services;

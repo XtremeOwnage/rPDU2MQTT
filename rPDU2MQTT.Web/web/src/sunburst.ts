@@ -6,6 +6,7 @@
 // does it flow"; this answers "what is using it" at a glance, with the big consumers as the big arcs.
 import { formatMeasure, svgEl } from './helpers.js';
 import { findHub, flowTree, treeFill, treePath, type TreeNode } from './flow-tree.js';
+import { SOURCE_COLOR } from './charts.js';
 import type { TreePlace } from './flow-card.js';
 import { showNodeCard, moveNodeCard, hideNodeCard } from './flow-focus.js';
 
@@ -20,19 +21,20 @@ export type TreeViewOpts = {
   card?: (id: string, place: TreePlace) => any[];
   /// Where the card belongs.
   host?: any;
+  /// 'out' draws what the hub feeds, 'in' what feeds it.
+  dir?: 'in' | 'out';
 };
 
 type Arc = { id: string; label: string; value: number; depth: number; a0: number; a1: number; hue: number; key: string; node: TreeNode };
 
 const SIZE = 720, C = SIZE / 2;
 const HUB_R = 62, SUPPLY_R0 = 68, SUPPLY_R1 = 80, RING0 = 88;
-/// The supply ring by what feeds it, in the colours the Energy page uses.
-const SUPPLY_FILL: Record<string, string> = { solar: '#f2b01e', grid: '#8b95a7', battery: '#3fb950', generator: '#d9730d' };
+const SUPPLY_FILL: Record<string, string> = { solar: SOURCE_COLOR.solar, grid: SOURCE_COLOR.grid, battery: SOURCE_COLOR.battery, generator: '#d9730d' };
 
 /// Every arc, laid out: a child's angle is its share of what its parent passes on, measured against the
 /// parent's scale, so a node that keeps some for itself leaves a gap at the end of its ring.
-export function layoutSunburst(nodes: any[], links: any[], hub: string | null, _supply?: string[]): { arcs: Arc[]; depth: number; total: number } {
-  const { top, total, depth } = flowTree(nodes, links, hub);
+export function layoutSunburst(nodes: any[], links: any[], hub: string | null, dir: 'in' | 'out' = 'out'): { arcs: Arc[]; depth: number; total: number } {
+  const { top, total, depth } = flowTree(nodes, links, hub, dir);
   const arcs: Arc[] = [];
   if (!(total > 0)) return { arcs, depth, total };
   const place = (t: TreeNode, a0: number, a1: number) => {
@@ -58,14 +60,92 @@ function arcPath(r0: number, r1: number, a0: number, a1: number): string {
        + `A${r0},${r0} 0 ${large} 0 ${f2(x3)},${f2(y3)} Z`;
 }
 
+const BASE_SIZE = 11.5;
+const MIN_SIZE = 8;
+
+/// Light text on dark fills, dark text on light ones.
+export function labelInk(fill: string): string {
+  const m = /hsl\((-?[\d.]+)\s+([\d.]+)%\s+([\d.]+)%\)/.exec(fill);
+  let r = 0.5, g = 0.5, b = 0.5;
+  if (m) {
+    const h = +m[1], sat = +m[2] / 100, l = +m[3] / 100, k = (n: number) => (n + h / 30) % 12;
+    const a = sat * Math.min(l, 1 - l), ch = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+    [r, g, b] = [ch(0), ch(8), ch(4)];
+  } else if (/^#[\da-f]{6}$/i.test(fill)) {
+    [r, g, b] = [1, 3, 5].map(i => parseInt(fill.slice(i, i + 2), 16) / 255);
+  }
+  const lin = (c: number) => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  const lum = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return lum < 0.18 ? '#ffffff' : '#0b0e13';
+}
+const clipTo = (text: string, n: number) => text.length > n ? text.slice(0, Math.max(3, n - 1)) + '…' : text;
+type ArcLabel = { along: boolean; flip: boolean; deg: number; lines: string[]; size: number; lineH: number; room: boolean };
+
+function layoutLabel(label: string, span: number, mid: number, rm: number, depth: number, size: number): ArcLabel {
+  const charW = 0.59 * size, lineH = 1.19 * size;
+  const across = Math.floor((depth - 8) / charW);
+  const fits = (r: number) => Math.floor((span * r - 8) / charW);
+  const along = fits(rm);
+  let deg = (mid * 180 / Math.PI) - 90;
+  if (deg > 90) deg -= 180;
+  const midDeg = mid * 180 / Math.PI;
+  const flip = midDeg > 90 && midDeg < 270;
+  const out = (a: boolean, lines: string[]) => ({ along: a, flip, deg, lines, size, lineH, room: a || span * innerR(rm, depth) >= lines.length * lineH + 1 });
+  if (label.length <= across || along <= across || depth < lineH + 2) {
+    if (label.length > across && span * innerR(rm, depth) >= 2 * lineH + 1) {
+      const [a, b] = wrapWords(label, across);
+      if (a) return out(false, b ? [a, clipTo(b, across)] : [a]);
+    }
+    return out(false, [clipTo(label, across)]);
+  }
+  if (label.length <= along || depth < 2 * lineH + 4) return out(true, [clipTo(label, along)]);
+  const inner = fits(rm - lineH / 2);
+  const [first, rest] = wrapWords(label, inner);
+  if (!first) return out(true, [clipTo(label, along)]);
+  return out(true, rest ? [first, clipTo(rest, inner)] : [first]);
+}
+
+const innerR = (rm: number, depth: number) => rm - depth / 2;
+
+/// The words that fit in `n` characters, and the rest.
+function wrapWords(label: string, n: number): [string, string] {
+  const words = label.split(/\s+/);
+  let first = '';
+  while (words.length && (first ? first + ' ' + words[0] : words[0]).length <= n) first = first ? first + ' ' + words.shift() : words.shift()!;
+  return [first, words.join(' ')];
+}
+
+/// An arc's label: across the ring, or curved along it (two lines when the ring is deep enough), whichever shows more.
+/// The largest size down to the base that shows the whole label (one line, then two), then the same below the base
+/// down to MIN_SIZE; else the smallest size that fits the slice, clipped. No lines when the slice is too thin for any size.
+/// `flip` marks the lower half, where text along the arc runs the other way to stay upright.
+export function arcLabel(label: string, span: number, mid: number, rm: number, depth: number, maxSize = BASE_SIZE): ArcLabel {
+  const whole = label.split(/\s+/).join(' ');
+  const tries: [number, number, number][] = [[1, maxSize, BASE_SIZE], [2, maxSize, BASE_SIZE], [1, BASE_SIZE - 0.5, MIN_SIZE], [2, BASE_SIZE - 0.5, MIN_SIZE]];
+  for (const [lines, hi, lo] of tries) for (let size = hi; size >= lo; size -= 0.5) {
+    const l = layoutLabel(label, span, mid, rm, depth, size);
+    if (l.room && l.lines.length <= lines && l.lines.join(' ') === whole) return l;
+  }
+  for (let size = MIN_SIZE; size <= Math.min(maxSize, BASE_SIZE); size += 0.5) {
+    const l = layoutLabel(label, span, mid, rm, depth, size);
+    if (l.room) return l;
+  }
+  return { ...layoutLabel(label, span, mid, rm, depth, MIN_SIZE), lines: [] };
+}
+
+let labelPaths = 0;
+
 /// A node opens only when there is something beneath it; opening a leaf would draw an empty diagram.
 export const opens = (links: any[], id: string) => links.some((l: any) => l.source === id && (l.value ?? 0) > 0);
 
 export function drawSunburst(nodes: any[], links: any[], opts: TreeViewOpts): SVGElement {
   const { hub, supply } = findHub(nodes, links);
-  const { arcs, depth, total } = layoutSunburst(nodes, links, hub);
+  const dir = hub ? opts.dir || 'out' : 'out';
+  const { arcs, depth, total } = layoutSunburst(nodes, links, hub, dir);
   const byId = new Map(nodes.map(n => [n.id, n]));
   const svg = svgEl('svg', { viewBox: `0 0 ${SIZE} ${SIZE}`, class: 'sunburst-svg', role: 'img' }) as any;
+  const defs = svgEl('defs', {});
+  svg.appendChild(defs);
   const ringW = Math.max(26, Math.min(70, (C - 8 - RING0) / Math.max(1, depth)));
   const fmt = (v: number) => formatMeasure(v, opts.units);
   const hubNode = hub ? byId.get(hub) : null;
@@ -103,7 +183,7 @@ export function drawSunburst(nodes: any[], links: any[], opts: TreeViewOpts): SV
 
   // The supply mix: a thin ring just outside the hub.
   const supplyTotal = supply.reduce((s, id) => s + Math.max(0, byId.get(id)?.value ?? 0), 0);
-  if (hub && supplyTotal > 0) {
+  if (hub && dir === 'out' && supplyTotal > 0) {
     let a = 0;
     supply.forEach((id, i) => {
       const v = Math.max(0, byId.get(id)?.value ?? 0);
@@ -123,9 +203,10 @@ export function drawSunburst(nodes: any[], links: any[], opts: TreeViewOpts): SV
     // Too thin to draw once the gap between arcs comes off: its parent's card lists it.
     const r0 = RING0 + (arc.depth - 1) * ringW, r1 = r0 + ringW - 2;
     if ((arc.a1 - arc.a0 - 0.004) * r0 < 3) return;
-    const p = svgEl('path', { d: arcPath(r0, r1, arc.a0 + 0.002, arc.a1 - 0.002), fill: treeFill(arc.node), class: 'sunburst-arc' });
+    const fill = treeFill(arc.node);
+    const p = svgEl('path', { d: arcPath(r0, r1, arc.a0 + 0.002, arc.a1 - 0.002), fill, class: 'sunburst-arc' });
     p.dataset.node = arc.id;
-    const leaf = !opens(links, arc.id);
+    const leaf = dir === 'in' ? true : !opens(links, arc.id);
     if (leaf) p.classList.add('is-leaf');
     p.addEventListener('click', (e: any) => { e.stopPropagation?.(); if (!leaf) opts.onOpen(arc.id); });
     hover(p, arc.id, arc.key, {
@@ -135,17 +216,38 @@ export function drawSunburst(nodes: any[], links: any[], opts: TreeViewOpts): SV
     svg.appendChild(p);
     drawn.push({ p, key: arc.key });
 
-    // A label where it fits: along the ring's middle, turned to read outward, on the arcs big enough to hold it.
     const mid = (arc.a0 + arc.a1) / 2, rm = (r0 + r1) / 2;
-    if ((arc.a1 - arc.a0) * rm < 16) return;
     const [x, y] = pt(rm, mid);
-    let deg = (mid * 180 / Math.PI) - 90;
-    if (deg > 90) deg -= 180;
-    const t = svgEl('text', { x: f2(x), y: f2(y), class: 'sunburst-label', transform: `rotate(${f2(deg)} ${f2(x)} ${f2(y)})` });
-    // Radial text: the ring's width is the line's length.
-    const maxChars = Math.floor((ringW - 8) / 6.2);
-    t.textContent = arc.label.length > maxChars ? arc.label.slice(0, Math.max(3, maxChars - 1)) + '…' : arc.label;
-    svg.appendChild(t);
+    const label = arcLabel(arc.label, arc.a1 - arc.a0, mid, rm, r1 - r0, arc.depth === 1 ? 16 : arc.depth === 2 ? 13.5 : BASE_SIZE);
+    if (!label.lines.length || label.lines[0].length < 2) return;
+    const style = `font-size:${label.size}px;fill:${labelInk(fill)}`;
+    if (!label.along) {
+      const t = svgEl('text', { x: f2(x), y: f2(y), class: 'sunburst-label', transform: `rotate(${f2(label.deg)} ${f2(x)} ${f2(y)})`, style });
+      if (label.lines.length === 1) t.textContent = label.lines[0];
+      else label.lines.forEach((line, i) => {
+        const ts = svgEl('tspan', { x: f2(x), dy: f2(i ? label.lineH : -label.lineH / 2) });
+        ts.textContent = line;
+        t.appendChild(ts);
+      });
+      svg.appendChild(t);
+      return;
+    }
+    // Upper line outward on the top half, inward on the bottom half, where the text runs the other way.
+    const n = label.lines.length;
+    label.lines.forEach((line, i) => {
+      const off = (n - 1) / 2 - i;
+      const r = rm + (label.flip ? -off : off) * label.lineH;
+      const id = `sb-label-${++labelPaths}`;
+      const a1 = arc.a0 + Math.min(arc.a1 - arc.a0, 2 * Math.PI - 0.02);
+      const [sx, sy] = pt(r, label.flip ? a1 : arc.a0), [ex, ey] = pt(r, label.flip ? arc.a0 : a1);
+      const large = a1 - arc.a0 > Math.PI ? 1 : 0;
+      defs.appendChild(svgEl('path', { id, d: `M${f2(sx)},${f2(sy)} A${f2(r)},${f2(r)} 0 ${large} ${label.flip ? 0 : 1} ${f2(ex)},${f2(ey)}`, fill: 'none' }));
+      const t = svgEl('text', { class: 'sunburst-label', style });
+      const tp = svgEl('textPath', { href: `#${id}`, startOffset: '50%' });
+      tp.textContent = line;
+      t.appendChild(tp);
+      svg.appendChild(t);
+    });
   });
 
   // The hub on top, so the arcs cannot cover it.

@@ -7,6 +7,7 @@ import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { column, rowOf } from '../panel-layout.js';
 import { locationChoices, choiceSelect } from '../location-options.js';
+import { integrationIds } from '../plugin-pages.js';
 
 /// A breaker as the API reports it, with its chain and power resolved.
 type Leg = { leg: number; wire: string; clamp: string | null; channel: string | null; reversed: boolean };
@@ -43,7 +44,7 @@ const PANEL_CIRCUIT_KINDS = ['breaker', 'outlet', 'load', 'node', 'panel'];
 
 export function addPanelScheduleSection(nav: any, sections: any) {
   const link = navLink(nav, 'Panel Schedule', '🗂');
-  link.dataset.section = 'EnergyFlow';
+  link.dataset.section = 'EnergyFlow.Panels,EnergyFlow.Clamps,EnergyFlow.Links';
   const sec = el('div', { class: 'section ps' });
   sections.appendChild(sec);
   sec.appendChild(el('h2', { text: 'Panel Schedule' }));
@@ -479,7 +480,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
       cb.onchange = () => { if (cb.checked) served.add(id); else served.delete(id); };
       serves.appendChild(el('label', { class: 'ld-inst' }, cb, ' ' + label.trim()));
     });
-    const servesField = field('Serves', places.length ? serves : el('div', { class: 'desc', text: 'No rooms yet — add them on the Floor Plans page.' }),
+    const servesField = field('Serves', places.length ? serves : el('div', { class: 'desc', text: integrationIds.has('floorplan') ? 'No rooms yet — add them on the Floor Plans page.' : 'No rooms yet — add them under EnergyFlow.Sites in the configuration.' }),
       'The rooms and areas this circuit feeds. A room then lists it among the circuits serving it.');
     const onIt = ((state.data?.EnergyFlow?.Placements || []) as any[]).filter(p => wasNumber && p.Circuit === `${panel.id}/${wasNumber}`);
     const placedField = field('Placed on it', onIt.length

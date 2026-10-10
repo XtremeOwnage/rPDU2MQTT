@@ -3,7 +3,7 @@ using Xunit;
 
 using rPDU2MQTT.Integrations.Prometheus;
 
-using rPDU2MQTT.Integrations.EmonCms;
+using rPDU2MQTT.Plugin.EmonCms;
 
 namespace rPDU2MQTT.Tests;
 

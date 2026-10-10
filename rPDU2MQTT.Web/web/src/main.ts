@@ -1,5 +1,4 @@
-// Shell bootstrap: load the schema + config, build the UI, and own everything that lives outside a
-// section — the app bar, the live-stream indicator, the theme, the palette, and the save bar.
+// Shell bootstrap: app bar, live indicator, theme, palette and save bar.
 import { api, toast, slug, el, openSheet, closeSheet, sheetIsOpen } from './helpers.js';
 import { state } from './state.js';
 import { build } from './config-form.js';
@@ -8,10 +7,9 @@ import { setBaseline, refreshDirty, discardChanges, isDirty, changes, formatValu
 import { subscribeLive, onRealtimeState, expectedRestart, restartFinished, expectRestart, onExpectRestart } from './realtime.js';
 import { initTheme } from './theme.js';
 import { initPalette } from './palette.js';
+import { loadPluginPages } from './plugin-pages.js';
 
-// Back/forward navigation + direct hash edits: open the matching tab if it isn't already active. (Normal
-// tab clicks already set the hash via activate(), so by the time this fires the tab is active -> no-op,
-// which also avoids re-loading a tab's data on every click.)
+// Back/forward and hash edits: open the matching tab if it isn't already active.
 window.addEventListener('hashchange', () => {
   const wanted = decodeURIComponent((location.hash || '').slice(1));
   if (!wanted) return;
@@ -22,69 +20,49 @@ window.addEventListener('hashchange', () => {
 export async function load() {
   state.schema = (await api('/api/schema')).body;
   state.data = (await api('/api/config')).body;
-  // Older backends have no such endpoint; the editor then says what it can without the arithmetic.
+  // Older backends lack this endpoint.
   try { state.derivations = ((await api('/api/flow/derivations')).body || {}).metrics || []; }
   catch { state.derivations = []; }
+  await loadPluginPages();
   build();
-  // Whatever the server just handed us is, by definition, the saved state.
   setBaseline();
   refreshStatus();
 }
 
 // --- App-bar status --------------------------------------------------------------------------------
 
-// Last-seen operator update report, so "check now" can tell when a fresh result has landed.
+// Last operator report time, so "check now" can tell when a fresh result lands.
 let lastCheckedAt: string | null = null;
 let configWritable = true;
-// The last roll the operator reported — its timestamp, and the tag it went to. null means "we haven't seen
-// a report yet", which is deliberately different from "" — see appliedTagChanged.
+// null means no report seen yet, distinct from "".
 let lastApplied: string | null = null;
 let lastAppliedAt: string | null = null;
 
-/// Did the operator just roll the deployment?
-///
-/// AutoUpdate rolls on the operator's own schedule, so unlike Switch or Force update there is no click to
-/// hang an expectRestart() on: the page's first and only warning is the stream dying, which shows as a red
-/// "Offline" for something entirely routine.
-///
-/// Watching the applied *tag* was not enough, and is why this never fired for anyone. Tracking a moving
-/// channel — `unstable`, `main`, `edge`, the default and the common case — means an auto-update swaps the
-/// digest under an unchanged tag, so "unstable" was reported before and after and nothing looked different.
-/// Only a switch between two differently named tags was ever visible. The operator now stamps when it
-/// actually rolled, which changes either way; the tag is still checked so an older operator that reports no
-/// timestamp keeps working as it did.
-///
-/// Never fires on the first report. On a fresh page load every value is "new", and announcing a restart
-/// that already happened (or never happened) would put the app bar into a state nothing is going to clear.
+/// True when the operator has rolled the deployment since the last report; never on the first report.
 export function appliedTagChanged(applied: string | undefined | null, appliedAt?: string | null): boolean {
   const at = appliedAt || '';
   if (at !== '') {
-    // Same rule as the tag below: an absent timestamp is not a new roll, so it must not clear what we know.
     const rolled = lastAppliedAt !== null && at !== lastAppliedAt;
     lastAppliedAt = at;
-    // Keep the tag in step so a later report can't read as a change purely because we stopped tracking it.
     if (applied) lastApplied = applied;
     return rolled;
   }
 
   const now = applied || '';
-  // No tag in this report is not a change of tag — the operator can simply stop reporting one (restarting,
-  // briefly unreachable). Forgetting the last tag here would make the next report of the SAME tag look
-  // like a fresh roll, and announce a restart that never happened.
+  // A report without a tag is not a tag change.
   if (now === '') return false;
   const changed = lastApplied !== null && now !== lastApplied;
   lastApplied = now;
   return changed;
 }
 
-// Render the header update chip from the operator's report (#210). Hidden when no operator is reporting.
+// Header update chip from the operator's report; hidden when none is reporting.
 function renderUpdate(u: any) {
   const upd: any = document.getElementById('st-update');
   if (!upd) return;
   if (!u) { upd.classList.add('is-hidden'); lastCheckedAt = null; return; }
   lastCheckedAt = u.checkedAt || null;
-  // An update the operator applied by itself: the workload is going away and nobody here asked for it.
-  // Same treatment as a manual switch, so the drop that follows reads as "busy", not "broken".
+  // An operator-applied update is treated like a manual switch.
   if (appliedTagChanged(u.applied, u.appliedAt)) {
     expectRestart(`Auto-updating to ${u.applied}`);
     toast(`Update applied — rolling to ${u.applied}. The bridge is restarting.`, true);
@@ -106,12 +84,7 @@ function renderUpdate(u: any) {
   }
 }
 
-/// Settings that were saved but that this process is not running.
-///
-/// Most of the configuration is read once at startup, so saving it writes the file and changes nothing
-/// else — the GUI then showed the saved value while the bridge went on behaving the old way, with a single
-/// toast as the only warning. The badge stays until a restart closes the gap, on every page and in every
-/// browser, and clicking it does the restart.
+/// Badge for settings saved but not yet running; clicking it restarts.
 function renderRestartPending(r: any) {
   const pill: any = document.getElementById('st-restart');
   if (!pill) return;
@@ -126,8 +99,6 @@ function renderRestartPending(r: any) {
   pill.onclick = () => restartNow(settings);
 }
 
-/// Restart the bridge, having said exactly what it is for. The stream drops on the way, which the live
-/// pill already knows how to explain.
 async function restartNow(settings: string[]) {
   const what = settings.length === 1 ? settings[0] : `${settings.length} settings`;
   if (!confirm(`Restart the bridge now to apply ${what}?\n\nPolling and MQTT publishing stop for a few seconds. This page reconnects on its own.`)) return;
@@ -137,9 +108,6 @@ async function restartNow(settings: string[]) {
 }
 
 // --- Coming back from a restart ----------------------------------------------------------------------
-// The bridge going away is expected — an update, a switch, applying settings. What was not handled is it
-// coming back: the stream stayed down, every page held whatever it had, and the tab sat there stale until
-// someone reloaded it by hand. So the page waits for the bridge and picks itself back up.
 
 let bootVersion: string | null = null;
 let returnWatch: any = null;
@@ -148,8 +116,6 @@ let watchingForReturn = false;
 let lastInstance: string | null = null;
 
 // --- The restart overlay -------------------------------------------------------------------------------
-// A restart or an update the operator asked for covers the page until the bridge is back: the page is
-// about to be stale or reloaded, and edits made meanwhile would be made against a process that is going.
 let restartBox: any = null;
 let restartFrom: string | null = null;
 let restartTimer: any = null;
@@ -176,7 +142,6 @@ function showRestartOverlay(why: string) {
   const tick = () => {
     const secs = Math.round((Date.now() - started) / 1000);
     parts.elapsed.textContent = secs < 90 ? `${secs} s` : `${secs} s — taking longer than expected`;
-    // Never a trap: past half a minute the page can be used again, restart or not.
     parts.dismiss.hidden = secs < 30;
   };
   tick();
@@ -193,18 +158,16 @@ function hideRestartOverlay() {
   restartParts = null;
 }
 
-/// Poll until the bridge answers again, then carry on where we left off.
+/// Poll until the bridge answers again.
 function watchForReturn() {
-  // A flag rather than the timer id: a timer id is only reliably truthy in a browser.
+  // A flag, not the timer id: timer ids are only reliably truthy in a browser.
   if (watchingForReturn) return;
   watchingForReturn = true;
   const poll = async () => {
     let body: any = null;
-    // While it is away this throws (connection refused) or answers with an error page; both mean "not yet".
     try { const r: any = await api('/api/status'); body = r && r.ok ? r.body : null; } catch { body = null; }
     if (!body || !body.version) return;
-    // A restart that was asked for is over when a different process answers. In a rolling update the old
-    // one keeps answering until the new one takes over; that is not the bridge coming back.
+    // During a rolling update the old instance still answers; wait for a different one.
     if (restartFrom && body.instance && body.instance === restartFrom) return;
     clearInterval(returnWatch);
     returnWatch = null;
@@ -215,7 +178,7 @@ function watchForReturn() {
   setTimeout(poll, 1000);
 }
 
-/// The bridge answered. Reload when it is a different build; otherwise just bring the page up to date.
+/// Reload on a different build; otherwise refresh the page.
 function cameBack(body: any) {
   restartFinished();
   hideRestartOverlay();
@@ -223,7 +186,7 @@ function cameBack(body: any) {
 
   const now = body.version || '';
   if (bootVersion && now && now !== bootVersion) {
-    // Never throw away work the operator has not saved: say what is waiting instead of reloading over it.
+    // Do not reload over unsaved changes.
     if (isDirty()) {
       toast(`The bridge is back on v${now}, but this page is still the old build. Save or discard your `
           + 'changes, then reload to catch up.', true);
@@ -235,17 +198,15 @@ function cameBack(body: any) {
   }
 
   toast('The bridge is back.', true);
-  // Sections re-subscribe and refresh off this, the same as a tab switch.
-  try { window.dispatchEvent?.(new CustomEvent('rpdu:activate')); } catch { /* sections keep polling */ }
+  try { window.dispatchEvent?.(new CustomEvent('rpdu:activate')); } catch { }
 }
 
-// Paint the app bar from a /api/status body — from the initial fetch, or pushed on the `status` feed.
+// Paint the app bar from a /api/status body.
 function renderStatus(body: any) {
   if (!body) return;
   const set = (id: string, fn: (e: any) => void) => { const e = document.getElementById(id); if (e) fn(e); };
 
-  // What this page was loaded against. A restart that comes back on a different build means the assets in
-  // this tab are the old ones, and no amount of reconnecting fixes that.
+  // The build this page was loaded against.
   if (!bootVersion && body.version) bootVersion = body.version;
   if (body.instance) lastInstance = body.instance;
   set('st-version', e => { e.textContent = 'v' + (body.version || '?'); e.title = body.configSource ? 'Config source: ' + body.configSource : ''; });
@@ -258,15 +219,14 @@ function renderStatus(body: any) {
 
   renderRestartPending(body.restart);
 
-  // A ConfigMap / read-only mount can't be saved: say so up front, not after the save fails.
+  // A read-only config source cannot be saved.
   configWritable = body.configWritable !== false;
   set('st-readonly', e => e.classList[configWritable ? 'add' : 'remove']('is-hidden'));
   renderSaveBar();
 
-  // Off by default only if the operator turned it off; absent (an older server) means show it.
+  // Absent (older server) means show it.
   set('project-link', e => e.classList[body.showProjectLink === false ? 'add' : 'remove']('is-hidden'));
 
-  // Show a logout link + signed-in user when OIDC is in use.
   if (body.auth === 'oidc') {
     set('st-logout', e => e.classList.remove('is-hidden'));
     if (body.user) set('st-user', e => e.textContent = body.user);
@@ -277,7 +237,6 @@ export async function refreshStatus() {
   renderStatus((await api('/api/status')).body);
 }
 
-// The live pill: the one place that says whether anything on screen is actually moving.
 function initLiveIndicator() {
   const pill: any = document.getElementById('st-live');
   const LOOK: Record<string, any> = {
@@ -286,15 +245,11 @@ function initLiveIndicator() {
     down: ['pill bad', 'Offline', 'The live update stream dropped — retrying. Pages fall back to manual refresh.'],
     idle: ['pill', 'Idle', 'Nothing on this page needs live updates.'],
   };
-  // Both ways the bridge can go away: one we asked for, and one we only notice by the stream dropping.
   onExpectRestart(() => { showRestartOverlay(expectedRestart() || 'Restarting'); watchForReturn(); });
   onRealtimeState(s => {
     if (s === 'down') watchForReturn();
     if (!pill) return;
-    // A gap we asked for is not a fault. While a switch/redeploy/restart is in flight the stream is
-    // expected to drop, so say "Updating" rather than flashing red "Offline" at someone who just clicked
-    // the button that caused it. Once the stream is back, the window closes and normal reporting resumes —
-    // and if it never comes back, the window expires and it goes red for real.
+    // An expected restart shows "Updating" instead of "Offline".
     const why = expectedRestart();
     if (s === 'live') restartFinished();
     const restarting = why && s !== 'live';
@@ -307,11 +262,10 @@ function initLiveIndicator() {
     const dot = restarting ? ' warn' : s === 'live' ? ' good' : s === 'down' ? ' bad' : s === 'connecting' ? ' warn' : '';
     pill.append(el('span', { class: 'dot' + dot }), text);
   });
-  // The app bar is always watching, so the stream is up as soon as the page is.
   subscribeLive('status', renderStatus);
 }
 
-// "Check now": ask the operator (a separate process) to run a registry check, then poll for the result.
+// Ask the operator to run a registry check, then poll for the result.
 async function checkUpdatesNow() {
   const upd: any = document.getElementById('st-update');
   if (upd.classList.contains('busy')) return;
@@ -321,7 +275,7 @@ async function checkUpdatesNow() {
   const r = await api('/api/operator/check', { method: 'POST' });
   if (!r.ok || !r.body?.ok) { toast(r.body?.message || 'Update check failed.', false); await refreshStatus(); return; }
 
-  // The operator patches the CR status asynchronously; poll a few times for a newer checkedAt.
+  // The operator updates its status asynchronously; poll for a newer checkedAt.
   const started = Date.now();
   while (Date.now() - started < 12000) {
     await new Promise(res => setTimeout(res, 1500));
@@ -337,21 +291,16 @@ async function checkUpdatesNow() {
 }
 
 // --- Save bar --------------------------------------------------------------------------------------
-// It only exists when there is something to save, and it says how much. The old bar was permanent and
-// always enabled: identical whether you'd changed nothing or twenty settings, with no way to see what
-// a click would write, and no way back.
 
 let saving = false;
 
-/// The page keeps the bar's height free at its foot, so the last thing on it can be scrolled up past the
-/// bar. On a phone the bar wraps to two or three rows and covered the bottom of every page — on the
-/// Balance page, the whole Home total, with no way to reach it but to save or discard first.
+/// Reserve the save bar's height at the page foot so content can scroll past it.
 function reserveForSaveBar() {
   const bar: any = document.getElementById('savebar');
   const h = bar && !bar.classList.contains('is-hidden') ? Math.ceil(bar.offsetHeight || 0) : 0;
   document.documentElement?.style?.setProperty?.('--savebar-h', h + 'px');
 }
-try { window.addEventListener('resize', () => reserveForSaveBar()); } catch { /* no window: tests */ }
+try { window.addEventListener('resize', () => reserveForSaveBar()); } catch { }
 
 function renderSaveBar() {
   const bar: any = document.getElementById('savebar');
@@ -383,13 +332,11 @@ async function saveConfigChanges() {
   if (save) { save.innerHTML = ''; save.append('Save', el('kbd', { text: 'Ctrl' }), el('kbd', { text: 'S' })); }
 
   const ok = r.ok && r.body.ok;
-  // Only re-baseline on success — a failed save must leave the changes (and the bar) exactly as they were.
+  // Re-baseline only on success.
   if (ok) setBaseline(payload);
   else renderSaveBar();
   toast(r.body.message || (ok ? 'Saved.' : 'Save failed.'), ok);
 
-  // Offer the restart at the moment it is needed, rather than leaving the operator to notice later that
-  // the bridge is still running the old settings.
   if (ok && r.body.restartRequired) {
     const settings: string[] = r.body.restartSettings || [];
     renderRestartPending({ required: true, settings });
@@ -397,13 +344,12 @@ async function saveConfigChanges() {
   }
 }
 
-// The reviewable list of what a save would write: one row per setting, old value -> new value.
+// Review sheet: one row per changed setting, old -> new.
 function reviewChanges() {
   const list = changes();
   const body = el('div');
   if (!list.length) body.appendChild(el('div', { class: 'cmd-empty', text: 'Nothing has been changed.' }));
 
-  // Grouped by the config section each setting belongs to, matching how the nav is organised.
   const groups = new Map<string, any[]>();
   list.forEach(c => {
     const g = c.path[0] || 'Config';
@@ -440,8 +386,6 @@ function discardAll() {
 function initShell() {
   const on = (id: string, fn: any) => { const e: any = document.getElementById(id); if (e) e.onclick = fn; };
   on('st-update', checkUpdatesNow);
-  // Not flow.ts's saveConfig, which this once named through the shared bundle: that one skips the
-  // restart offer and then calls the click event as its callback.
   on('btn-save', saveConfigChanges);
   on('btn-review', reviewChanges);
   on('btn-discard', discardAll);
@@ -450,7 +394,7 @@ function initShell() {
     load();
   });
 
-  // Narrow screens: the sidebar is a drawer. Any nav click closes it again.
+  // Narrow screens: the sidebar is a drawer; a nav click closes it.
   const closeNav = () => document.body.classList.remove('nav-open');
   on('nav-toggle', () => document.body.classList.toggle('nav-open'));
   on('nav-scrim', closeNav);
@@ -458,23 +402,18 @@ function initShell() {
 
   window.addEventListener('keydown', (e: any) => {
     if (e.key === 'Escape' && sheetIsOpen()) { e.preventDefault(); closeSheet(); return; }
-    // Ctrl/⌘+S is what everyone's fingers already do in a form this size.
     if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); saveConfigChanges(); }
   });
 
-  // Don't let a tab close silently take edits with it.
   window.addEventListener('beforeunload', (e: any) => {
     if (!isDirty()) return;
     e.preventDefault();
     e.returnValue = '';
   });
 
-  // The bar is a pure function of the pending changes, so it repaints whenever they move.
   onDirty(renderSaveBar);
 
-  // The bespoke editors (energy-flow nodes, the overrides table) mutate the same document directly
-  // rather than going through the schema form. Instead of making every one of them report in, re-diff
-  // after any interaction with the page: the document is small, and this runs once per event burst.
+  // Bespoke editors mutate the document directly, so re-diff after any interaction.
   let dirtyTick: any = null;
   const scheduleDirty = () => { clearTimeout(dirtyTick); dirtyTick = setTimeout(refreshDirty, 120); };
   const sections = document.getElementById('sections');

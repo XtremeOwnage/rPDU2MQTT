@@ -1,11 +1,15 @@
 // Day-by-day bar charts: axis, empty days, signed values, hover card.
 import { el, formatNum } from './helpers.js';
 
+// Fixed source colours, the same in every view. Grid is import; export has its own.
+export const SOURCE_HUE = { solar: 46, grid: 2, gridExport: 140, battery: 212 };
+export const SOURCE_COLOR = { solar: '#f2c230', grid: '#e5534b', gridExport: '#3fb950', battery: '#4f8cff' };
+
 // The kinds worth a colour of their own; anything else shares the neutral run.
 export const KIND_COLOR: Record<string, string> = {
-  solar: 'var(--warn, #d08700)',
-  battery: 'var(--good, #46c46a)',
-  grid: 'var(--accent, #4f8cff)',
+  solar: SOURCE_COLOR.solar,
+  battery: SOURCE_COLOR.battery,
+  grid: SOURCE_COLOR.grid,
   load: '#b06fd0',
   outlet: '#7f8ea3',
   pdu: '#5c7fa3',
@@ -13,6 +17,13 @@ export const KIND_COLOR: Record<string, string> = {
   breaker: '#d9a55c',
   inverter: '#3fb0a8',
 };
+/// The fixed colour for a solar, grid or battery node; a grid node that feeds nothing is export.
+export const sourceColor = (kind: string | undefined, sink = false): string | null =>
+  kind === 'solar' ? SOURCE_COLOR.solar : kind === 'battery' ? SOURCE_COLOR.battery
+  : kind === 'grid' ? (sink ? SOURCE_COLOR.gridExport : SOURCE_COLOR.grid) : null;
+export const sourceHue = (kind: string | undefined, sink = false): number | null =>
+  kind === 'solar' ? SOURCE_HUE.solar : kind === 'battery' ? SOURCE_HUE.battery
+  : kind === 'grid' ? (sink ? SOURCE_HUE.gridExport : SOURCE_HUE.grid) : null;
 export const colorFor = (kind: string, i: number) =>
   KIND_COLOR[kind] || ['#4f8cff', '#46c46a', '#d08700', '#b06fd0', '#3fb0a8', '#c05c5c'][i % 6];
 
@@ -54,6 +65,8 @@ export function barChart(opts: {
   overlay?: Line;
   /// Bars, lines or filled areas. Lines are never stacked.
   kind?: 'bar' | 'line' | 'area';
+  /// A dashed reference line at this value.
+  ref?: number;
 }): { svg: any; gaps: number } {
   const { days, lines, units } = opts;
   const kind = opts.kind || 'bar';
@@ -217,6 +230,8 @@ export function barChart(opts: {
 
   // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
   svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
+  if (opts.ref != null && opts.ref >= trough && opts.ref <= peak)
+    svg.appendChild(svgTag('line', { x1: padL, y1: y(opts.ref), x2: W - padR, y2: y(opts.ref), stroke: 'var(--muted)', 'stroke-width': 1, 'stroke-dasharray': '4 4', class: 'trend-ref' }));
 
   // A full-height hit area per day, over the bars.
   days.forEach((day, d) => {
@@ -286,6 +301,8 @@ export function sparkline(opts: {
   /// Draw a light grid behind the line, with the scale down the side and the time along the bottom. Off by
   /// default: a strip a few centimetres wide has no room for it, and the shape is the whole message there.
   grid?: boolean;
+  /// Scale from zero (the default), or to the readings' own range, where a 250 V line would otherwise be flat.
+  fromZero?: boolean;
 }): any {
   const { values, color, units } = opts;
   const w = opts.width ?? 132, h = opts.height ?? 40;
@@ -301,7 +318,7 @@ export function sparkline(opts: {
     return empty;
   }
 
-  const lo = Math.min(...known, 0), hi = Math.max(...known);
+  const lo = opts.fromZero === false ? Math.min(...known) : Math.min(...known, 0), hi = Math.max(...known);
   const span = hi - lo || 1;
   const x = (i: number) => padL + (values.length === 1 ? 0 : (i * (w - padL - pad)) / (values.length - 1));
   const y = (v: number) => h - padB - ((v - lo) / span) * (h - padB - pad);
