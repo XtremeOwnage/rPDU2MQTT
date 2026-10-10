@@ -669,11 +669,13 @@ Notes
         with a message saying where it belongs. The config model is exempt by design — the schema, the GUI
         form and the CRD are all generated from Core's types, and naming a vendor's SETTINGS is not knowing
         its protocol.
-    [ ] Two exceptions are listed rather than moved: `EmonCmsHealth` and `EmonCmsReport`, the EmonCMS
+    [x] Two exceptions are listed rather than moved: `EmonCmsHealth` and `EmonCmsReport`, the EmonCMS
         outcome a process carries on its heartbeat and in the process registry. They know nothing about the
         protocol, but a generic process registry should not name one integration either — that is the
         pre-plugin world showing through, from before `IntegrationStatus` existed. Generalising them changes
         the diagnostics payload the GUI reads, so it is its own change rather than a rider on this one.
+        Done: both deleted. A process carries `Integrations` (one `IntegrationReport` per id), and the
+        diagnostics payload lists every enabled integration instead of an `emoncms` block.
 
 28. Two credentials were being written out in plain text
     Found by a guard written while adding a new config section, not by looking for it. `RedactSecrets` is a

@@ -37,7 +37,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     private readonly IHostApplicationLifetime lifetime;
     private readonly HealthState health;
     private readonly Core.Integrations.IPduInstances registry;
-    private readonly EmonCmsStatus emonCmsStatus;
+    private readonly Core.Integrations.IntegrationStatus? integrationStatus;
     private readonly Core.IProcessRestarter? restarter;
     private readonly Core.ISnapshotCache snapshots;
     private readonly Core.HostRole hostRoles;
@@ -72,7 +72,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     // Last outcome per Modbus device, for diagnostics.
     private readonly Core.Modbus.ModbusDevices? modbusDevices;
 
-    public GuiService(Config config, IHiveMQClient mqtt, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, Core.Integrations.IPduInstances registry, EmonCmsStatus emonCmsStatus, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null, rPDU2MQTT.Plugins.PluginCatalog? pluginCatalog = null)
+    public GuiService(Config config, IHiveMQClient mqtt, DiscoveryCoordinator discovery, IConfigSource configSource, IHostApplicationLifetime lifetime, HealthState health, Core.Integrations.IPduInstances registry, Core.ISnapshotCache snapshots, Core.HostRole hostRoles, HaEnergyDashboardSync haEnergy, Core.Flow.IFlowValueSource? live = null, Core.IProcessRestarter? restarter = null, Core.Flow.IMeasurementHistory? history = null, Core.RestartPending? pending = null, PluginSchemaSections? pluginSections = null, Core.Integrations.IntegrationRegistry? integrations = null, Abstractions.Pdu.IOutletControl? outletControl = null, IEnumerable<Core.Integrations.INodeProvider>? nodeProviders = null, Core.Status.StatusBoard? statusBoard = null, Core.Diagnostics.ProcessRegistry? processes = null, Core.Discovery.TopicIndex? topicIndex = null, Core.Operator.IOperatorControl? deployOperator = null, Core.Modbus.ModbusDevices? modbusDevices = null, Core.Plans.IPlanImageStore? cachePlans = null, Core.History.LocalSeriesStore? localHistory = null, HistoryCopyService? historyCopy = null, rPDU2MQTT.Plugins.PluginCatalog? pluginCatalog = null, Core.Integrations.IntegrationStatus? integrationStatus = null)
     {
         this.pluginCatalog = pluginCatalog;
         this.live = live;
@@ -96,7 +96,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         this.lifetime = lifetime;
         this.health = health;
         this.registry = registry;
-        this.emonCmsStatus = emonCmsStatus;
+        this.integrationStatus = integrationStatus;
         this.restarter = restarter;
         this.snapshots = snapshots;
         this.hostRoles = hostRoles;
@@ -942,19 +942,19 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 .Select(f => new { kind = f.Kind, severity = f.Severity, message = f.Message, breakers = f.Breakers, channels = f.Channels })
                 .ToArray();
 
-            // EmonCMS export health (worker only).
-            object? emonStatus = null;
-            if (config.EmonCMS.Enabled)
-            {
-                if (emonCmsStatus.HasAttempted)
-                    emonStatus = emonCmsStatus.Snapshot();
-                else
-                    emonStatus = processList
-                        .Where(p => p.EmonCms is not null && (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= Core.Diagnostics.ProcessRegistry.StaleAfterSeconds)
-                        .OrderByDescending(p => p.TimestampUtc)
-                        .Select(p => (object?)p.EmonCms)
-                        .FirstOrDefault() ?? emonCmsStatus.Snapshot();
-            }
+            // Each enabled integration's last outcome: this process's own, else the freshest a live process reported.
+            var reported = Core.Diagnostics.IntegrationReports.Local(integrationStatus);
+            var integrationList = (integrations?.All ?? [])
+                .Where(i => i is Core.Integrations.IMeasurementDestination or Core.Integrations.IConfigurationPublisher
+                                 or Core.Integrations.IDeviceSourcePlugin)
+                .Where(i => i.Enabled(config))
+                .Select(i => new
+                {
+                    id = i.Id,
+                    name = i.DisplayName,
+                    status = reported.TryGetValue(i.Id, out var mine) ? mine : Core.Diagnostics.IntegrationReports.Freshest(processList, i.Id),
+                })
+                .ToArray();
 
             // Modbus source health per configured connection.
             var modbus = new List<object>();
@@ -1027,9 +1027,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 kubernetes = k8s is not null,
                 pod = Environment.GetEnvironmentVariable("RPDU2MQTT_POD_NAME"),
                 ns = k8s?.Namespace,
-                emoncms = config.EmonCMS.Enabled
-                    ? new { enabled = true, transport = (string?)config.EmonCMS.Transport.ToString().ToLowerInvariant(), status = emonStatus }
-                    : new { enabled = false, transport = (string?)null, status = (object?)null },
+                integrations = integrationList,
             }, ConfigSchema.Json);
         });
 
