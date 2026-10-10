@@ -8447,7 +8447,7 @@ function mountMqttExplorer(body     , close            , showing               )
 
   let current = lastFilter();
   const filterBar = el('div', { class: 'ld-toolbar' });
-  const filterIn = el('input', { type: 'text', value: current, placeholder: '# (everything)', style: { width: '220px' } })                    ;
+  const filterIn = el('input', { type: 'text', value: current, placeholder: '# (everything)', style: { width: '220px', maxWidth: '100%' } })                    ;
   filterIn.title = 'The topic filter to subscribe to while browsing. If the broker denies “#”, narrow it (e.g. solar_assistant/#).';
   const applyFilter = btn('Browse');
   const chips = el('span', { style: { display: 'inline-flex', gap: '4px', flexWrap: 'wrap' } });
@@ -8455,7 +8455,7 @@ function mountMqttExplorer(body     , close            , showing               )
   body.appendChild(filterBar);
 
   const bar = el('div', { class: 'ld-toolbar' });
-  const search = el('input', { type: 'search', placeholder: 'find a topic…', style: { width: '320px' } })                    ;
+  const search = el('input', { type: 'search', placeholder: 'find a topic…', style: { width: '320px', maxWidth: '100%' } })                    ;
   const expandAll = btn('Expand all');
   const collapseAll = btn('Collapse all');
   const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
@@ -8468,7 +8468,7 @@ function mountMqttExplorer(body     , close            , showing               )
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(tbl);
+  body.appendChild(el('div', { style: { overflowX: 'auto' } }, tbl));
 
   const picked = new Map                       ();
   const pick = (t     ) => {
