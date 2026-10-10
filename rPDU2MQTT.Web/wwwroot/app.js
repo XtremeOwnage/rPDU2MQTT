@@ -4185,13 +4185,13 @@ function addDiagnosticsSection(nav     , sections     ) {
     info.appendChild(row('Started (UTC)', b.startedUtc));
     info.appendChild(row('MQTT', (b.mqttConnected ? 'connected' : 'disconnected') + ' — ' + b.mqttHost));
     info.appendChild(row('Last PDU poll (UTC)', b.lastPollUtc));
-    if (b.emoncms && b.emoncms.enabled) {
-      const s = b.emoncms.status || {};
+    for (const i of b.integrations || []) {
+      const s = i.status || {};
       let txt;
-      if (s.ok === true) txt = 'ok (' + b.emoncms.transport + ') — last sent ' + (s.lastSuccessUtc || '?') + (s.count ? ', ' + s.count + ' inputs' : '');
-      else if (s.ok === false) txt = 'error (' + b.emoncms.transport + ') — ' + (s.lastError || 'unknown');
-      else txt = 'enabled (' + b.emoncms.transport + ') — no export yet';
-      info.appendChild(row('EmonCMS', txt));
+      if (s.ok === true) txt = 'ok — last run ' + (s.lastSuccessUtc || '?') + (s.count ? ', ' + s.count + ' items' : '');
+      else if (s.ok === false) txt = 'error — ' + (s.lastError || 'unknown');
+      else txt = 'enabled — not run yet';
+      info.appendChild(row(i.name, txt));
     }
     // The server's clock, and the boundary the daily energy totals are cut on. Neither is visible from a
     // browser — the container's clock is UTC unless someone set TZ, so "Energy Daily" can end at 7pm local

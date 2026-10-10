@@ -85,7 +85,6 @@ public static class ServiceConfiguration
         var faults = new Core.Startup.ConfigurationFaults();
         services.AddSingleton(faults);
 
-        services.AddSingleton<Services.EmonCmsStatus>();
 
         services.AddSingleton<DiscoveryCoordinator>();
 
