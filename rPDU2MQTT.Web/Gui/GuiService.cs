@@ -740,6 +740,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 var reloaded = configSource.Load();
                 config.EnergyFlow = reloaded.EnergyFlow;
                 config.HASS.EnergyDashboard = reloaded.HASS.EnergyDashboard;
+                config.HASS.Url = reloaded.HASS.Url;
+                config.HASS.Token = reloaded.HASS.Token;
                 config.EmonCMS.Feeds = reloaded.EmonCMS.Feeds;
                 config.History = reloaded.History;
                 config.PlanStorage = reloaded.PlanStorage;
@@ -1787,8 +1789,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var b = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: cts.Token);
-                var url = b.RootElement.TryGetProperty("url", out var u) ? u.GetString() : config.HASS.EnergyDashboard.Url;
-                var token = b.RootElement.TryGetProperty("token", out var t) ? t.GetString() : config.HASS.EnergyDashboard.Token;
+                var url = b.RootElement.TryGetProperty("url", out var u) ? u.GetString() : config.HASS.Url;
+                var token = b.RootElement.TryGetProperty("token", out var t) ? t.GetString() : config.HASS.Token;
                 var count = await haEnergy.SyncAsync(url ?? "", token ?? "", cts.Token);
                 return Results.Json(new { ok = true, message = count == 0 ? "No tiers had an energy sensor in HA yet — enable “Export tiers to MQTT” + HA discovery and wait a poll." : $"Synced {count} device(s) into the Energy Dashboard." }, ConfigSchema.Json);
             }
@@ -1805,8 +1807,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             try
             {
                 var b = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: cts.Token);
-                var url = b.RootElement.TryGetProperty("url", out var u) ? u.GetString() : config.HASS.EnergyDashboard.Url;
-                var token = b.RootElement.TryGetProperty("token", out var t) ? t.GetString() : config.HASS.EnergyDashboard.Token;
+                var url = b.RootElement.TryGetProperty("url", out var u) ? u.GetString() : config.HASS.Url;
+                var token = b.RootElement.TryGetProperty("token", out var t) ? t.GetString() : config.HASS.Token;
                 var count = await haEnergy.ClearAsync(url ?? "", token ?? "", cts.Token);
                 return Results.Json(new { ok = true, message = $"Cleared {count} device(s) from the Energy Dashboard." }, ConfigSchema.Json);
             }

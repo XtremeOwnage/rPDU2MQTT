@@ -29,7 +29,13 @@ public class RedactedSecretsSurviveTests
         return dir?.FullName ?? throw new InvalidOperationException("repo root not found");
     }
 
-    /// <summary>The config paths RedactSecrets nulls out, e.g. "HASS.EnergyDashboard.Token".</summary>
+    /// <summary>
+    /// Old locations of a secret that every load moves to its new one, so nothing is left in them by the time
+    /// a config is saved. RedactSecrets clears them only in case a config skipped the load.
+    /// </summary>
+    private static readonly string[] MovedOnLoad = ["HASS.EnergyDashboard.LegacyToken"];
+
+    /// <summary>The config paths RedactSecrets nulls out, e.g. "HASS.Token".</summary>
     private static IEnumerable<string> Redacted()
     {
         var source = Read("rPDU2MQTT.Core", "ConfigSchema.cs");
@@ -47,7 +53,7 @@ public class RedactedSecretsSurviveTests
         fields = fields[..fields.IndexOf("};", StringComparison.Ordinal)].Replace("?", "");
 
         var missing = new List<string>();
-        foreach (var path in Redacted())
+        foreach (var path in Redacted().Except(MovedOnLoad))
         {
             // The last two segments identify the field well enough to spot in the accessor lambdas —
             // "EnergyDashboard.Token", "Gui.Password" — without matching a same-named field elsewhere.

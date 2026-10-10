@@ -19,7 +19,7 @@ Each also accepts `<NAME>_FILE`, a path to a file holding the value (Docker or K
 | `RPDU2MQTT_MQTT_USERNAME`, `RPDU2MQTT_MQTT_PASSWORD` | `MQTT.Credentials` |
 | `RPDU2MQTT_PDU_USERNAME`, `RPDU2MQTT_PDU_PASSWORD` | Credentials of the `default` PDU, else the first one |
 | `RPDU2MQTT_EMONCMS_APIKEY` | `EmonCMS.ApiKey` |
-| `RPDU2MQTT_HASS_TOKEN` | `HomeAssistant.EnergyDashboard.Token` |
+| `RPDU2MQTT_HASS_TOKEN` | `HomeAssistant.Token` |
 | `RPDU2MQTT_GUI_PASSWORD` | `Gui.Password` |
 | `RPDU2MQTT_OIDC_CLIENT_SECRET` | `Gui.Oidc.ClientSecret` |
 | `RPDU2MQTT_API_KEY` | `Api.ApiKey` |

@@ -340,8 +340,8 @@ public class HistoryCopyTests : IDisposable
     public async Task AHomeAssistantReadingEndsWhenTheSensorGoesUnavailable()
     {
         var cfg = new Config();
-        cfg.HASS.EnergyDashboard.Url = "http://hass.local";
-        cfg.HASS.EnergyDashboard.Token = "t";
+        cfg.HASS.Url = "http://hass.local";
+        cfg.HASS.Token = "t";
         var start = new DateTime(2026, 8, 20, 5, 0, 0, DateTimeKind.Utc);
         string At(int minutes) => start.AddMinutes(minutes).ToString("o", CultureInfo.InvariantCulture);
         var handler = new Stub(_ => $$"""[[{"entity_id":"sensor.energyflow_grid_energy","state":"10","last_changed":"{{At(0)}}"},{"entity_id":"sensor.energyflow_grid_energy","state":"unavailable","last_changed":"{{At(10)}}"}]]""");

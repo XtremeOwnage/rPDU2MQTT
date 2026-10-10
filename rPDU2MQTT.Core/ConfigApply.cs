@@ -23,6 +23,8 @@ public static class ConfigApply
         "History",
         // Read on each periodic sync and by the manual sync/clear buttons.
         "HomeAssistant.EnergyDashboard",
+        "HomeAssistant.Url",
+        "HomeAssistant.Token",
         // Read on each provisioning pass.
         "EmonCMS.Feeds",
         // The image store is rebuilt when its settings object changes.

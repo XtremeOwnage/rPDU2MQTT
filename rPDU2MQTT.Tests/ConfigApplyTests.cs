@@ -46,7 +46,7 @@ public class ConfigApplyTests
     {
         // HomeAssistant is half and half: the Energy Dashboard settings are re-read, discovery is not.
         var saved = Fresh();
-        saved.HASS.EnergyDashboard.Url = "http://ha:8123";
+        saved.HASS.Url = "http://ha:8123";
         saved.HASS.DiscoveryEnabled = !Fresh().HASS.DiscoveryEnabled;
 
         var stranded = ConfigApply.NeedingRestart(Fresh(), saved);
