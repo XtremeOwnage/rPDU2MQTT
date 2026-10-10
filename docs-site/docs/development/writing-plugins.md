@@ -25,6 +25,8 @@ Example: [HelloWorld](https://github.com/XtremeOwnage/rPDU2MQTT/tree/main/Exampl
 
 `rPDU2MQTT.Core` contains the contracts, config model, flow engine and helpers. No ASP.NET or MQTT client dependency.
 
+A plugin loads only on a bridge with the same major `rPDU2MQTT.Core` version and an equal or newer minor. Otherwise it is skipped and the Plugins page says why.
+
 ## The identity
 
 ```csharp

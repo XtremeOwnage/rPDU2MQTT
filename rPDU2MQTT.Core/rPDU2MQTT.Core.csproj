@@ -5,6 +5,8 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<InvariantGlobalization>true</InvariantGlobalization>
+		<!-- Plugin API version: major = breaking, minor = additive. -->
+		<AssemblyVersion>1.0.0.0</AssemblyVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
