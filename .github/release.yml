@@ -18,6 +18,9 @@ changelog:
     - title: Dependencies
       labels:
         - kind/dependency
+    - title: Workflows
+      labels:
+        - kind/workflow
     - title: Chores
       labels:
         - kind/chore

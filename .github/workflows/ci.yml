@@ -11,6 +11,7 @@ on:
       - 'charts/**'
       - 'rPDU2MQTT.sln'
       - '.github/workflows/ci.yml'
+      - '!**/*.md'
   pull_request:
     branches: [ "main" ]
     paths:
@@ -20,6 +21,7 @@ on:
       - 'charts/**'
       - 'rPDU2MQTT.sln'
       - '.github/workflows/ci.yml'
+      - '!**/*.md'
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
