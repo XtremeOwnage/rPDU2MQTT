@@ -60,6 +60,8 @@ Implement any combination.
 | `IConfigurablePlugin` | Carry your own settings section. |
 | `IGuiPageProvider` | Ship your own GUI pages. |
 | `IEntityExtensionProvider` | Keep your own settings on nodes, panels and breakers. |
+| `IExportContributor` | Publish tiers of your own beside the flow's nodes, each with its own topic and Home Assistant device. |
+| `IAreaProvider` | Say which Home Assistant area each node's device belongs in. |
 | `IPluginStoreUser` | Keep named hashes across restarts (Valkey/Redis when the cache is on). |
 
 ### Receiving data
@@ -134,6 +136,8 @@ EnergyFlow:
 ```
 
 Read and write them with `EntityExtensions.Read<MyNodeSettings>(node, Id)` and `EntityExtensions.Write(node, Id, settings)`.
+
+A field whose choices only the running bridge knows takes `[ChoicesFrom("/api/...")]`: the GUI asks that path for `[value, label]` pairs and draws a dropdown, or a box to tick per choice on a list.
 
 ## Your actions
 

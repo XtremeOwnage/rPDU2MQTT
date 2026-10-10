@@ -126,6 +126,9 @@ public static class ServiceConfiguration
         AddCache(services, cfg, pluginIntegrations.OfType<Core.History.IHistoryBackend>().ToList());
         PluginSections = Plugins.PluginLoader.Sections(pluginIntegrations).ToList();
         EntityExtensions = Core.Integrations.EntityExtensions.Of(pluginIntegrations).ToList();
+        // Tiers and areas: the bridge's own places first, then whatever plugins add.
+        services.AddSingleton(new Core.Integrations.ExportContributions(
+            new object[] { new Core.Flow.LocationContributor() }.Concat(pluginIntegrations)));
         // Plugin source types offered in the node editor.
         Services.Gui.ConfigSchema.PluginSourceTypes = pluginIntegrations
             .OfType<Core.Integrations.IValueSourcePlugin>()
