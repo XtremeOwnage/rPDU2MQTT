@@ -22,7 +22,6 @@ public sealed class StatusReporter : BackgroundService
     private readonly Core.Integrations.IntegrationStatus? integrationStatus;
     private readonly IHiveMQClient mqtt;
     private readonly ISnapshotCache snapshots;
-    private readonly EmonCmsStatus emon;
     private readonly ProcessIdentity self;
     private readonly Core.Flow.CacheHealth? cacheHealth;
     private readonly Core.Startup.ConfigurationFaults? faults;
@@ -35,7 +34,7 @@ public sealed class StatusReporter : BackgroundService
     private IReadOnlyList<Core.StorageUse>? storage;
     private DateTime storageCheckedUtc = DateTime.MinValue;
 
-    public StatusReporter(Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, EmonCmsStatus emon, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null, Core.Status.StatusBoard? statusBoard = null, Core.History.LocalSeriesStore? localHistory = null, LeaderState? leader = null, Core.Integrations.IPduInstances? pdus = null)
+    public StatusReporter(Config config, IHiveMQClient mqtt, ISnapshotCache snapshots, ProcessIdentity self, Core.Flow.CacheHealth? cacheHealth = null, Core.Startup.ConfigurationFaults? faults = null, Services.ICacheClient? cacheProbe = null, Core.Flow.IMeasurementHistory? history = null, Core.Integrations.IntegrationRegistry? registry = null, Core.Integrations.IntegrationStatus? integrationStatus = null, Core.Status.StatusBoard? statusBoard = null, Core.History.LocalSeriesStore? localHistory = null, LeaderState? leader = null, Core.Integrations.IPduInstances? pdus = null)
     {
         this.config = config;
         board = statusBoard ?? new Core.Status.StatusBoard();
@@ -43,7 +42,6 @@ public sealed class StatusReporter : BackgroundService
         this.integrationStatus = integrationStatus;
         this.mqtt = mqtt;
         this.snapshots = snapshots;
-        this.emon = emon;
         this.self = self;
         this.cacheHealth = cacheHealth;
         this.faults = faults;

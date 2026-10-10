@@ -45,3 +45,21 @@ export function sumKnown(values: (number | null | undefined)[]): number | null {
   const known = values.filter(v => v != null) as number[];
   return known.length ? known.reduce((a, b) => a + b, 0) : null;
 }
+
+/// Per step: solar + (battery out − in) + (grid out − in). A missing reading is a gap; an absent `#in` lane is 0.
+export function homeBalanceTrend(rows: Map<string, (number | null)[]>,
+                                 roles: { solar: string[], battery: string[], grid: string[] }): (number | null)[] | null {
+  const outs = [...roles.solar, ...roles.battery, ...roles.grid];
+  if (!outs.length || outs.some(id => !rows.has(id))) return null;
+  const ins = [...roles.battery, ...roles.grid].map(id => rows.get(id + '#in')).filter(Boolean) as (number | null)[][];
+  const ok = (v: number | null | undefined): v is number => v != null && Number.isFinite(v);
+  const points = Math.max(...outs.map(id => rows.get(id)!.length));
+  const values: (number | null)[] = [];
+  for (let i = 0; i < points; i++) {
+    const out = outs.map(id => rows.get(id)![i]), back = ins.map(r => r[i]);
+    values.push(out.every(ok) && back.every(ok)
+      ? out.reduce((a, b) => a + b, 0) - back.reduce((a, b) => a + b, 0)
+      : null);
+  }
+  return values.some(v => v != null) ? values : null;
+}
