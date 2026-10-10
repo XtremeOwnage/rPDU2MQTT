@@ -84,12 +84,12 @@ for (const s of sparks(drawn)) {
     if (p.attrs['stroke-width'] !== '2') fail(`a trend line is ${p.attrs['stroke-width']}px — the spec is 2`);
 }
 
-// --- Home has no node of its own here, so its trend is the balance of solar and grid at each step.
+// --- No Home node: Home trend is the balance of its sources.
 const homeTile = (root) => query(root, '.energy-tile', true).find(t => t.classList.has('home'));
 if (!homeTile(drawn)) fail('no Home tile');
 if (!sparks(homeTile(drawn)).length) fail('Home had no trend, though every source it balances reported at every step');
 
-// --- An export lane counts against it: grid#in at every step still gives Home a line.
+// --- An export lane (grid#in) still gives Home a line.
 const exporting = await render({ ...withData, series: [...withData.series,
   { node: 'grid#in', label: 'Grid', kind: 'grid', balance: 'grid', values: [0, 0, 100, 200, 300] }] });
 if (!sparks(homeTile(exporting)).length) fail('Home lost its trend when the grid reported an export lane');

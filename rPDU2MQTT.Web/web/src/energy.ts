@@ -46,9 +46,7 @@ export function sumKnown(values: (number | null | undefined)[]): number | null {
   return known.length ? known.reduce((a, b) => a + b, 0) : null;
 }
 
-/// Home as the balance of its sources at each step: solar + (battery out − in) + (grid out − in).
-/// A step where any source's reading is missing is a gap, never a partial sum. A return lane (`id#in`)
-/// that history has nothing for counts as 0, as it does on the live board.
+/// Per step: solar + (battery out − in) + (grid out − in). A missing reading is a gap; an absent `#in` lane is 0.
 export function homeBalanceTrend(rows: Map<string, (number | null)[]>,
                                  roles: { solar: string[], battery: string[], grid: string[] }): (number | null)[] | null {
   const outs = [...roles.solar, ...roles.battery, ...roles.grid];

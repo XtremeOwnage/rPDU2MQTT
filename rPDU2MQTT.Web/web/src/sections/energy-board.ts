@@ -137,7 +137,6 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     return values.some(v => v != null) ? { values, color, units, at: trendSeries!.at } : undefined;
   };
 
-  // Home with no node of its own is the balance of its sources, so its trend is too.
   const homeTrend = (roles: { solar: string[], battery: string[], grid: string[] }, units: string) => {
     const values = trendSeries && homeBalanceTrend(trendSeries.byNode, roles);
     return values ? { values, color: 'var(--muted)', units, at: trendSeries!.at } : undefined;

@@ -1428,9 +1428,7 @@ function sumKnown(values                               )                {
   return known.length ? known.reduce((a, b) => a + b, 0) : null;
 }
 
-/// Home as the balance of its sources at each step: solar + (battery out − in) + (grid out − in).
-/// A step where any source's reading is missing is a gap, never a partial sum. A return lane (`id#in`)
-/// that history has nothing for counts as 0, as it does on the live board.
+/// Per step: solar + (battery out − in) + (grid out − in). A missing reading is a gap; an absent `#in` lane is 0.
 function homeBalanceTrend(rows                                ,
                                  roles                                                        )                           {
   const outs = [...roles.solar, ...roles.battery, ...roles.grid];
@@ -8951,7 +8949,6 @@ function addEnergyOverviewSection(nav     , sections     ) {
     return values.some(v => v != null) ? { values, color, units, at: trendSeries .at } : undefined;
   };
 
-  // Home with no node of its own is the balance of its sources, so its trend is too.
   const homeTrend = (roles                                                        , units        ) => {
     const values = trendSeries && homeBalanceTrend(trendSeries.byNode, roles);
     return values ? { values, color: 'var(--muted)', units, at: trendSeries .at } : undefined;
