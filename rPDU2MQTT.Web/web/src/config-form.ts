@@ -15,7 +15,7 @@ import { addFlowSection, addNodesSection, addEnergyOverviewSection, addMqttImpor
 import { addNodeDataSection } from './sections/nodedata.js';
 import { addTrendsSection } from './sections/trends.js';
 import { renderPduTags } from './sections/pdu-tags.js';
-import { openMqttExplorer, openRegisterExplorer } from './sections/explorer.js';
+import { addMqttExplorerSection, openMqttExplorer, openRegisterExplorer } from './sections/explorer.js';
 import { addNodeTrendsSection } from './sections/node-trends.js';
 import { addGroupsSection } from './sections/groups.js';
 import { addBalanceSection } from './sections/balance.js';
@@ -372,7 +372,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   // Sources: the PDU tabs are children of the Vertiv rPDU page.
   { title: 'Sources', items: [{ tool: addLiveDataSection, child: true, after: PDU_BLOCK }, { tool: addControlSection, child: true, after: PDU_BLOCK }, { tool: addPathsSection, child: true, after: PDU_BLOCK }] },
   { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addBalanceSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { page: 'floor-plans' }, { tool: addNodeDataSection }] },
-  { title: 'Integrations', items: [{ tool: addMqttImportSection, child: true, after: 'MQTT' }] },
+  { title: 'Integrations', items: [{ tool: addMqttExplorerSection, child: true, after: 'MQTT' }, { tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   { title: 'System', items: [{ tool: addHomeSection }, { tool: addPluginsSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];

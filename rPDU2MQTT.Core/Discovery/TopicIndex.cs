@@ -29,6 +29,15 @@ public sealed class TopicIndex
     public const int Capacity = 2000;
 
     private readonly Dictionary<string, TopicSample> topics = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> changedAt = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<double>> trends = new(StringComparer.Ordinal);
+
+    /// <summary>Most numeric readings kept per topic for its trend.</summary>
+    public const int TrendLength = 60;
+    private readonly object gate = new();
+    private readonly SemaphoreSlim demand = new(0, 1);
+    private long sequence;
+    private long epoch = 1;
 
     private DateTime leaseUntilUtc = DateTime.MinValue;
     private DateTime lastObservedUtc = DateTime.MinValue;
@@ -37,83 +46,176 @@ public sealed class TopicIndex
 
     public TopicIndexState Renew(string? filter)
     {
-        // A blank filter means "just renew, keep browsing what I'm browsing" (the detail lookups do this),
-        // so it never resets a narrowed filter back to '#'. A non-blank, different filter re-subscribes.
-        if (!string.IsNullOrWhiteSpace(filter) && filter!.Trim() != this.filter)
+        lock (gate)
         {
-            this.filter = filter.Trim();
-            topics.Clear();
-            granted = null;
-            lastObservedUtc = DateTime.MinValue;
-        }
+            var idle = DateTime.UtcNow >= leaseUntilUtc;
+            // A blank filter means "just renew, keep browsing what I'm browsing" (the detail lookups do this),
+            // so it never resets a narrowed filter back to '#'. A non-blank, different filter re-subscribes.
+            if (!string.IsNullOrWhiteSpace(filter) && filter!.Trim() != this.filter)
+            {
+                this.filter = filter.Trim();
+                Clear();
+                idle = true;
+            }
 
-        leaseUntilUtc = DateTime.UtcNow + Lease;
-        return State();
+            leaseUntilUtc = DateTime.UtcNow + Lease;
+            if (idle) Wake();
+            return State();
+        }
+    }
+
+    /// <summary>Waits until a reader starts browsing or changes the filter, or the timeout passes.</summary>
+    public async Task WaitForDemandAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        try { await demand.WaitAsync(timeout, cancellationToken); }
+        catch (OperationCanceledException) { }
+    }
+
+    private void Wake()
+    {
+        if (demand.CurrentCount == 0)
+            try { demand.Release(); } catch (SemaphoreFullException) { }
+    }
+
+    private void Clear()
+    {
+        topics.Clear();
+        changedAt.Clear();
+        trends.Clear();
+        granted = null;
+        lastObservedUtc = DateTime.MinValue;
+        epoch++;
     }
 
     public bool Wanted()
     {
-        // Checked on read rather than by a timer. An expired lease frees everything it was holding here,
-        // which is the whole point of leasing it: nobody browsing means nothing indexed and nothing
-        // subscribed. Nothing has to notice: the lease is checked when someone looks.
-        if (DateTime.UtcNow >= leaseUntilUtc && topics.Count > 0)
+        lock (gate)
         {
-            topics.Clear();
-            granted = null;
-            lastObservedUtc = DateTime.MinValue;
+            // Checked on read rather than by a timer. An expired lease frees everything it was holding here,
+            // which is the whole point of leasing it: nobody browsing means nothing indexed and nothing
+            // subscribed. Nothing has to notice: the lease is checked when someone looks.
+            if (DateTime.UtcNow >= leaseUntilUtc && topics.Count > 0)
+                Clear();
+            return DateTime.UtcNow < leaseUntilUtc;
         }
-        return DateTime.UtcNow < leaseUntilUtc;
     }
 
-    public string DesiredFilter() => DateTime.UtcNow < leaseUntilUtc ? filter : "";
+    public string DesiredFilter()
+    {
+        lock (gate) return DateTime.UtcNow < leaseUntilUtc ? filter : "";
+    }
 
     public void ReportSubscription(bool granted)
     {
-        this.granted = granted;
+        lock (gate) this.granted = granted;
     }
 
     public void Observe(List<TopicSample> samples)
     {
-        lastObservedUtc = DateTime.UtcNow;
+        lock (gate)
+        {
+            lastObservedUtc = DateTime.UtcNow;
 
-        // Don't accumulate for a reader that has already gone away.
-        if (DateTime.UtcNow >= leaseUntilUtc) return;
+            // Don't accumulate for a reader that has already gone away.
+            if (DateTime.UtcNow >= leaseUntilUtc) return;
 
-        foreach (var sample in samples)
-            if (!string.IsNullOrEmpty(sample.Topic))
-                topics[sample.Topic] = sample;
+            if (samples.Count > 0) sequence++;
+            foreach (var sample in samples)
+                if (!string.IsNullOrEmpty(sample.Topic))
+                {
+                    var total = (topics.TryGetValue(sample.Topic, out var prev) ? prev.Messages : 0) + Math.Max(1, sample.Messages);
+                    topics[sample.Topic] = sample with { Messages = total };
+                    changedAt[sample.Topic] = sequence;
+                    if (Flow.TopicSampleAnalyzer.Analyze(sample.Topic, sample.Payload).Value is double v && double.IsFinite(v))
+                    {
+                        if (!trends.TryGetValue(sample.Topic, out var trend)) trends[sample.Topic] = trend = new List<double>();
+                        trend.Add(v);
+                        if (trend.Count > TrendLength) trend.RemoveRange(0, trend.Count - TrendLength);
+                    }
+                }
 
-        Trim();
+            Trim();
+        }
+    }
+
+    /// <summary>
+    /// The topics that changed after <paramref name="since"/>, with the cursor to ask from next time.
+    /// A reader that saw a different <see cref="TopicChanges.Epoch"/> must start over: the index was cleared.
+    /// </summary>
+    public TopicChanges Changes(long since, string? epochSeen = null)
+    {
+        lock (gate)
+        {
+            leaseUntilUtc = DateTime.UtcNow + Lease;
+            var reset = epochSeen != epoch.ToString();
+            var from = reset ? 0 : since;
+            var changed = changedAt
+                .Where(kv => kv.Value > from)
+                .Select(kv => topics[kv.Key])
+                .OrderBy(t => t.Topic, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return new TopicChanges { Topics = changed, Cursor = sequence, Epoch = epoch.ToString(), Reset = reset, State = State() };
+        }
+    }
+
+    /// <summary>Does <paramref name="topic"/> fall under the MQTT subscription filter (with + and # wildcards)?</summary>
+    public static bool FilterMatches(string filter, string topic)
+    {
+        if (string.IsNullOrEmpty(filter) || filter == "#") return true;
+        var f = filter.Split('/');
+        var t = topic.Split('/');
+        for (var i = 0; i < f.Length; i++)
+        {
+            if (f[i] == "#") return true;
+            if (i >= t.Length) return false;
+            if (f[i] != "+" && f[i] != t[i]) return false;
+        }
+        return f.Length == t.Length;
     }
 
     public List<TopicSample> Search(string? query, int limit)
     {
-        leaseUntilUtc = DateTime.UtcNow + Lease;   // searching is browsing: keep it alive
+        lock (gate)
+        {
+            leaseUntilUtc = DateTime.UtcNow + Lease;   // searching is browsing: keep it alive
 
-        var q = (query ?? "").Trim();
-        var matches = topics.Values
-            .Where(t => q.Length == 0 || t.Topic.Contains(q, StringComparison.OrdinalIgnoreCase))
-            // Shortest first: the closest match to what was typed, rather than the deepest topic tree.
-            .OrderBy(t => t.Topic.Length)
-            .ThenBy(t => t.Topic, StringComparer.OrdinalIgnoreCase)
-            .Take(Math.Clamp(limit, 1, 200))
-            .ToList();
+            var q = (query ?? "").Trim();
+            var matches = topics.Values
+                .Where(t => q.Length == 0 || t.Topic.Contains(q, StringComparison.OrdinalIgnoreCase))
+                // Shortest first: the closest match to what was typed, rather than the deepest topic tree.
+                .OrderBy(t => t.Topic.Length)
+                .ThenBy(t => t.Topic, StringComparer.OrdinalIgnoreCase)
+                .Take(Math.Clamp(limit, 1, 200))
+                .ToList();
 
-        return matches;
+            return matches;
+        }
     }
 
 
     public List<string> TopicsUnder(string prefix)
     {
-        leaseUntilUtc = DateTime.UtcNow + Lease;   // a sweep is a reader too; don't let the feed lapse mid-scan
+        lock (gate)
+        {
+            leaseUntilUtc = DateTime.UtcNow + Lease;   // a sweep is a reader too; don't let the feed lapse mid-scan
 
-        var p = prefix ?? "";
-        return topics.Keys
-            .Where(t => p.Length == 0 || t.StartsWith(p, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+            var p = prefix ?? "";
+            return topics.Keys
+                .Where(t => p.Length == 0 || t.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
     }
+
+    /// <summary>The numeric readings seen on a topic while browsing, oldest first.</summary>
+    public double[] Trend(string topic)
+    {
+        lock (gate) return trends.TryGetValue(topic ?? "", out var trend) ? trend.ToArray() : [];
+    }
+
     public TopicSample? Get(string topic)
-        => topics.TryGetValue(topic ?? "", out var sample) ? sample : null;
+    {
+        lock (gate) return topics.TryGetValue(topic ?? "", out var sample) ? sample : null;
+    }
 
     private TopicIndexState State() => new()
     {
@@ -130,7 +232,11 @@ public sealed class TopicIndex
         if (topics.Count <= Capacity) return;
 
         foreach (var stale in topics.Values.OrderBy(t => t.SeenUtc).Take(topics.Count - Capacity).ToList())
+        {
             topics.Remove(stale.Topic);
+            changedAt.Remove(stale.Topic);
+            trends.Remove(stale.Topic);
+        }
     }
 
 }

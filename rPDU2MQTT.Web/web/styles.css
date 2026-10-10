@@ -951,6 +951,9 @@
   /* The Nodes table scrolls within itself, with no sticky header. */
   .nodes-scroll { overflow-x:auto; }
   .nodes-scroll table.ld th { position:static; }
+  /* The MQTT explorer's table too. */
+  .explorer-scroll { overflow-x:auto; }
+  .explorer-scroll table.ld th { position:static; }
 
 
   .cmd-item {

@@ -1,9 +1,10 @@
 // Explorers on the MQTT and Modbus pages: browse what is out there, tick readings, and create a node from them.
-import { api, btn, copyText, el, ensure, formatNum, toast } from '../helpers.js';
+import { activate, api, btn, copyText, el, ensure, formatNum, navLink, toast } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
 import { METRICS, NODE_KINDS, MODBUS_REGISTER_TYPES, metricLabel } from '../flow-vocabulary.js';
 import { overlay, fetchTopics } from './node-editor.js';
+import { sparkline } from '../charts.js';
 import { editNodeOnNextOpen } from './nodes.js';
 
 /// A ticked reading: the binding it becomes, what the create dialog calls it, and a JSON topic's fields.
@@ -153,20 +154,63 @@ function treeBranches(n: TopicTree, out: string[] = []): string[] {
   return out;
 }
 
-/// The MQTT explorer: search the broker's live topics and tick the ones to create a node from.
+/// The filters browsed lately, newest first; '#' is always on offer and isn't kept here.
+const RECENT_FILTERS_KEY = 'rpdu-mqtt-explorer-filters';
+function recentFilters(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_FILTERS_KEY) || '[]');
+    return Array.isArray(v) ? v.filter((f: any) => typeof f === 'string' && f && f !== '#').slice(0, 6) : [];
+  } catch { return []; }
+}
+function rememberFilter(filter: string) {
+  const list = filter === '#' ? recentFilters() : [filter, ...recentFilters().filter(f => f !== filter)].slice(0, 6);
+  try { localStorage.setItem(RECENT_FILTERS_KEY, JSON.stringify(list)); localStorage.setItem(RECENT_FILTERS_KEY + '-last', filter); } catch { /* this session only */ }
+}
+function lastFilter() {
+  try { return localStorage.getItem(RECENT_FILTERS_KEY + '-last') || '#'; } catch { return '#'; }
+}
+
+/// How long ago, in the fewest words that still say it.
+function seenAgo(iso: string) {
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  if (!Number.isFinite(s)) return '';
+  return s < 2 ? 'just now' : s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
+}
+
+/// The MQTT explorer in a sheet.
 export function openMqttExplorer() {
   const { body, close } = overlay('MQTT explorer');
-  body.appendChild(el('div', { class: 'desc', text: 'Live topics seen on the broker while this window is open, as a tree of their topic segments. Ticking a branch ticks every topic under it; create a node with a binding for each ticked reading.' }));
+  mountMqttExplorer(body, close, () => true);
+}
 
+/// The MQTT explorer as its own page under MQTT. It only polls while the page is showing.
+export function addMqttExplorerSection(nav: any, sections: any) {
+  const link = navLink(nav, 'MQTT Explorer', '⌕');
+  const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
+  sec.appendChild(el('h2', { text: 'MQTT Explorer' }));
+  let mounted = false;
+  link.onclick = () => {
+    activate(link, sec);
+    if (!mounted) { mounted = true; mountMqttExplorer(sec, () => {}, () => sec.classList.contains('active')); }
+  };
+  return { link, sec };
+}
+
+/// The broker's live topics as a tree that fills in as they arrive; tick the ones to create a node from.
+function mountMqttExplorer(body: any, close: () => void, showing: () => boolean) {
+  body.appendChild(el('div', { class: 'desc', text: 'Topics appear as the broker sends them: retained ones at once, the rest when they next publish. Open a branch to drill in, ⌖ to browse only that branch, and tick readings to create a node from them.' }));
+
+  let current = lastFilter();
   const filterBar = el('div', { class: 'ld-toolbar' });
-  const filterIn = el('input', { type: 'text', value: '#', placeholder: '# (everything)', style: { width: '220px' } }) as HTMLInputElement;
+  const filterIn = el('input', { type: 'text', value: current, placeholder: '# (everything)', style: { width: '220px', maxWidth: '100%' } }) as HTMLInputElement;
   filterIn.title = 'The topic filter to subscribe to while browsing. If the broker denies “#”, narrow it (e.g. solar_assistant/#).';
-  const applyFilter = btn('Browse this');
-  filterBar.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'Subscribe to:' }), filterIn, applyFilter);
+  const applyFilter = btn('Browse');
+  const chips = el('span', { style: { display: 'inline-flex', gap: '4px', flexWrap: 'wrap' } });
+  filterBar.append(el('span', { class: 'desc', style: { margin: '0' }, text: 'Browsing:' }), filterIn, applyFilter, chips);
   body.appendChild(filterBar);
 
   const bar = el('div', { class: 'ld-toolbar' });
-  const search = el('input', { type: 'search', placeholder: 'filter the shown topics…', style: { width: '320px' } }) as HTMLInputElement;
+  const search = el('input', { type: 'search', placeholder: 'find a topic…', style: { width: '320px', maxWidth: '100%' } }) as HTMLInputElement;
   const expandAll = btn('Expand all');
   const collapseAll = btn('Collapse all');
   const status = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
@@ -175,11 +219,11 @@ export function openMqttExplorer() {
 
   const tbl = el('table', { class: 'ld' });
   const head = el('tr');
-  ['', 'Topic', 'Last value', 'Looks like'].forEach(h => head.appendChild(el('th', { text: h })));
+  ['', 'Topic', 'Last value', 'Trend', 'Last seen', 'Messages', 'Looks like'].forEach(h => head.appendChild(el('th', { text: h })));
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
-  body.appendChild(tbl);
+  body.appendChild(el('div', { class: 'explorer-scroll' }, tbl));
 
   const picked = new Map<string, PickedBinding>();
   const pick = (t: any) => {
@@ -197,14 +241,17 @@ export function openMqttExplorer() {
     return explorerSlug(common[common.length - 1] || '');
   };
 
-  let rows: any[] = [];
-  const showing = new Set<string>();   // topics showing their whole payload
+  const known = new Map<string, any>();   // every topic seen under the current filter
+  let cursor = 0;
+  let epoch = '';
+  let startedAt = Date.now();
+  const opened = new Set<string>();    // topics showing their whole payload
   const open = new Set<string>();      // branches showing their children
 
   /// What a topic actually published, under its row: the payload in full, and the fields worth binding.
   const payloadRow = (t: any) => {
     const cell = el('td');
-    cell.setAttribute('colspan', '4');
+    cell.setAttribute('colspan', '7');
     const bar = el('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', margin: '0 0 6px' } });
     bar.append(el('code', { class: 'desc', style: { margin: '0' }, text: t.topic }),
                copyButton(`Copy the topic ${t.topic}`, 'topic', () => t.topic),
@@ -229,8 +276,9 @@ export function openMqttExplorer() {
     return el('tr', { class: 'payload-row' }, cell);
   };
   const decided = new Set<string>();   // branches the reader has opened or closed themselves
+  const byName = (a: TopicTree, b: TopicTree) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
 
-  const drawBranch = (start: TopicTree, depth: number) => {
+  const drawBranch = (start: TopicTree, depth: number, searching: boolean) => {
     // A chain of single children is one line: esphome/fridge/sensor/power/state, not five rows of one each.
     const names = [start.name];
     let n = start;
@@ -240,6 +288,7 @@ export function openMqttExplorer() {
     const branch = n.children.size > 0;
     // A small branch opens itself, a big one waits to be asked, and either way the reader's choice sticks.
     if (branch && !decided.has(n.path) && topics.length <= 25) open.add(n.path);
+    const isOpen = searching || open.has(n.path);
 
     const box = el('input', { type: 'checkbox', title: branch ? `Tick the ${topics.length} topic(s) under ${n.path}` : n.path }) as HTMLInputElement;
     box.checked = topics.length > 0 && topics.every(t => picked.has(t.topic));
@@ -252,15 +301,25 @@ export function openMqttExplorer() {
 
     const name = el('td', { style: { paddingLeft: `${6 + depth * 18}px`, whiteSpace: 'nowrap' } });
     if (branch) {
-      const toggle = el('span', { text: open.has(n.path) ? '▾' : '▸', style: { cursor: 'pointer', marginRight: '6px', color: 'var(--muted)' } });
+      const toggle = el('span', { text: isOpen ? '▾' : '▸', style: { cursor: 'pointer', marginRight: '6px', color: 'var(--muted)' } });
       toggle.onclick = () => { decided.add(n.path); open.has(n.path) ? open.delete(n.path) : open.add(n.path); draw(); };
       name.appendChild(toggle);
     }
-    name.append(el('code', { text: label }));
+    const code = el('code', { text: label });
+    if (branch) {
+      code.style.cursor = 'pointer';
+      code.onclick = () => { decided.add(n.path); open.has(n.path) ? open.delete(n.path) : open.add(n.path); draw(); };
+    }
+    name.append(code);
     if (branch) name.append(el('span', { class: 'desc', style: { margin: '0 0 0 6px' }, text: `${topics.length} topic(s)` }));
     // The path, ready to paste into a profile pattern, a subscription or a binding.
     name.append(copyButton(branch ? `Copy the path ${n.path}` : `Copy the topic ${n.path}`,
                            branch ? 'path' : 'topic', () => n.path));
+    if (branch && `${n.path}/#` !== current) {
+      const focus = el('button', { class: 'copy-btn', text: '⌖', title: `Browse only ${n.path}/#` }) as HTMLButtonElement;
+      focus.onclick = (ev: any) => { ev?.stopPropagation?.(); browse(`${n.path}/#`); };
+      name.append(focus);
+    }
 
     const t = n.row;
     const value = el('td', { class: 'num', text: t ? (t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48)) : '' });
@@ -268,26 +327,53 @@ export function openMqttExplorer() {
     if (t && (t.payload || t.value != null)) {
       value.title = t.payload || '';
       value.style.cursor = 'pointer';
-      value.onclick = () => { showing.has(t.topic) ? showing.delete(t.topic) : showing.add(t.topic); draw(); };
+      value.onclick = () => { opened.has(t.topic) ? opened.delete(t.topic) : opened.add(t.topic); draw(); };
       // What it last published, in full — not the 48 characters the cell has room for.
       value.append(' ', copyButton('Copy the last value', 'value', () => t.payload || String(t.value ?? '')));
     }
+    const trend = el('td', { style: { width: '140px' } });
+    if (t && Array.isArray(t.trend) && t.trend.length > 1)
+      trend.appendChild(sparkline({ values: t.trend, color: '#4f8ff7', units: t.unit || '', width: 132, height: 22, fromZero: false }));
+    // A branch reports its freshest topic and the messages under it.
+    const newest = topics.reduce((m: string, x: any) => (x.seenUtc && x.seenUtc > m ? x.seenUtc : m), '');
+    const seen = el('td', { class: 'desc', style: { whiteSpace: 'nowrap', margin: '0' }, text: newest ? seenAgo(newest) : '' });
+    if (newest) { seen.title = new Date(newest).toLocaleString(); ages.push({ cell: seen, at: newest }); }
+    const count = topics.reduce((n: number, x: any) => n + (Number(x.messages) || 0), 0);
     tbody.appendChild(el('tr', {},
       el('td', {}, box),
       name,
       value,
+      trend,
+      seen,
+      el('td', { class: 'num', text: count ? formatNum(count) : '' }),
       el('td', { text: t ? (t.isJson ? `JSON · ${fieldNames(t.fields).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—')) : '' })));
-    if (t && showing.has(t.topic)) tbody.appendChild(payloadRow(t));
+    if (t && opened.has(t.topic)) tbody.appendChild(payloadRow(t));
 
-    if (branch && open.has(n.path)) n.children.forEach(c => drawBranch(c, depth + 1));
+    if (branch && isOpen) [...n.children.values()].sort(byName).forEach(c => drawBranch(c, depth + 1, searching));
   };
 
+  /// The topics on show: everything known, or what matches the search.
+  const shown = () => {
+    const q = search.value.trim().toLowerCase();
+    const all = [...known.values()];
+    return q ? all.filter(t => String(t.topic).toLowerCase().includes(q)) : all;
+  };
+  let ages: { cell: any, at: string }[] = [];
   const draw = () => {
     tbody.innerHTML = '';
-    buildTopicTree(rows).children.forEach(c => drawBranch(c, 0));
+    ages = [];
+    const rows = shown();
+    const searching = !!search.value.trim();
+    if (!rows.length) {
+      const cell = el('td', { class: 'desc', text: searching && known.size ? 'No topic matches that.' : 'Nothing yet — topics show up here as they arrive.' });
+      cell.setAttribute('colspan', '7');
+      tbody.appendChild(el('tr', {}, cell));
+      return;
+    }
+    [...buildTopicTree(rows).children.values()].sort(byName).forEach(c => drawBranch(c, 0, searching));
   };
   const setAll = (opened: boolean) => {
-    treeBranches(buildTopicTree(rows)).forEach(path => { decided.add(path); opened ? open.add(path) : open.delete(path); });
+    treeBranches(buildTopicTree(shown())).forEach(path => { decided.add(path); opened ? open.add(path) : open.delete(path); });
     draw();
   };
   expandAll.onclick = () => setAll(true);
@@ -296,29 +382,89 @@ export function openMqttExplorer() {
   const footer = explorerFooter(picked, suggestId, draw, close);
   body.appendChild(footer.bar);
 
-  const reload = async () => {
-    const b = await fetchTopics(search.value.trim(), 100, filterIn.value.trim() || '#');
-    if (b.granted === false) {
-      status.style.color = 'var(--bad)';
-      status.textContent = `The broker denied the subscription to “${b.filter || filterIn.value.trim()}”. Grant this MQTT account read permission on it, or narrow the filter.`;
-      rows = []; draw();
-      return;
-    }
-    status.style.color = 'var(--muted)';
-    status.textContent = b.listening
-      ? `${(b.topics || []).length} shown · ${b.indexed}/${b.capacity} indexed · subscribed to “${b.filter || '#'}”`
-      : `waiting for the broker subscription to “${b.filter || filterIn.value.trim()}” to come up…`;
-    rows = b.topics || [];
-    draw();
+  const drawChips = () => {
+    chips.innerHTML = '';
+    ['#', ...recentFilters()].forEach(f => {
+      const chip = btn(f === '#' ? 'Everything' : f) as HTMLButtonElement;
+      chip.title = `Browse ${f}`;
+      if (f === current) chip.classList.add('chip-on');
+      chip.onclick = () => browse(f);
+      chips.appendChild(chip);
+    });
   };
 
-  let timer: any = null;
-  search.oninput = () => { clearTimeout(timer); timer = setTimeout(reload, 250); };
-  applyFilter.onclick = () => reload();
-  filterIn.onkeydown = (e: any) => { if (e.key === 'Enter') reload(); };
-  reload();
-  // Keep the topic index's lease alive, and the values fresh, while the window is open.
-  const poll = setInterval(() => { if (!document.body.contains(tbl)) { clearInterval(poll); return; } reload(); }, 5000);
+  const showStatus = (b: any) => {
+    status.style.color = 'var(--muted)';
+    if (!b) { status.style.color = 'var(--bad)'; status.textContent = 'Could not reach the topic index.'; return; }
+    if (b.granted === false) {
+      status.style.color = 'var(--bad)';
+      status.textContent = known.size
+        ? `The broker denied “${b.filter || current}”, so only the topics this app already subscribes to are shown. Grant this MQTT account read permission on it, or browse a branch (⌖).`
+        : `The broker denied the subscription to “${b.filter || current}”. Grant this MQTT account read permission on it, or browse a narrower branch.`;
+      return;
+    }
+    if (!b.listening && !known.size) { status.textContent = `Subscribing to “${current}”…`; return; }
+    if (!known.size) { status.textContent = `Subscribed to “${current}” · waiting for the first message…`; return; }
+    const full = b.capacity && b.indexed >= b.capacity ? ` · at the ${b.capacity}-topic limit, browse a branch (⌖) to see all of it` : '';
+    status.textContent = `${known.size} topic(s) · subscribed to “${current}”${full}`;
+  };
+
+  let busy = false;
+  const poll = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const filter = current;
+      const r = await api(`/api/mqtt/topics?since=${cursor}&epoch=${encodeURIComponent(epoch)}&filter=${encodeURIComponent(filter)}`);
+      if (filter !== current) return;
+      const b = (r.body && r.body.ok) ? r.body : null;
+      if (!b) { showStatus(null); return; }
+      let changed = !!b.reset && known.size > 0;
+      if (b.reset) known.clear();
+      (b.topics || []).forEach((t: any) => {
+        const had = known.get(t.topic);
+        if (!had || had.payload !== t.payload || had.value !== t.value || had.messages !== t.messages) changed = true;
+        known.set(t.topic, t);
+      });
+      if (typeof b.cursor === 'number') cursor = b.cursor;
+      if (b.epoch != null) epoch = String(b.epoch);
+      showStatus(b);
+      if (changed || !tbody.children.length) draw();
+      else ages.forEach(a => { a.cell.textContent = seenAgo(a.at); });
+    } finally { busy = false; }
+  };
+
+  const browse = (filter: string) => {
+    const next = (filter || '').trim() || '#';
+    // Already browsing it: refresh, rather than start over.
+    if (next === current && known.size) { poll(); return; }
+    current = next;
+    filterIn.value = current;
+    rememberFilter(current);
+    known.clear(); open.clear(); decided.clear(); opened.clear();
+    cursor = 0; epoch = ''; startedAt = Date.now();
+    status.style.color = 'var(--muted)';
+    status.textContent = `Subscribing to “${current}”…`;
+    drawChips();
+    draw();
+    poll();
+  };
+
+  search.oninput = () => draw();
+  applyFilter.onclick = () => browse(filterIn.value);
+  filterIn.onkeydown = (e: any) => { if (e.key === 'Enter') browse(filterIn.value); };
+  drawChips();
+  poll();
+  // Every second while it fills in, then every few; polling also keeps the topic index's lease alive.
+  let lastPoll = Date.now();
+  const timer = setInterval(() => {
+    if (!document.body.contains(tbl)) { clearInterval(timer); return; }
+    if (!showing()) { startedAt = Date.now(); return; }
+    const delay = !known.size || Date.now() - startedAt < 15000 ? 1000 : 3000;
+    if (Date.now() - lastPoll < delay - 100) return;
+    lastPoll = Date.now();
+    poll();
+  }, 1000);
 }
 
 /// The Modbus explorer: read a block of registers from a connection and tick the decoded values to create a node from.
@@ -376,8 +522,10 @@ export function openRegisterExplorer() {
     td.append(box, ' ', formatNum(row[type]));
     return td;
   };
+  let ages: { cell: any, at: string }[] = [];
   const draw = () => {
     tbody.innerHTML = '';
+    ages = [];
     rows.forEach((row: any) => {
       const tr = el('tr');
       tr.appendChild(el('td', {}, el('code', { text: String(row.register) })));

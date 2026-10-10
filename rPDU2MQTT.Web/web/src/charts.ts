@@ -301,6 +301,8 @@ export function sparkline(opts: {
   /// Draw a light grid behind the line, with the scale down the side and the time along the bottom. Off by
   /// default: a strip a few centimetres wide has no room for it, and the shape is the whole message there.
   grid?: boolean;
+  /// Scale from zero (the default), or to the readings' own range, where a 250 V line would otherwise be flat.
+  fromZero?: boolean;
 }): any {
   const { values, color, units } = opts;
   const w = opts.width ?? 132, h = opts.height ?? 40;
@@ -316,7 +318,7 @@ export function sparkline(opts: {
     return empty;
   }
 
-  const lo = Math.min(...known, 0), hi = Math.max(...known);
+  const lo = opts.fromZero === false ? Math.min(...known) : Math.min(...known, 0), hi = Math.max(...known);
   const span = hi - lo || 1;
   const x = (i: number) => padL + (values.length === 1 ? 0 : (i * (w - padL - pad)) / (values.length - 1));
   const y = (v: number) => h - padB - ((v - lo) / span) * (h - padB - pad);
