@@ -137,8 +137,7 @@ export async function integrationActionBar(id: string): Promise<any> {
   return bar;
 }
 
-/// Each EmonCMS input's processlist as provisioning would set it: the input, then each step and the feed
-/// (or, for × / ÷ input, the other input) it uses. A calculated step is highlighted.
+/// EmonCMS processlists as provisioning would set them.
 export async function showEmonCmsPlan() {
   const r = await api('/api/integrations/emoncms/plan', { method: 'POST' });
   const result = r.body?.result || {};

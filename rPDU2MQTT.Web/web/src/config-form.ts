@@ -188,7 +188,6 @@ export function renderNode(node: any, obj: any, container: any, path: string[] =
     const fs = document.createElement('fieldset');
     const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-    // A resettable section keeps its fields in one box, so a reset can redraw them in place.
     const body = node.resettable ? document.createElement('div') : fs;
     renderObjectBody(node.properties, target, body, here);
     if (node.resettable) {

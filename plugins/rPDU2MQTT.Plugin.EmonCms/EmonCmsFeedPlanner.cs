@@ -13,7 +13,7 @@ public sealed record EmonFeed(int Id, string Name, string? Tag, string? ProcessL
 /// <summary>A feed we want to exist. DataType 1 = realtime, 2 = daily (kWh/d).</summary>
 public sealed record DesiredFeed(string Name, string Tag, int Engine, int IntervalSeconds, int DataType);
 
-/// <summary>One step of an input's processlist: the process, and the feed it writes or, for an input-arg step, the input it reads.</summary>
+/// <summary>One processlist step: process and feed, or input when <c>InputArg</c>.</summary>
 public sealed record DesiredProcess(string Process, string Feed, bool InputArg = false);
 
 /// <summary>An input and the ordered processlist we want on it; order matters, as some steps rewrite the value passed on.</summary>
@@ -115,7 +115,6 @@ public static class EmonCmsFeedPlanner
             var reported = g.Select(r => r.Type).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var hasPower = reported.Contains(PowerMetric);
             var hasEnergy = reported.Contains(EnergyMetric);
-            // The input another reading of this group arrives on, for a step that reads it.
             string? InputOf(string metric) => g.FirstOrDefault(x => string.Equals(x.Type, metric, StringComparison.OrdinalIgnoreCase))
                 is { } other ? MetricsHelper.EmonCmsInputName(other, config) : null;
 
@@ -166,7 +165,7 @@ public static class EmonCmsFeedPlanner
                         if (calc.DailyFromPower && Who(DailyMetric, local: false, emon: true) == Producer.EmonCms && Derived(DailyMetric, 2) is { } daily)
                             steps.Add(new(ProcessSlot.PowerToKwhd, daily));
                     }
-                    // Division rewrites the value passed on, so it comes after every step that needs watts.
+                    // Last: division rewrites the value.
                     if (calc.VoltageFromPowerAndCurrent && !reported.Contains(VoltageMetric) && InputOf(CurrentMetric) is { } amps
                         && Who(VoltageMetric, local: false, emon: true) == Producer.EmonCms && Derived(VoltageMetric, 1) is { } volts)
                         steps.AddRange([new(ProcessSlot.DivideInput, amps, InputArg: true), new(ProcessSlot.LogToFeed, volts)]);
@@ -177,7 +176,6 @@ public static class EmonCmsFeedPlanner
                 else
                 {
                     steps.Add(new(ProcessSlot.LogToFeed, storageName));
-                    // Power from V × I, unless an energy counter already supplies it.
                     if (string.Equals(r.Type, CurrentMetric, StringComparison.OrdinalIgnoreCase) && calc.PowerFromVoltageAndCurrent
                         && !hasPower && !(hasEnergy && calc.PowerFromEnergy) && InputOf(VoltageMetric) is { } volts
                         && Who(PowerMetric, local: false, emon: true) == Producer.EmonCms && Derived(PowerMetric, 1) is { } power)
@@ -335,11 +333,7 @@ public static class EmonCmsFeedPlanner
         return null;
     }
 
-    /// <summary>
-    /// Join the steps into <c>&lt;process&gt;:&lt;id&gt;</c> pairs, dropping any whose feed does not exist. An
-    /// input-arg step whose input does not exist ends the list: it rewrites the value, so what follows it
-    /// would log the wrong thing.
-    /// </summary>
+    /// <summary>Join steps as <c>process:id</c>; skip missing feeds, stop at a missing input.</summary>
     public static string BuildInputProcessList(IReadOnlyList<DesiredProcess> steps, Func<string, int?> feedId, Func<string, int?>? inputId = null)
     {
         var pairs = new List<string>();

@@ -1,5 +1,4 @@
-// The EmonCMS feed planner (#441): the Calculations box can be put back to its defaults in one click, and
-// "Show feed plan" draws each input's processlist with the calculated steps marked.
+// EmonCMS Calculations reset and feed plan view (#441).
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -9,7 +8,6 @@ const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import
   .filter(n => n.key !== '_README');
 const fail = (m) => { console.error('emoncmsplan check FAILED: ' + m); process.exit(1); };
 
-// The section as the schema emits it; spliced in so the check does not wait on a fixture regeneration.
 const bool = (key, def) => ({ key, label: key, type: 'bool', required: false, default: def, radio: false });
 const calculations = {
   key: 'Calculations', label: 'Calculations', type: 'object', required: false, radio: false, resettable: true,
@@ -50,7 +48,6 @@ link.click();
 await new Promise(r => setTimeout(r, 300));
 const sections = getEl('sections');
 
-// The innermost box: the Feeds box around it holds the same legend further down.
 const box = query(sections, 'fieldset', true)
   .filter(f => query(f, 'legend', true).some(l => String(l.textContent || '') === 'Calculations')).at(-1);
 if (!box) fail('no Calculations box on the EmonCMS page');

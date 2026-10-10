@@ -100,7 +100,7 @@ public sealed class RadioChoicesAttribute : Attribute
 {
 }
 
-/// <summary>The GUI offers to put every setting in this section back to its default.</summary>
+/// <summary>GUI shows a reset-to-defaults button.</summary>
 [AttributeUsage(AttributeTargets.Property)]
 public sealed class ResettableAttribute : Attribute
 {

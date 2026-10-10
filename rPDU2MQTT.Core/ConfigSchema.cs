@@ -76,7 +76,7 @@ public sealed class SchemaNode
     /// <summary>Show the choices as radios rather than a dropdown.</summary>
     public bool Radio { get; set; }
 
-    /// <summary>The GUI offers a button that puts this section back to its defaults.</summary>
+    /// <summary>Show a reset-to-defaults button.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool Resettable { get; set; }
 

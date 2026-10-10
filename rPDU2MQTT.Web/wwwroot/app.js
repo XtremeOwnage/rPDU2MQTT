@@ -13637,7 +13637,6 @@ function renderNode(node     , obj     , container     , path           = []) {
     const fs = document.createElement('fieldset');
     const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
     if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
-    // A resettable section keeps its fields in one box, so a reset can redraw them in place.
     const body = node.resettable ? document.createElement('div') : fs;
     renderObjectBody(node.properties, target, body, here);
     if (node.resettable) {
@@ -14603,8 +14602,7 @@ async function integrationActionBar(id        )               {
   return bar;
 }
 
-/// Each EmonCMS input's processlist as provisioning would set it: the input, then each step and the feed
-/// (or, for × / ÷ input, the other input) it uses. A calculated step is highlighted.
+/// EmonCMS processlists as provisioning would set them.
 async function showEmonCmsPlan() {
   const r = await api('/api/integrations/emoncms/plan', { method: 'POST' });
   const result = r.body?.result || {};

@@ -169,7 +169,7 @@ public sealed class EmonCmsFeedSync
         return new(errors.Count == 0, msg, deleted);
     }
 
-    /// <summary>What provisioning would build from <paramref name="merged"/> now, without asking EmonCMS anything.</summary>
+    /// <summary>The desired state, without contacting EmonCMS.</summary>
     public EmonDesiredState Plan(PduData merged)
         => EmonCmsFeedPlanner.BuildDesired(merged, config,
             config.EmonCMS.ExportFlowNodes ? Core.Flow.FlowTiers.Graphs(merged, config, live) : null, Instances());

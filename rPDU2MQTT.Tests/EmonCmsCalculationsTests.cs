@@ -6,7 +6,6 @@ using Xunit;
 
 namespace rPDU2MQTT.Tests;
 
-/// <summary>The feed planner's calculation switches (#441): each one adds or removes exactly its step.</summary>
 public class EmonCmsCalculationsTests
 {
     private static PduData Outlet(params (string type, string val)[] measurements)
@@ -26,7 +25,7 @@ public class EmonCmsCalculationsTests
         var c = new Config();
         c.EmonCMS.Node = "rpdu2mqtt";
         c.EmonCMS.InputNameTemplate = "{device}_{source}_{type}";
-        c.EmonCMS.Feeds.StorageNameTemplate = "{device}_{source}";   // each type appends its own suffix
+        c.EmonCMS.Feeds.StorageNameTemplate = "{device}_{source}";
         foreach (var t in c.EmonCMS.Feeds.Types) t.Enabled = types.Contains(t.Type, StringComparer.OrdinalIgnoreCase);
         return c;
     }
@@ -114,7 +113,6 @@ public class EmonCmsCalculationsTests
         var volts = StepsOf(EmonCmsFeedPlanner.BuildDesired(Outlet(("realpower", "120"), ("current", "0.5")), config), "pdu_o0_realpower");
         Assert.Equal(new DesiredProcess(ProcessSlot.DivideInput, "pdu_o0_current", InputArg: true), volts[^2]);
         Assert.Equal(new DesiredProcess(ProcessSlot.LogToFeed, "pdu_o0_voltage"), volts[^1]);
-        // Power to kWh needs watts, so it runs before the division rewrites them.
         Assert.True(volts.ToList().FindIndex(s => s.Process == ProcessSlot.PowerToKwh) < volts.Count - 2);
 
         var amps = StepsOf(EmonCmsFeedPlanner.BuildDesired(Outlet(("realpower", "120"), ("voltage", "240")), config), "pdu_o0_realpower");
@@ -145,7 +143,6 @@ public class EmonCmsCalculationsTests
 
         Assert.Equal("process__log_to_feed:1,process__times_input:7,process__log_to_feed:2",
             EmonCmsFeedPlanner.BuildInputProcessList(steps, feeds, n => n == "volts" ? 7 : null));
-        // Without the voltage input the product cannot be formed, and logging amps as watts would be wrong.
         Assert.Equal("process__log_to_feed:1", EmonCmsFeedPlanner.BuildInputProcessList(steps, feeds, _ => null));
     }
 }

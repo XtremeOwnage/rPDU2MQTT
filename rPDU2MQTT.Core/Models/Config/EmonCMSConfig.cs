@@ -179,7 +179,6 @@ public class EmonCmsFeedsConfig
     [TemplateVariables("device", "source", "name", "number", "units")]
     public string StorageNameTemplate { get; set; } = "{device}_{source}";
 
-    /// <summary>Which values EmonCMS works out from others, step by step on an input's processlist.</summary>
     [Description("Which values EmonCMS calculates from others when a feed has no reading of its own. Each runs on EmonCMS, as a step on the input's processlist.")]
     [Resettable]
     public EmonCmsCalculationsConfig Calculations { get; set; } = new();
@@ -260,10 +259,7 @@ public class EmonCmsFeedTypeConfig
     };
 }
 
-/// <summary>
-/// The calculations the feed planner may put on an input's processlist. Each only runs where the type it
-/// produces is enabled and its <see cref="EmonCmsCalculation"/> lets EmonCMS supply it.
-/// </summary>
+/// <summary>Calculations the feed planner may add; each also needs its type enabled and EmonCMS allowed to supply it.</summary>
 public class EmonCmsCalculationsConfig
 {
     [DefaultValue(true)]
