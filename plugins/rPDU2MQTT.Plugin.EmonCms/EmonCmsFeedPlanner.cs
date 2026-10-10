@@ -13,7 +13,6 @@ public sealed record EmonFeed(int Id, string Name, string? Tag, string? ProcessL
 /// <summary>A feed we want to exist. DataType 1 = realtime, 2 = daily (kWh/d).</summary>
 public sealed record DesiredFeed(string Name, string Tag, int Engine, int IntervalSeconds, int DataType);
 
-/// <summary>One processlist step: process and feed, or input when <c>InputArg</c>.</summary>
 public sealed record DesiredProcess(string Process, string Feed, bool InputArg = false);
 
 /// <summary>An input and the ordered processlist we want on it; order matters, as some steps rewrite the value passed on.</summary>
@@ -333,7 +332,7 @@ public static class EmonCmsFeedPlanner
         return null;
     }
 
-    /// <summary>Join steps as <c>process:id</c>; skip missing feeds, stop at a missing input.</summary>
+    /// <summary>A missing input ends the list: the steps after it would log a wrong value.</summary>
     public static string BuildInputProcessList(IReadOnlyList<DesiredProcess> steps, Func<string, int?> feedId, Func<string, int?>? inputId = null)
     {
         var pairs = new List<string>();

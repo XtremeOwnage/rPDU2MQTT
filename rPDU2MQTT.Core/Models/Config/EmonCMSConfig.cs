@@ -259,7 +259,6 @@ public class EmonCmsFeedTypeConfig
     };
 }
 
-/// <summary>Calculations the feed planner may add; each also needs its type enabled and EmonCMS allowed to supply it.</summary>
 public class EmonCmsCalculationsConfig
 {
     [DefaultValue(true)]

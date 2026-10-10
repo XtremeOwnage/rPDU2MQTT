@@ -1,4 +1,3 @@
-// EmonCMS Calculations reset and feed plan view (#441).
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';

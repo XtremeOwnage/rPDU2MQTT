@@ -137,7 +137,6 @@ export async function integrationActionBar(id: string): Promise<any> {
   return bar;
 }
 
-/// EmonCMS processlists as provisioning would set them.
 export async function showEmonCmsPlan() {
   const r = await api('/api/integrations/emoncms/plan', { method: 'POST' });
   const result = r.body?.result || {};

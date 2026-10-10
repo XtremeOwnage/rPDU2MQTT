@@ -1671,7 +1671,6 @@
 .trend-custom:not([hidden]) { display:inline-flex; align-items:center; gap:6px; }
 .trend-custom input[type=date] { width:auto; }
 
-/* EmonCMS feed plan */
 .emon-plan-filter { width:100%; margin:var(--sp-2) 0; }
 .emon-plan { display:flex; flex-direction:column; gap:var(--sp-2); }
 .emon-plan-row { display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding:var(--sp-2); border:1px solid var(--line); border-radius:var(--r); background:var(--panel2); }

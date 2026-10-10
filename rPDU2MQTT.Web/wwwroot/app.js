@@ -14602,7 +14602,6 @@ async function integrationActionBar(id        )               {
   return bar;
 }
 
-/// EmonCMS processlists as provisioning would set them.
 async function showEmonCmsPlan() {
   const r = await api('/api/integrations/emoncms/plan', { method: 'POST' });
   const result = r.body?.result || {};
