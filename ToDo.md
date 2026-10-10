@@ -728,3 +728,5 @@ Notes
     That is correct — Home is the BALANCE of measured sources, not a set of nodes, so there is nothing to
     sum a trend from. Deriving it per step (solar + grid + battery, each known at that step) would give it
     one honestly; worth doing, and it is the only tile without a shape.
+    [x] Done: with no Home node, Home's trend is solar + battery net + grid net per step; a step missing
+        any source is a gap. `sparkline.check.mjs` covers it.

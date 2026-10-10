@@ -1428,6 +1428,26 @@ function sumKnown(values                               )                {
   return known.length ? known.reduce((a, b) => a + b, 0) : null;
 }
 
+/// Home as the balance of its sources at each step: solar + (battery out − in) + (grid out − in).
+/// A step where any source's reading is missing is a gap, never a partial sum. A return lane (`id#in`)
+/// that history has nothing for counts as 0, as it does on the live board.
+function homeBalanceTrend(rows                                ,
+                                 roles                                                        )                           {
+  const outs = [...roles.solar, ...roles.battery, ...roles.grid];
+  if (!outs.length || outs.some(id => !rows.has(id))) return null;
+  const ins = [...roles.battery, ...roles.grid].map(id => rows.get(id + '#in')).filter(Boolean)                       ;
+  const ok = (v                           )              => v != null && Number.isFinite(v);
+  const points = Math.max(...outs.map(id => rows.get(id) .length));
+  const values                    = [];
+  for (let i = 0; i < points; i++) {
+    const out = outs.map(id => rows.get(id) [i]), back = ins.map(r => r[i]);
+    values.push(out.every(ok) && back.every(ok)
+      ? out.reduce((a, b) => a + b, 0) - back.reduce((a, b) => a + b, 0)
+      : null);
+  }
+  return values.some(v => v != null) ? values : null;
+}
+
 // ── cost.ts ─────────────────────────────────────────────────────
 // Energy as cost (#515): readings in kWh times the price per kWh from the GUI settings.
 
@@ -8931,6 +8951,12 @@ function addEnergyOverviewSection(nav     , sections     ) {
     return values.some(v => v != null) ? { values, color, units, at: trendSeries .at } : undefined;
   };
 
+  // Home with no node of its own is the balance of its sources, so its trend is too.
+  const homeTrend = (roles                                                        , units        ) => {
+    const values = trendSeries && homeBalanceTrend(trendSeries.byNode, roles);
+    return values ? { values, color: 'var(--muted)', units, at: trendSeries .at } : undefined;
+  };
+
   const gaugeFor = (ids          , value               , units        ) => {
     const cfgNodes = (state.data?.EnergyFlow?.Nodes || [])         ;
     const maxes = ids.map(id => cfgNodes.find(n => n.Id === id)?.Max).filter((m     ) => typeof m === 'number' && m > 0);
@@ -9184,7 +9210,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
 
     if (home != null || load_.present)
       grid.appendChild(tile('home', '🏠', 'Home', fmt(home), home == null ? whyNoReading(loadIds) : (homeSub || 'consuming'), '',
-        dial(loadIds, home), trendFor(loadIds, 'var(--muted)', units), { ids: loadIds, label: 'Home' }));
+        dial(loadIds, home), load_.present ? trendFor(loadIds, 'var(--muted)', units) : homeTrend({ solar: solarIds, battery: battIds, grid: gridIds }, units), { ids: loadIds, label: 'Home' }));
 
     const ssPct = selfSufficiencyPct(eHome, eFromGrid);
     const ssCovered = coveredEnergy(eHome, eFromGrid);
