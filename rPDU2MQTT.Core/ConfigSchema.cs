@@ -102,6 +102,9 @@ public sealed class SchemaNode
     /// <summary>One object per plugin that keeps settings on this kind of entity, keyed by plugin id.</summary>
     public List<SchemaNode>? Extensions { get; set; }
 
+    /// <summary>The API path that answers this field's choices — see <c>ChoicesFromAttribute</c>.</summary>
+    public string? ChoicesFrom { get; set; }
+
     public string[]? TemplateVars { get; set; }
     public List<SchemaNode>? Properties { get; set; }
     public SchemaNode? ValueSchema { get; set; }
@@ -313,6 +316,9 @@ public static class ConfigSchema
 
         if (prop.GetCustomAttribute<ExtensionPointAttribute>() is { } ext)
             node.ExtensionOf = ext.Entity;
+
+        if (prop.GetCustomAttribute<ChoicesFromAttribute>() is { } from)
+            node.ChoicesFrom = from.Path;
 
         // A setting whose "off" would remove the means of turning it back on. Carried on the schema so the
         // form does not need its own hardcoded list of which fields those are.

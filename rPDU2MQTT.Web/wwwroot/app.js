@@ -13714,12 +13714,37 @@ function pluginPageTool(p            ) {
 // ── config-form.ts ──────────────────────────────────────────────
 // Schema-driven config form, nav, and build().
 
+/// The choices a field's server path answers, as [value, label]; none when it cannot be reached.
+async function fetchChoices(path        )                              {
+  try {
+    const r      = await api(path);
+    const list = Array.isArray(r?.body) ? r.body : (r?.body?.choices || []);
+    return list.map((c     ) => Array.isArray(c) ? [String(c[0]), String(c[1] ?? c[0])] : [String(c), String(c)]);
+  } catch { return []; }
+}
+
 function scalarInput(node     , obj     )      {
   const touched = () => refreshDirty();
   let el     ;
   if (node.type === 'bool') {
     el = document.createElement('input'); el.type = 'checkbox'; el.className = 'switch'; el.checked = !!(obj[node.key] ?? node.default);
     el.onchange = () => { obj[node.key] = el.checked; touched(); };
+  } else if (node.choicesFrom) {
+    // Choices the server answers when the field is drawn, such as the places a plugin defines.
+    el = document.createElement('select');
+    const current = obj[node.key] == null ? '' : String(obj[node.key]);
+    const fill = (choices                    ) => {
+      el.innerHTML = '';
+      const list = choices.slice();
+      if (current && !list.some(([v]) => v === current)) list.push([current, current + ' — not recognised']);
+      [['', '(none)']                    , ...list].forEach(([v, label]) => {
+        const o = document.createElement('option'); o.value = v; o.textContent = label; el.appendChild(o);
+      });
+      el.value = current;
+    };
+    fill([]);
+    fetchChoices(node.choicesFrom).then(fill);
+    el.onchange = () => { obj[node.key] = el.value === '' ? undefined : el.value; touched(); };
   } else if (node.type === 'enum') {
     el = document.createElement('select');
     // A blank choice means unset; leave the field out.
@@ -14005,6 +14030,32 @@ function renderMap(node     , mapObj     , path          ) {
 function renderList(node     , arr       , path          ) {
   const fs = document.createElement('fieldset');
   const lg = document.createElement('legend'); lg.textContent = node.label; fs.appendChild(lg);
+
+  // Picked from the choices the server answers, as boxes to tick.
+  if (node.choicesFrom) {
+    if (node.description) { const d = document.createElement('div'); d.className = 'desc'; d.textContent = node.description; fs.appendChild(d); }
+    const boxes = el('div', { class: 'choice-boxes' });
+    const draw = (choices                    ) => {
+      boxes.innerHTML = '';
+      const list = choices.slice();
+      arr.filter(v => !list.some(([c]) => c === v)).forEach(v => list.push([v, v + ' — not recognised']));
+      list.forEach(([v, label]) => {
+        const cb = el('input', { type: 'checkbox' })                    ;
+        cb.checked = arr.includes(v);
+        cb.onchange = () => {
+          const at = arr.indexOf(v);
+          if (cb.checked && at < 0) arr.push(v); else if (!cb.checked && at >= 0) arr.splice(at, 1);
+          refreshDirty();
+        };
+        boxes.appendChild(el('label', { class: 'choice-box' }, cb, ' ' + label));
+      });
+    };
+    draw([]);
+    fetchChoices(node.choicesFrom).then(draw);
+    fs.appendChild(boxes);
+    registerField([...path], fs       , false);
+    return fs;
+  }
 
   // Tag lists are picked from defined tags, not typed.
   if (node.tagChoices) {

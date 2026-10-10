@@ -1625,6 +1625,8 @@
 .ext-section { margin: 10px 0 0; padding: 4px 14px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); }
 .ext-section > legend { padding: 0 6px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
 .ne-ext > .ext-section { margin: 0 12px 12px; }
+.choice-boxes { display:flex; flex-wrap:wrap; gap:4px 14px; }
+.choice-box { display:inline-flex; align-items:center; gap:4px; }
 
 /* Diagnostics: the directories this process writes to. */
 .diag-storage { margin: 4px 0 14px; overflow-x: auto; }
