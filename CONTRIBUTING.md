@@ -9,7 +9,8 @@ Every PR title starts with one of these prefixes, then a space and a short summa
 | `[Feature]` | New functionality or an enhancement | `kind/feature` |
 | `[Bug]` | A fix for something not working as intended | `kind/bug` |
 | `[Major]` | A breaking change (config, API, MQTT topics, CRD) that needs a major version bump | `kind/major` |
-| `[Chore]` | Refactoring, tests, CI, build, release housekeeping | `kind/chore` |
+| `[Workflow]` | GitHub Actions workflows and repository automation (`.github/`) | `kind/workflow` |
+| `[Chore]` | Refactoring, tests, build, release housekeeping | `kind/chore` |
 | `[Docs]` | Documentation only | `kind/documentation` |
 | `[Dependency]` | Dependency updates | `kind/dependency` |
 
@@ -18,7 +19,7 @@ Examples:
 ```
 [Feature] Add hour windows to the Trends pages
 [Bug] Re-subscribe to MQTT topics after a reconnect
-[Chore] Scope CI and Docker workflows by path
+[Workflow] Scope CI and Docker workflows by path
 ```
 
 PRs are squash-merged, so the title becomes the commit message on `main`. Generated release notes are grouped by the `kind/*` label ([`.github/release.yml`](.github/release.yml)).
@@ -31,7 +32,7 @@ Every issue has a GitHub issue type that agrees with its `kind/*` label:
 |---|---|
 | Bug | `kind/bug` |
 | Feature | `kind/feature` |
-| Task | `kind/chore`, `kind/documentation`, `kind/dependency` or `kind/support` |
+| Task | `kind/chore`, `kind/workflow`, `kind/documentation`, `kind/dependency` or `kind/support` |
 
 The **Issue Standards** workflow sets the type from the label, or adds the label from the type when there is none.
 

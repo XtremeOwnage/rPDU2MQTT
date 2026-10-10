@@ -28,6 +28,7 @@ jobs:
               'kind/documentation': 'Task',
               'kind/dependency': 'Task',
               'kind/support': 'Task',
+              'kind/workflow': 'Task',
             };
             const labelFor = { Bug: 'kind/bug', Feature: 'kind/feature', Task: 'kind/chore' };
 

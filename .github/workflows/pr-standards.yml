@@ -27,6 +27,7 @@ jobs:
               Chore: 'kind/chore',
               Docs: 'kind/documentation',
               Dependency: 'kind/dependency',
+              Workflow: 'kind/workflow',
             };
             const pr = context.payload.pull_request;
             const errors = [];

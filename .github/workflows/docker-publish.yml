@@ -15,6 +15,7 @@ on:
       - 'Dockerfile'
       - '.dockerignore'
       - '.github/workflows/docker-publish.yml'
+      - '!**/*.md'
 
 concurrency:
   group: docker-${{ github.ref }}
