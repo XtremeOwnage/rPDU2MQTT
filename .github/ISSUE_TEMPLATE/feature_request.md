@@ -3,6 +3,7 @@ name: Feature request
 about: Request new feature or functionality for this project
 title: ''
 labels: kind/feature, needs-triage
+type: Feature
 assignees: ''
 
 ---

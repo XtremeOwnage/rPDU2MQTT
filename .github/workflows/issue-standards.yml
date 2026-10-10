@@ -1,0 +1,52 @@
+name: Issue Standards
+
+on:
+  issues:
+    types: [opened, reopened, labeled, typed, untyped]
+
+concurrency:
+  group: issue-standards-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+permissions:
+  issues: write
+
+jobs:
+  sync-type:
+    name: Issue type and kind label
+    if: ${{ !github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const typeFor = {
+              'kind/bug': 'Bug',
+              'kind/feature': 'Feature',
+              'kind/major': 'Feature',
+              'kind/chore': 'Task',
+              'kind/documentation': 'Task',
+              'kind/dependency': 'Task',
+              'kind/support': 'Task',
+            };
+            const labelFor = { Bug: 'kind/bug', Feature: 'kind/feature', Task: 'kind/chore' };
+
+            const { data: issue } = await github.rest.issues.get({ ...context.repo, issue_number: context.issue.number });
+            const kinds = issue.labels.map(l => l.name).filter(n => n.startsWith('kind/'));
+            const type = issue.type?.name;
+
+            if (kinds.length > 1) {
+              core.warning(`Multiple kind labels: ${kinds.join(', ')}`);
+              return;
+            }
+
+            if (kinds.length === 1) {
+              const want = typeFor[kinds[0]];
+              if (want && want !== type) {
+                await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', { ...context.repo, issue_number: issue.number, type: want });
+                core.info(`Set type ${want} from ${kinds[0]}.`);
+              }
+            } else if (type && labelFor[type]) {
+              await github.rest.issues.addLabels({ ...context.repo, issue_number: issue.number, labels: [labelFor[type]] });
+              core.info(`Added ${labelFor[type]} from type ${type}.`);
+            }

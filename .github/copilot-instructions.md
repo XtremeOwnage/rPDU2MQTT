@@ -8,6 +8,10 @@
 - Use only the labels listed in `CONTRIBUTING.md`. Do not create labels.
 - PR body: a short list of what changed. No narration, no restating the diff.
 
+## Issues
+
+- Set the issue type and exactly one matching `kind/*` label: Bug `kind/bug`, Feature `kind/feature`, Task `kind/chore`/`kind/documentation`/`kind/dependency`/`kind/support`.
+
 ## Commits
 
 - Commit subjects follow the same `[Prefix] Summary` format.

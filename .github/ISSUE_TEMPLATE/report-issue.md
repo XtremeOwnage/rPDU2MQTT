@@ -3,6 +3,7 @@ name: Report Issue
 about: Report a bug, or issue with functionality.
 title: ''
 labels: kind/bug, needs-triage
+type: Bug
 assignees: ''
 
 ---
