@@ -1,4 +1,3 @@
-// Opens every GUI page in Chromium against a running bridge.
 // BASE_URL (default http://127.0.0.1:18080), PW_CHROMIUM (optional browser path).
 import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
