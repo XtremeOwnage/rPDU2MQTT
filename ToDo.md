@@ -474,8 +474,10 @@ Notes
         broker degrades under sustained QoS1 traffic and the bridge correctly noticed and said so.
 
     NOT run, and worth saying plainly:
-    [ ] The GUI in a browser. There is none in this environment, so the pages are covered by the DOM checks
+    [x] The GUI in a browser. There is none in this environment, so the pages are covered by the DOM checks
         only — the original "looks like ass in Chrome" report can only be confirmed by the maintainer.
+        Now covered by `rPDU2MQTT.Web/e2e/smoke.mjs` in CI: every page in Chromium against a running bridge,
+        desktop and phone, failing on a script error, a failed request, an empty page or sideways scroll.
     [x] OneView (multi-PDU aggregation) and group control. A stub cluster (`run/oneview.mjs`: a master on
         9098 proxying two members on 9101/9102, both carrying a group called "Rack 1") shows both members
         polled and exported through the master, both groups published with their control topics, and a
