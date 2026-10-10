@@ -16,6 +16,9 @@ public static class ServiceConfiguration
     public static IReadOnlyList<(string Id, string Label, Type ConfigType, string? Group)> PluginSections { get; private set; }
         = Array.Empty<(string, string, Type, string?)>();
 
+    /// <summary>Settings externally loaded plugins keep on core entities.</summary>
+    public static IReadOnlyList<Core.Integrations.EntityExtension> EntityExtensions { get; private set; } = [];
+
     public static void Configure(HostBuilderContext context, IServiceCollection services)
     {
         IConfigSource configSource = ConfigSourceFactory.IsKubernetes
@@ -122,6 +125,7 @@ public static class ServiceConfiguration
         }
         AddCache(services, cfg, pluginIntegrations.OfType<Core.History.IHistoryBackend>().ToList());
         PluginSections = Plugins.PluginLoader.Sections(pluginIntegrations).ToList();
+        EntityExtensions = Core.Integrations.EntityExtensions.Of(pluginIntegrations).ToList();
         // Plugin source types offered in the node editor.
         Services.Gui.ConfigSchema.PluginSourceTypes = pluginIntegrations
             .OfType<Core.Integrations.IValueSourcePlugin>()
@@ -210,7 +214,7 @@ public static class ServiceConfiguration
                      .Where(t => !typeof(Core.Flow.IFlowValueSource).IsAssignableFrom(t)))
             services.AddSingleton(typeof(Core.Integrations.IIntegration), type);
 
-        services.AddSingleton(new Services.Gui.PluginSchemaSections(PluginSections));
+        services.AddSingleton(new Services.Gui.PluginSchemaSections(PluginSections, EntityExtensions));
 
         // Hands the cluster lease and the plugin store to integrations that ask for them.
         services.AddSingleton(sp =>

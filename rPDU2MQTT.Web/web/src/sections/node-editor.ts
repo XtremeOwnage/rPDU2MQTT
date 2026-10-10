@@ -8,6 +8,7 @@ import { tagInput } from '../tags.js';
 import { templateHelp } from '../template-field.js';
 import { BALANCE_ROLES, balanceRoleOf, renameInBalance, setBalanceRole } from './balance.js';
 import { locationChoices, circuitChoices, choiceSelect } from '../location-options.js';
+import { extensionsFor, renderExtensions } from '../entity-extensions.js';
 import {
   DIRECTIONAL_METRICS, LIVE_HINT, MODBUS_DATATYPES, MODBUS_REGISTER_TYPES, MODBUS_WORDORDERS,
   NODE_KINDS, NODE_MODES, SIGNED_METRICS, feedsNothing, sourceTypes,
@@ -891,8 +892,24 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   more.appendChild(moreGrid);
   box.appendChild(more);
 
+  // --- Settings plugins keep on this node. Folded until one of them has something set. ---
+  if (extensionsFor('node').length) {
+    const ext = el('details', { class: 'ne-more ne-ext' }) as HTMLDetailsElement;
+    const kept = Object.keys(node.Ext || {}).length;
+    ext.open = kept > 0 || nodeEditorPluginsOpen;
+    ext.addEventListener('toggle', () => { nodeEditorPluginsOpen = ext.open; });
+    ext.appendChild(el('summary', { class: 'ne-more-summary' },
+      el('span', { text: 'Plugin settings' }),
+      el('span', { class: 'ne-count', text: kept ? `${kept} set` : '' })));
+    const at = ((state.data?.EnergyFlow?.Nodes || []) as any[]).indexOf(node);
+    renderExtensions('node', node, ext, ['EnergyFlow', 'Nodes', String(at)]);
+    box.appendChild(ext);
+  }
+
   return box;
 }
 
 /// Whether the filing section was left open, so a redraw after an edit inside it does not fold it away.
 let nodeEditorFilingOpen = false;
+/// Likewise for the plugin settings.
+let nodeEditorPluginsOpen = false;

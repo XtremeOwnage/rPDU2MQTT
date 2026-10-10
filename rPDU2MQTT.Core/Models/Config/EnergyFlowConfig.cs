@@ -226,7 +226,7 @@ public class EnergyFlowLink
 }
 
 /// <summary>A custom flow node (see <see cref="EnergyFlowConfig.Nodes"/>).</summary>
-public class EnergyFlowNode
+public class EnergyFlowNode : IExtensible
 {
     [Description("Stable unique id used to wire parents/children.")]
     public string Id { get; set; } = "";
@@ -297,6 +297,10 @@ public class EnergyFlowNode
     [Description("EmonCMS tag this node's virtual feeds are filed under. Blank uses EmonCMS.Feeds.Virtual.Tag. Placeholders: {node}, {label}, {kind}.")]
     [TemplateVariables("node", "label", "kind")]
     public string? EmonCmsVirtualTag { get; set; }
+
+    [ExtensionPoint(EntityKind.Node)]
+    [Description("Settings plugins keep on this node, keyed by plugin id. Kept as they are while the plugin is not loaded.")]
+    public Dictionary<string, object?>? Ext { get; set; }
 
     /// <summary>For <see cref="Kind"/> <c>battery</c>: usable storage capacity in kWh. Metadata for the
     /// diagram/state-of-charge display; does not affect the power roll-up.</summary>

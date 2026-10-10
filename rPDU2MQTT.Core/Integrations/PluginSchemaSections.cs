@@ -9,8 +9,15 @@ namespace rPDU2MQTT.Services.Gui;
 /// </remarks>
 public sealed class PluginSchemaSections
 {
-    public PluginSchemaSections(IReadOnlyList<(string Id, string Label, Type ConfigType, string? Group)> sections)
-        => Sections = sections;
+    public PluginSchemaSections(IReadOnlyList<(string Id, string Label, Type ConfigType, string? Group)> sections,
+        IReadOnlyList<Core.Integrations.EntityExtension>? extensions = null)
+    {
+        Sections = sections;
+        Extensions = extensions ?? [];
+    }
 
     public IReadOnlyList<(string Id, string Label, Type ConfigType, string? Group)> Sections { get; }
+
+    /// <summary>The settings plugins keep on core entities.</summary>
+    public IReadOnlyList<Core.Integrations.EntityExtension> Extensions { get; }
 }
