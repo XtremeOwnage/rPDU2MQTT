@@ -13,6 +13,7 @@ public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntity
 
     public IReadOnlyList<GuiPage> Pages { get; } =
     [
+        new("locations", "Locations", "Energy Flow", "⌂", "Plugins.locations,EnergyFlow.Nodes"),
         new("floor-plans", "Floor Plans", "Energy Flow", "⌗", "Plugins.locations,EnergyFlow.Panels"),
     ];
 

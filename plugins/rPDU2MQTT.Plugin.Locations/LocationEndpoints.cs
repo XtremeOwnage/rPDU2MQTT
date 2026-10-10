@@ -105,6 +105,7 @@ internal sealed class LocationEndpoints(IPluginHost host)
                 kind = n.Kind,
                 value = n.Value,
                 location = index.LocationOf(n.Id),
+                via = index.Reason(n.Id).Via,
                 placed = placed.GetValueOrDefault(n.Id),
                 circuit = flow.Nodes.FirstOrDefault(c => string.Equals(c.Id, n.Id, StringComparison.OrdinalIgnoreCase))?.Circuit,
             }).OrderBy(n => n.label, StringComparer.OrdinalIgnoreCase).ToArray(),

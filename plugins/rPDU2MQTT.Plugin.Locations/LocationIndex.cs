@@ -87,24 +87,27 @@ public sealed class LocationIndex
     /// Where a node is: its own Location, then an exact-id rule, then a placement metering it, then a pattern
     /// rule, then the rooms its circuit serves. Null when nothing places it, or it names a place that does not exist.
     /// </summary>
-    public string? LocationOf(string nodeId)
-    {
-        if (string.IsNullOrWhiteSpace(nodeId)) return null;
+    public string? LocationOf(string nodeId) => Reason(nodeId).Location;
 
-        if (nodeLocation.TryGetValue(nodeId, out var own) && Contains(own)) return this[own]!.Id;
+    /// <summary>Where a node is, and what put it there: own, rule, placement or circuit.</summary>
+    public (string? Location, string? Via) Reason(string nodeId)
+    {
+        if (string.IsNullOrWhiteSpace(nodeId)) return (null, null);
+
+        if (nodeLocation.TryGetValue(nodeId, out var own) && Contains(own)) return (this[own]!.Id, "own");
 
         var rules = settings.AutoLocations ?? new();
         var exact = rules.FirstOrDefault(r => !r.Match.Contains('*') && Ids.Equals(r.Match.Trim(), nodeId) && Contains(r.Location));
-        if (exact is not null) return this[exact.Location]!.Id;
+        if (exact is not null) return (this[exact.Location]!.Id, "rule");
 
         // An item outside every room is on its floor: outdoors, or anywhere not drawn as a room.
         var placed = (settings.Placements ?? new()).FirstOrDefault(p => Ids.Equals(p.Node, nodeId) && (Contains(p.Room) || Contains(p.Floor)));
-        if (placed is not null) return this[Contains(placed.Room) ? placed.Room : placed.Floor]!.Id;
+        if (placed is not null) return (this[Contains(placed.Room) ? placed.Room : placed.Floor]!.Id, "placement");
 
         var pattern = rules.FirstOrDefault(r => r.Match.Contains('*') && AutoTags.Matches(r.Match.Trim(), nodeId) && Contains(r.Location));
-        if (pattern is not null) return this[pattern.Location]!.Id;
+        if (pattern is not null) return (this[pattern.Location]!.Id, "rule");
 
-        return circuitLocation.TryGetValue(nodeId, out var served) ? served : null;
+        return circuitLocation.TryGetValue(nodeId, out var served) ? (served, "circuit") : (null, null);
     }
 
     private void Build()
