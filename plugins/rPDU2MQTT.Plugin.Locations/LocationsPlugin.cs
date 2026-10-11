@@ -19,7 +19,7 @@ public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntity
 
     public string? PageAsset(string file) => GuiPageAssets.Read(typeof(LocationsPlugin).Assembly, file);
 
-    public IReadOnlyList<string> PageSettings { get; } = ["Sites", "Placements", "Runs", "AutoLocations"];
+    public IReadOnlyList<string> PageSettings { get; } = ["Sites", "Placements", "Runs", "AutoLocations", "HomeAssistant"];
 
     public Type ConfigType => typeof(LocationSettings);
 

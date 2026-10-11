@@ -746,6 +746,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 config.History = reloaded.History;
                 config.PlanStorage = reloaded.PlanStorage;
                 config.Gui.DistanceUnits = reloaded.Gui.DistanceUnits;
+                foreach (var p in (integrations?.All ?? []).OfType<Core.Integrations.IGuiPageProvider>().Where(p => p.PageSettings.Count > 0))
+                    ConfigApply.CopyPluginKeys(config, reloaded, ((Core.Integrations.IIntegration)p).Id, p.PageSettings);
 
                 // Apply PDU instance add/remove live.
                 var instanceMessage = "";
