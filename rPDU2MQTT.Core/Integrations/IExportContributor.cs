@@ -6,8 +6,11 @@ namespace rPDU2MQTT.Core.Integrations;
 /// <summary>A plugin-published tier.</summary>
 /// <param name="Area">Home Assistant suggested area.</param>
 /// <param name="Fields">Extra state payload fields.</param>
-public sealed record ContributedTier(string Id, string Label, string Kind, double Power, double? Energy, double? EnergyToday,
-    string? Area = null, IReadOnlyDictionary<string, object?>? Fields = null);
+public sealed record ContributedTier(string Id, string Label, string Kind, double? Power, double? Energy, double? EnergyToday,
+    string? Area = null, IReadOnlyDictionary<string, object?>? Fields = null, IReadOnlyList<TierSensor>? Sensors = null);
+
+/// <summary>An extra Home Assistant sensor on a tier's device, read from <c>Fields[Key]</c>.</summary>
+public sealed record TierSensor(string Key, string Name, string DeviceClass, string Units);
 
 /// <summary>Publishes tiers beside the flow's nodes.</summary>
 public interface IExportContributor

@@ -23,7 +23,7 @@ public static class LocationExport
 }
 
 /// <summary>Places as tiers; rooms as areas.</summary>
-public sealed class LocationContributor : IExportContributor, IAreaProvider
+public sealed class LocationContributor(Func<IFlowValueSource?>? live = null) : IExportContributor, IAreaProvider
 {
     public IReadOnlyList<ContributedTier> Tiers(ExportPass pass, Config cfg)
     {
@@ -34,13 +34,28 @@ public sealed class LocationContributor : IExportContributor, IAreaProvider
         var power = LocationRollup.Compute(locations, topology, LocationExport.ValuesOf(graph));
         var energy = LocationRollup.Compute(locations, topology, LocationExport.ValuesOf(pass.Tiers.Count > 1 ? pass.Tiers[1].Graph : graph));
         var today = LocationRollup.Compute(locations, topology, LocationExport.ValuesOf(pass.Tiers.Count > 2 ? pass.Tiers[2].Graph : graph));
+        Func<string, double?>? temperature = null, humidity = null;
+        if (locations.All.Any(p => LocationClimate.Configured(locations, p)))
+        {
+            temperature = LocationExport.ValuesOf(FlowGraphBuilder.Build(pass.Snapshot, cfg.EnergyFlow, LocationClimate.TemperatureMetric, live?.Invoke()));
+            humidity = LocationExport.ValuesOf(FlowGraphBuilder.Build(pass.Snapshot, cfg.EnergyFlow, LocationClimate.HumidityMetric, live?.Invoke()));
+        }
 
         var tiers = new List<ContributedTier>();
         foreach (var place in locations.All)
         {
-            if (power[place.Id].Value is not { } watts) continue;
+            var climate = temperature is not null && LocationClimate.Configured(locations, place);
+            var watts = power[place.Id].Value;
+            if (watts is null && !climate) continue;
+            var fields = new Dictionary<string, object?> { ["location"] = place.Id };
+            if (climate)
+            {
+                var (t, h) = LocationClimate.Read(locations, place, temperature!, humidity!);
+                if (t is not null) fields["temperature"] = t;
+                if (h is not null) fields["humidity"] = h;
+            }
             tiers.Add(new(LocationExport.NodeId(place.Id), place.Label, place.Kind, watts, energy[place.Id].Value, today[place.Id].Value,
-                place.Kind == LocationKind.Room ? place.Label : null, new Dictionary<string, object?> { ["location"] = place.Id }));
+                place.Kind == LocationKind.Room ? place.Label : null, fields, climate ? LocationClimate.Sensors : null));
         }
         return tiers;
     }
