@@ -5,7 +5,7 @@ namespace rPDU2MQTT.Plugin.Locations;
 
 /// <summary>Sites, floors, rooms and areas.</summary>
 public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntityExtensionProvider, IExportContributor, IAreaProvider,
-    IIntegrationApi, IPluginHostUser, IGuiPageProvider, IStatusProvider
+    IIntegrationApi, IPluginHostUser, IGuiPageProvider, IStatusProvider, ISingleOwnerLeaseUser, IPluginStoreUser
 {
     public string Id => LocationSettings.PluginId;
     public string DisplayName => "Locations";
@@ -34,14 +34,31 @@ public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntity
     };
 
     private IPluginHost? host;
-    public void UseHost(IPluginHost host) => this.host = host;
+    public void UseHost(IPluginHost host) { this.host = host; StartRunner(); }
+
+    private IPluginStore store = new NullPluginStore();
+    public void UseStore(IPluginStore store) => this.store = store;
+
+    private HaSyncRunner? runner;
+    private ISingleOwnerLease? lease;
+    public void UseLease(ISingleOwnerLease lease) { this.lease = lease; StartRunner(); }
+
+    private void StartRunner()
+    {
+        if (host is not { } h || lease is null || runner is not null) return;
+        runner = new HaSyncRunner(Endpoints, () => h.Config, lease);
+        runner.Start();
+    }
 
     public bool Enabled(Config cfg) => true;
 
     public IntegrationHealth Status(Config cfg)
     {
         var floors = LocationSettings.Of(cfg).Sites.Sum(s => s.Floors?.Count ?? 0);
-        return new(HealthLevel.Good, "Available", floors == 1 ? "1 floor" : $"{floors} floors");
+        var detail = floors == 1 ? "1 floor" : $"{floors} floors";
+        if (runner?.LastAt is { } at) detail += $" · published {at.ToLocalTime():g}";
+        if (runner is { LastOk: false }) return new(HealthLevel.Warn, "Publish failed", runner.LastMessage);
+        return new(HealthLevel.Good, "Available", detail);
     }
 
     private LocationContributor contributor => field ??= new(() => host?.LiveValues);
@@ -70,7 +87,7 @@ public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntity
     ];
 
     private LocationEndpoints Endpoints() =>
-        new(host ?? throw new InvalidOperationException("The Locations plugin has not been started."));
+        new(host ?? throw new InvalidOperationException("The Locations plugin has not been started."), store);
 
     private static object Choices(Config cfg, string[]? kinds) =>
         LocationIndex.For(cfg).All.Where(e => kinds is null || kinds.Contains(e.Kind))

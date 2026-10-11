@@ -47,6 +47,8 @@ Plugins:
       Floors: off          # create | update | off
       DeviceAreas: unset-only  # unset-only | off
       AreaSensors: off     # fill | always | off
+      Schedule: manual     # manual | on-change | interval
+      IntervalMinutes: 60
 ```
 
-`update` touches only linked or same-name areas and floors. `AreaSensors` sets each area's temperature and humidity entities to its room's.
+`update` touches only linked or same-name areas and floors. `AreaSensors` sets each area's temperature and humidity entities to its room's. Scheduled publishes run on the lease owner and report on the Status board.
