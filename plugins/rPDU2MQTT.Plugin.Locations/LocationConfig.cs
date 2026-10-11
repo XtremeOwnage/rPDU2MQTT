@@ -258,11 +258,11 @@ public static class ClimateCombine
 public class ClimateConfig
 {
     [ChoicesFrom("/api/integrations/locations/nodes")]
-    [Description("Nodes reporting temperature.")]
+    [Description("Sensor ids, or ids of nodes reporting temperature.")]
     public List<string> Temperature { get; set; } = new();
 
     [ChoicesFrom("/api/integrations/locations/nodes")]
-    [Description("Nodes reporting humidity.")]
+    [Description("Sensor ids, or ids of nodes reporting humidity.")]
     public List<string> Humidity { get; set; } = new();
 
     [AllowedValues(ClimateCombine.First, ClimateCombine.Average, ClimateCombine.Min, ClimateCombine.Max)]

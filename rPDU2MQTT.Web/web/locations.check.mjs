@@ -1,4 +1,4 @@
-// Locations page: one nav entry, tree, totals, nodes, add/rename/delete, add-nodes picker, HA sync and publish.
+// Locations page: one nav entry, tree, totals, nodes, add/rename/delete, add-nodes picker, sensors, HA sync and publish.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -148,6 +148,19 @@ query(sheet(), 'button', true).find(b => /^Apply 3/.test(b.textContent)).click()
 await wait(20);
 const fl = st.data.Plugins.locations.Sites[0].Floors[0];
 if (fl.HaFloor !== 'floor_ground' || fl.Rooms.find(r => r.Id === 'office').HaArea !== 'area_office') fail('apply did not record links');
+
+// Sensors: added from a sheet, kept out of the energy nodes.
+button('+ Sensor').click();
+const ins = query(sheet(), 'input', true), sels = query(sheet(), 'select', true);
+ins[0].value = 'Garage';
+sels[0].value = 'mqtt'; sels[0].onchange();
+ins[1].value = 'rtl_433/Acurite-Tower/326'; ins[2].value = 'temperature_C';
+query(sheet(), 'button', true).find(b => b.textContent === 'Add sensor').click();
+const sensors = st.data.Plugins.locations.Sensors || [];
+const src = sensors[0]?.Sources?.[0];
+if (sensors.length !== 1 || sensors[0].Id !== 'garage' || src?.Topic !== 'rtl_433/Acurite-Tower/326' || src?.Metric !== 'temperature' || src?.JsonField !== 'temperature_C') fail(`sensor not saved: ${JSON.stringify(sensors)}`);
+if (st.data.EnergyFlow.Nodes.some(n => /garage/.test(n.Id))) fail('sensor became an energy node');
+if (!textOf(query(sec, '.loc-sensors')).includes('Garage')) fail('sensor not listed');
 
 // Delete a room: references go.
 row('Office').click();

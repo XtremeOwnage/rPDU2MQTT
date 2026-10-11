@@ -74,3 +74,8 @@
 .loc-pick-foot { display: flex; justify-content: flex-end; }
 
 @media (max-width: 760px) { .loc-body { grid-template-columns: 1fr; } .loc-head { flex-direction: column; } }
+.loc-pick-foot { gap: 8px; }
+.loc-pick-foot > :last-child { margin-left: auto; }
+.loc-sensors { display: flex; flex-direction: column; gap: 1px; }
+.loc-sensor-edit { display: flex; flex-direction: column; gap: 10px; min-width: min(520px, 85vw); }
+.loc-sensor-edit .loc-card { padding: 10px 12px; }

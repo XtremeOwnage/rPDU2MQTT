@@ -53,6 +53,7 @@ function haPublishSheet(call                                  , onLinked        
 // Locations: the site › floor › room/area tree, each place's totals, nodes and climate, and Home Assistant sync.
 
 const LOC_STATE                         = { unmetered: 'Nothing metered here yet.', unknown: 'A reading is missing.' };
+const LOC_TEMP = 'temperature', LOC_HUM = 'percent';
 const LOC_VIA                         = { own: 'Node', rule: 'Rule', placement: 'Floor plan', circuit: 'Circuit' };
 const LOC_SYNC                                                 = [
   ['Areas', 'Rooms → areas', [['create', 'Create and update'], ['update', 'Update linked only'], ['off', 'Off']], 'create'],
@@ -71,6 +72,7 @@ function mount(sec     , host     ) {
   const sitesIn = ()        => ensure(locIn(), 'Sites', []);
   const rulesIn = ()        => ensure(locIn(), 'AutoLocations', []);
   const haIn = () => ensure(locIn(), 'HomeAssistant', {});
+  const sensorsIn = ()        => ensure(locIn(), 'Sensors', []);
   const flowNodes = ()        => ensure(ensure(state.data, 'EnergyFlow', {}), 'Nodes', []);
   const onScreen = () => JSON.stringify({ EnergyFlow: state.data?.EnergyFlow || {}, Plugins: { locations: locIn() } });
 
@@ -139,8 +141,9 @@ function mount(sec     , host     ) {
 
   const tree = el('div', { class: 'loc-tree' });
   const sync = el('div', { class: 'loc-card loc-sync' });
+  const sensorsCard = el('div', { class: 'loc-card loc-sensors' });
   const detail = el('div', { class: 'loc-detail' });
-  sec.appendChild(el('div', { class: 'loc-body' }, el('div', { class: 'loc-side' }, tree, sync), detail));
+  sec.appendChild(el('div', { class: 'loc-body' }, el('div', { class: 'loc-side' }, tree, sensorsCard, sync), detail));
 
   const fmt = (v                           , units         ) => v == null ? '—' : formatMeasure(Math.round(v * 100) / 100, units);
   const placeLive = (src                , id        ) => src?.places?.find(p => p.id === id) || null;
@@ -148,7 +151,7 @@ function mount(sec     , host     ) {
 
   function render() {
     if (!refOf(selected)) selected = refs()[0]?.obj.Id || '';
-    renderTree(); renderDetail(); renderSync();
+    renderTree(); renderDetail(); renderSensors(); renderSync();
   }
 
   function addPlace(kind        , into       , extra      = {}) {
@@ -352,13 +355,14 @@ function mount(sec     , host     ) {
   function renderClimate(o     , kind        ) {
     const c = card('Climate');
     const cl = ensure(o, 'Climate', {});
-    const labelOf = (id        ) => nodesOf().find(n => n.id === id)?.label || id;
+    const labelOf = (id        ) => label(sensorsIn().find(x => x.Id === id)) || nodesOf().find(n => n.id === id)?.label || id;
     for (const key of ['Temperature', 'Humidity']) {
       const list           = ensure(cl, key, []);
       const box = el('div', { class: 'loc-chips' });
       for (const id of list) box.appendChild(el('span', { class: 'loc-sensor' }, el('span', { text: labelOf(id) }), remove(() => { list.splice(list.indexOf(id), 1); changed(); })));
-      const rest = nodesOf().filter(n => !list.includes(n.id));
-      if (rest.length) box.appendChild(searchSelect([{ value: '', label: `+ ${key.toLowerCase()} sensor` }, ...rest.map(n => ({ value: n.id, label: n.label }))],
+      const rest = [...sensorsIn().filter(x => x.Id && !list.includes(x.Id)).map(x => ({ value: x.Id, label: label(x) })),
+        ...nodesOf().filter(n => !list.includes(n.id)).map(n => ({ value: n.id, label: `${n.label} (node)` }))];
+      if (rest.length) box.appendChild(searchSelect([{ value: '', label: `+ ${key.toLowerCase()} sensor` }, ...rest],
         '', (v        ) => { if (v) { list.push(v); changed(); } }, { placeholder: 'Search nodes…' }));
       c.appendChild(field(key, box, !list.length && kind === 'area' ? 'None: uses its rooms.' : undefined));
     }
@@ -381,6 +385,83 @@ function mount(sec     , host     ) {
         el('span', { class: 'loc-via', text: `${hits} node${hits === 1 ? '' : 's'}` }),
         remove(() => { rulesIn().splice(rulesIn().indexOf(rule), 1); changed(); })));
     }
+  }
+
+  function renderSensors() {
+    sensorsCard.innerHTML = '';
+    const add = btn('+ Sensor');
+    add.onclick = () => editSensor(null);
+    sensorsCard.appendChild(el('div', { class: 'loc-card-head' }, el('h4', { text: 'Sensors' }), add));
+    const list = sensorsIn();
+    if (!list.length) { sensorsCard.appendChild(el('div', { class: 'desc', text: 'Thermometers and humidity sensors for room climate.' })); return; }
+    for (const x of list) {
+      const v = live?.sensors?.find(s => s.id === x.Id);
+      const reading = [v?.temperature != null ? fmtTemp(v.temperature) : '', v?.humidity != null ? `${Math.round(v.humidity)} %` : ''].filter(Boolean).join(' · ');
+      const row = el('button', { type: 'button', class: 'loc-row loc-sensor-row' + (reading ? '' : ' is-empty') },
+        el('span', { class: 'loc-name', text: label(x) }), el('span', { class: 'loc-val', text: reading }));
+      row.onclick = () => editSensor(x);
+      sensorsCard.appendChild(row);
+    }
+  }
+
+  /// One reading of a sensor: its source type, topic and field, or entity.
+  const SENSOR_TYPES                     = [['', 'None'], ['mqtt', 'MQTT topic'], ['homeassistant', 'Home Assistant entity']];
+  function editSensor(x     ) {
+    const isNew = !x;
+    const draft      = x ? JSON.parse(JSON.stringify(x)) : { Id: '', Name: '', Sources: [] };
+    const body = el('div', { class: 'loc-sensor-edit' });
+    const name = el('input', { type: 'text', value: draft.Name || '', placeholder: 'Garage' });
+    body.appendChild(field('Name', name));
+    const parts                = [];
+    for (const [metric, title] of [[LOC_TEMP, 'Temperature'], [LOC_HUM, 'Humidity']]) {
+      const src = (draft.Sources || []).find((s     ) => s.Metric === metric) || {};
+      const type = el('select', {}, ...SENSOR_TYPES.map(([v, t]) => el('option', { value: v, text: t, selected: (src.Type || '') === v })));
+      const topic = el('input', { type: 'text', value: src.Topic || '', placeholder: 'rtl_433/Acurite-Tower/326' });
+      const json = el('input', { type: 'text', value: src.JsonField || '', placeholder: metric === LOC_TEMP ? 'temperature_C' : 'humidity' });
+      const entity = el('input', { type: 'text', value: src.Settings?.Entity || '', placeholder: 'sensor.garage_temperature' });
+      const mqttRow = el('div', { class: 'loc-grid' }, field('Topic', topic), field('JSON field', json));
+      const haRow = el('div', { class: 'loc-grid' }, field('Entity', entity));
+      const show = () => { mqttRow.hidden = type.value !== 'mqtt'; haRow.hidden = type.value !== 'homeassistant'; };
+      type.onchange = show; show();
+      body.appendChild(el('div', { class: 'loc-card' }, el('div', { class: 'loc-card-head' }, el('h4', { text: title }), type), mqttRow, haRow));
+      parts.push(() => {
+        if (type.value === 'mqtt' && topic.value.trim()) return { ...src, Type: 'mqtt', Metric: metric, Topic: topic.value.trim(), JsonField: json.value.trim() || undefined };
+        if (type.value === 'homeassistant' && entity.value.trim()) return { ...src, Type: 'homeassistant', Metric: metric, Topic: '', Settings: { ...(src.Settings || {}), Entity: entity.value.trim() } };
+        return null;
+      });
+    }
+    const save = btn(isNew ? 'Add sensor' : 'Save', 'primary');
+    save.onclick = () => {
+      const n = name.value.trim();
+      if (!n) { toast('Give the sensor a name.', false); return; }
+      const others = (draft.Sources || []).filter((s     ) => s.Metric !== LOC_TEMP && s.Metric !== LOC_HUM);
+      const sources = [...others, ...parts.map(p => p()).filter(Boolean)];
+      if (isNew) {
+        const taken = new Set(sensorsIn().map(s => s.Id));
+        const stem = n.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'sensor';
+        let id = stem, i = 2;
+        while (taken.has(id)) id = `${stem}_${i++}`;
+        sensorsIn().push({ Id: id, Name: n, Sources: sources });
+      } else { x.Name = n; x.Sources = sources; }
+      closeSheet(); changed();
+    };
+    const foot = el('div', { class: 'loc-pick-foot' });
+    if (!isNew) {
+      const del = btn('Delete', 'danger');
+      del.onclick = () => {
+        if (!confirm(`Delete ${label(x)}?`)) return;
+        sensorsIn().splice(sensorsIn().indexOf(x), 1);
+        for (const r of refs()) for (const k of ['Temperature', 'Humidity']) {
+          const l = r.obj.Climate?.[k];
+          if (Array.isArray(l)) r.obj.Climate[k] = l.filter((id        ) => id !== x.Id);
+        }
+        closeSheet(); changed();
+      };
+      foot.appendChild(del);
+    }
+    foot.appendChild(save);
+    body.appendChild(foot);
+    openSheet({ title: isNew ? 'Add sensor' : label(x), body });
   }
 
   function renderSync() {
