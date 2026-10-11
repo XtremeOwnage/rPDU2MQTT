@@ -1,4 +1,4 @@
-// Locations page: tree, totals, members, add/rename/delete, rules and bulk assign.
+// Locations page: one nav entry, tree, totals, nodes, add/rename/delete, add-nodes picker, HA sync and publish.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -7,7 +7,8 @@ const code = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8
 const page = (f) => readFile(new URL('../../plugins/rPDU2MQTT.Plugin.Locations/wwwroot/locations.' + f, import.meta.url), 'utf8');
 const pageJs = await page('js'), css = await page('css');
 const pages = [{ id: 'locations', title: 'Locations', group: 'Energy Flow', icon: '⌂', configSection: 'Plugins.locations' }];
-const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import.meta.url), 'utf8')).filter(n => n.key !== '_README');
+const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import.meta.url), 'utf8')).filter(n => n.key !== '_README')
+  .concat([{ key: 'locations', label: 'Locations', type: 'object', group: 'Integrations', properties: [] }]);
 const fail = (m) => { console.error('locations check FAILED: ' + m); process.exit(1); };
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
@@ -63,24 +64,26 @@ vm.createContext(sandbox);
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 await wait(50);
 
-const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Locations');
-if (!link) fail('no Locations page in the nav');
+const links = query(getEl('nav'), 'a', true).filter(a => a.dataset.label === 'Locations');
+if (links.length !== 1) fail(`${links.length} Locations entries in the nav, not 1`);
+const link = links[0];
 link.click();
 await wait(100);
 const sec = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
 if (!sec) fail('clicking Locations activated no section');
 const rows = () => query(sec, '.loc-row', true);
 const row = (name) => rows().find(r => (r.textContent || '').startsWith(name));
-const button = (text, root = sec) => query(root, 'button', true).find(b => (b.textContent || '').trim() === text);
+const button = (text, root = sec) => query(root, 'button', true).find(b => (b.textContent || '').trim() === text || b.title === text);
 const textOf = (n) => n?.textContent || '';
 
 if (rows().length !== 5) fail(`tree has ${rows().length} rows, not 5`);
 if (!textOf(row('Kitchen')).includes('150')) fail('kitchen row shows no power');
-if (!textOf(row('Front')).includes('(area)')) fail('area not marked');
+if (!query(row('Front'), '.loc-tag')) fail('area not marked');
+if (!query(sec, '.loc-detail h3') || textOf(query(sec, '.loc-detail h3')) !== 'Home') fail('first place not selected by default');
 
 row('Office').click();
 const detail = () => query(sec, '.loc-detail');
-if (!textOf(detail()).includes('room · office')) fail('office detail not shown');
+if (textOf(query(detail(), 'h3')) !== 'Office' || textOf(query(detail(), '.loc-chip')) !== 'room') fail('office detail not shown');
 const members = () => query(detail(), '.loc-member', true);
 if (!members().some(m => textOf(m).includes('Desk')) || !members().some(m => textOf(m).includes('Rack 1'))) fail('office members missing');
 const deskRow = members().find(m => textOf(m).includes('Desk'));
@@ -101,7 +104,7 @@ if (config.Plugins.locations.Sites[0].Floors[0].Rooms[0].Climate.Temperature.len
 
 // Add a room, rename it: the id follows the first name.
 row('Ground').click();
-button('Add room').click();
+button('+ Room').click();
 const st = { data: config };
 let rooms = st.data.Plugins.locations.Sites[0].Floors[0].Rooms;
 if (rooms.length !== 3) fail('Add room did not add one');
@@ -118,18 +121,26 @@ const kIn = query(detail(), 'input', true)[0];
 kIn.value = 'Galley'; kIn.onchange();
 if (rooms[0].Id !== 'kitchen' || rooms[0].Name !== 'Galley') fail('renaming an existing room changed its id');
 
-// Bulk assign: a config node gets Ext; a discovered node gets an exact rule.
-const assign = query(sec, '.loc-assign');
-const pick = (label) => { const lb = query(assign, '.loc-member', true).find(m => textOf(m).includes(label)); const cb = query(lb, 'input'); cb.checked = true; cb.onchange(); };
+// Add nodes: a config node gets Ext; a discovered node gets an exact rule.
+const sheet = () => query(getEl('overlay'), '.sheet');
+row('Laundry').click();
+button('Add nodes…').click();
+const pick = (label) => { const lb = query(sheet(), '.loc-pick-row', true).find(m => textOf(m).includes(label)); const cb = query(lb, 'input'); cb.checked = true; cb.onchange(); };
 pick('Desk'); pick('TV');
-const to = query(assign, 'select');
-to.value = 'laundry'; to.onchange();
+query(sheet(), 'button', true).find(b => b.textContent === 'Add 2 to Laundry').click();
 if (st.data.EnergyFlow.Nodes[0].Ext.locations.Location !== 'laundry') fail('bulk assign did not set the config node');
 const rules = st.data.Plugins.locations.AutoLocations;
 if (!rules.some(r => r.Match === 'tv' && r.Location === 'laundry')) fail(`bulk assign did not add a rule for a discovered node: ${JSON.stringify(rules)}`);
 
+// Home Assistant sync settings live on the page.
+const sched = query(sec, 'select[data-key="Schedule"]') || query(sec, 'select', true).find(s => s.getAttribute?.('data-key') === 'Schedule');
+if (!sched) fail('no HA schedule setting');
+sched.value = 'interval'; sched.onchange();
+if (st.data.Plugins.locations.HomeAssistant.Schedule !== 'interval') fail('schedule not saved');
+const mins = query(query(sec, '.loc-sync'), 'input[type="number"]') || query(query(sec, '.loc-sync'), 'input');
+if (!mins) fail('interval minutes not offered');
+
 // Publish to Home Assistant: preview, apply, links written.
-const sheet = () => query(getEl('overlay'), '.sheet');
 button('Publish to Home Assistant…').click();
 await wait(20);
 if (!/Ground.*create/.test(textOf(sheet())) || !/Office · temperature/.test(textOf(sheet()))) fail('preview does not list floors and area settings');

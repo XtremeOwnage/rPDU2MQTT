@@ -4,17 +4,17 @@ title: Locations
 
 # Locations
 
-**Energy Flow › Locations**. Sites, floors, rooms and areas, with each place's total and members. Bundled plugin: `plugins/rPDU2MQTT.Plugin.Locations`.
+**Energy Flow › Locations**. Sites, floors, rooms and areas, with each place's total and nodes. Bundled plugin: `plugins/rPDU2MQTT.Plugin.Locations`.
 
 | Part | |
 | --- | --- |
 | Tree | Places with live power. Add, rename, reorder, delete. |
 | Now / Today | The place's total. Blank when nothing metered is in it or a reading is missing. |
-| Members | Nodes in the place, and why: set, rule, floor plan or circuit. Inherited members are greyed. |
+| Nodes | Nodes in the place, and what placed them: node, rule, floor plan or circuit. Inherited nodes are greyed. **Add nodes…** picks several; configured nodes get `Ext.locations.Location`, others an exact rule. |
 | Climate | Rooms and areas: temperature and humidity sensors, combined by average, first, min or max. An area with none uses its rooms'. |
 | Publish to Home Assistant | Preview, then create, rename and link areas and floors. |
 | Rules | `AutoLocations` pointing here. `*` matches anything. |
-| Assign | Tick nodes, pick a place. Configured nodes get `Ext.locations.Location`; others get an exact rule. |
+| Home Assistant | The `HomeAssistant` sync modes and schedule. |
 
 A new place's id follows its first name. Deleting a place clears every reference to it.
 
