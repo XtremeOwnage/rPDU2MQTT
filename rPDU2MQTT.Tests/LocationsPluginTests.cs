@@ -11,16 +11,16 @@ namespace rPDU2MQTT.Tests;
 public class LocationsPluginTests
 {
     [Fact]
-    public void ThePageAndItsStylesheet_AreEmbedded()
+    public void ThePagesAndTheirStylesheets_AreEmbedded()
     {
         var plugin = new LocationsPlugin();
-        var page = Assert.Single(plugin.Pages);
+        Assert.Equal(["locations", "floor-plans"], plugin.Pages.Select(p => p.Id));
 
-        var js = plugin.PageAsset(page.Id + ".js");
-        Assert.NotNull(js);
-        Assert.EndsWith("return mount;\n", js);
-        Assert.Contains("function planSolve", js);
-        Assert.Contains(".fp-svg", plugin.PageAsset(page.Id + ".css"));
+        foreach (var page in plugin.Pages)
+            Assert.EndsWith("return mount;\n", plugin.PageAsset(page.Id + ".js"));
+        Assert.Contains("function planSolve", plugin.PageAsset("floor-plans.js"));
+        Assert.Contains(".fp-svg", plugin.PageAsset("floor-plans.css"));
+        Assert.Contains(".loc-tree", plugin.PageAsset("locations.css"));
     }
 
     [Fact]

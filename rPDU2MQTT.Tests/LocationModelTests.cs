@@ -109,8 +109,14 @@ public class LocationModelTests
         Assert.Equal("bedroom", index.LocationOf("outlet:rack:4"));    // a placement beats a pattern
         Assert.Equal("office", index.LocationOf("outlet:rack:1"));
         Assert.Equal("ground", index.LocationOf("breaker:main:B06"));  // the breaker is the circuit, and it serves two rooms
-        Assert.Equal("ground", index.LocationOf("porch_light"));       // outdoors, outside every room: on its floor               // a circuit serving two rooms is in their floor
+        Assert.Equal("ground", index.LocationOf("porch_light"));       // outdoors, outside every room: on its floor
         Assert.Null(index.LocationOf("elsewhere"));
+
+        Assert.Equal("own", index.Reason("fridge").Via);
+        Assert.Equal("rule", index.Reason("outlet:rack:1").Via);
+        Assert.Equal("placement", index.Reason("outlet:rack:4").Via);
+        Assert.Equal("circuit", index.Reason("breaker:main:B06").Via);
+        Assert.Null(index.Reason("elsewhere").Via);
     }
 
     [Fact]
