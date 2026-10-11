@@ -12,6 +12,7 @@ title: Locations
 | Now / Today | The place's total. Blank when nothing metered is in it or a reading is missing. |
 | Members | Nodes in the place, and why: set, rule, floor plan or circuit. Inherited members are greyed. |
 | Climate | Rooms and areas: temperature and humidity sensors, combined by average, first, min or max. An area with none uses its rooms'. |
+| Publish to Home Assistant | Preview, then create, rename and link areas and floors. |
 | Rules | `AutoLocations` pointing here. `*` matches anything. |
 | Assign | Tick nodes, pick a place. Configured nodes get `Ext.locations.Location`; others get an exact rule. |
 
@@ -35,3 +36,17 @@ Plugins:
                   Humidity: [office_thermo]
                   Combine: average
 ```
+
+## Home Assistant
+
+```yaml
+Plugins:
+  locations:
+    HomeAssistant:
+      Areas: create        # create | update | off
+      Floors: off          # create | update | off
+      DeviceAreas: unset-only  # unset-only | off
+      AreaSensors: off     # fill | always | off
+```
+
+`update` touches only linked or same-name areas and floors. `AreaSensors` sets each area's temperature and humidity entities to its room's.

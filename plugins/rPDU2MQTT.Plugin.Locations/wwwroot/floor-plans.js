@@ -760,6 +760,52 @@ function planFootprintArt(key        , W        , D        , u        )         
   return g;
 }
 
+// ── ha-publish.ts ───────────────────────────────────────────────
+// Publish to Home Assistant: preview the plan, then apply it.
+
+const HA_WORDS                         = { create: 'create', rename: 'rename', link: 'link', ok: 'no change', set: 'set', keep: 'left alone', skip: 'skipped' };
+
+/// `call` posts an action with what is on screen; `onLinked` records the links apply made.
+function haPublishSheet(call                                  , onLinked                                                                         ) {
+  const body = el('div', { class: 'ha-sheet' });
+  body.appendChild(el('div', { class: 'desc', text: 'Reading Home Assistant…' }));
+  openSheet({ title: 'Publish to Home Assistant', body, wide: true });
+  (async () => {
+    const r      = await call('areas-preview').catch((e     ) => ({ body: { ok: false, message: e?.message } }));
+    body.innerHTML = '';
+    if (!r.body?.ok) { body.appendChild(el('div', { class: 'desc', text: `${r.body?.message || 'Could not reach Home Assistant.'} Set the URL and token under Home Assistant.` })); return; }
+    const plan = r.body.plan;
+    const table = (title        , rows       , cells                      ) => {
+      if (!rows?.length) return;
+      body.appendChild(el('h4', { text: title }));
+      const t = el('div', { class: 'ha-plan' });
+      rows.forEach(x => t.appendChild(el('div', { class: 'ha-row is-' + x.action }, ...cells(x).map(c => el('span', { text: c })))));
+      body.appendChild(t);
+    };
+    table('Floors', plan.floors, (x     ) => [x.name, HA_WORDS[x.action] || x.action, x.why]);
+    table('Rooms', plan.rooms, (x     ) => [x.name, HA_WORDS[x.action] || x.action, x.why]);
+    table('Area settings', plan.fields, (x     ) => [`${x.name} · ${x.field}`, HA_WORDS[x.action] || x.action, x.why]);
+    table('Devices', plan.devices, (x     ) => [x.deviceName, HA_WORDS[x.action] || x.action, x.why]);
+    if (plan.leftAlone?.length) body.appendChild(el('div', { class: 'desc', text: `Left alone: ${plan.leftAlone.map((a     ) => a.name).join(', ')}.` }));
+    if (!plan.rooms.length) body.appendChild(el('div', { class: 'desc', text: 'No rooms yet.' }));
+    const writes = (rows       , acts          ) => (rows || []).filter((x     ) => acts.includes(x.action)).length;
+    const changes = writes(plan.floors, ['create', 'rename', 'link']) + writes(plan.rooms, ['create', 'rename', 'link'])
+      + writes(plan.fields, ['set']) + writes(plan.devices, ['set']);
+    const go = btn(changes ? `Apply ${changes} change${changes > 1 ? 's' : ''}` : 'Nothing to change', 'primary');
+    go.disabled = !changes;
+    go.onclick = async () => {
+      go.disabled = true;
+      const a      = await call('areas-apply').catch((e     ) => ({ body: { ok: false, message: e?.message } }));
+      const rooms = a.body?.linked || {}, floors = a.body?.linkedFloors || {};
+      const any = Object.keys(rooms).length + Object.keys(floors).length > 0;
+      if (any) onLinked(rooms, floors);
+      closeSheet();
+      toast((a.body?.message || 'Done.') + (any ? ' Save to keep the links.' : ''), !!a.body?.ok);
+    };
+    body.appendChild(el('div', { class: 'ha-actions' }, go));
+  })();
+}
+
 // ── floor-plans.ts ──────────────────────────────────────────────
 // Floor Plans (#470): each floor drawn at real size with its rooms, outdoor zones and areas, doors and windows
 // (#463), the outlets, fixtures, devices and utility gear placed on it and the cable runs between them (#464,
@@ -3621,41 +3667,14 @@ function mount(sec     , host     ) {
     body.appendChild(el('div', { class: 'fp-actions' }, preview, apply));
   };
 
-  const haSheet = async () => {
-    const body = el('div', { class: 'fp-sheet' });
-    body.appendChild(el('div', { class: 'desc', text: 'Reading Home Assistant…' }));
-    openSheet({ title: 'Rooms as Home Assistant areas', body, wide: true });
-    const r      = await call('areas-preview').catch((e     ) => ({ body: { ok: false, message: e?.message } }));
-    body.innerHTML = '';
-    if (!r.body?.ok) { body.appendChild(el('div', { class: 'desc', text: `${r.body?.message || 'Could not reach Home Assistant.'} The URL and token are set under Home Assistant › Energy Dashboard.` })); return; }
-    const plan = r.body.plan;
-    const WORDS                         = { create: 'create', rename: 'rename', link: 'link', ok: 'no change', set: 'put in area', keep: 'left alone' };
-    const table = (title        , rows       , cells                      ) => {
-      if (!rows.length) return;
-      body.appendChild(el('h4', { text: title }));
-      const t = el('div', { class: 'fp-ha' });
-      rows.forEach(x => t.appendChild(el('div', { class: 'fp-ha-row is-' + x.action }, ...cells(x).map(c => el('span', { text: c })))));
-      body.appendChild(t);
-    };
-    table('Rooms', plan.rooms, (x     ) => [x.name, WORDS[x.action] || x.action, x.why]);
-    table('Devices', plan.devices, (x     ) => [x.deviceName, WORDS[x.action] || x.action, x.why]);
-    if (plan.leftAlone.length) body.appendChild(el('div', { class: 'desc', text: `Areas no room claims are left alone: ${plan.leftAlone.map((a     ) => a.name).join(', ')}. Removing a room never removes its area.` }));
-    if (!plan.rooms.length) body.appendChild(el('div', { class: 'desc', text: 'There are no rooms to publish yet.' }));
-    const changes = plan.rooms.filter((x     ) => x.action !== 'ok').length + plan.devices.filter((x     ) => x.action === 'set').length;
-    const go = btn(changes ? `Apply ${changes} change${changes > 1 ? 's' : ''}` : 'Nothing to change', 'primary');
-    go.disabled = !changes;
-    go.onclick = async () => {
-      go.disabled = true;
-      const a      = await call('areas-apply').catch((e     ) => ({ body: { ok: false, message: e?.message } }));
-      const linked = a.body?.linked || {};
-      if (Object.keys(linked).length) history.push();
-      floorsAll().forEach(({ floor }) => ensure(floor, 'Rooms', []).forEach((rm     ) => { if (linked[rm.Id]) rm.HaArea = linked[rm.Id]; }));
-      if (Object.keys(linked).length) changed();
-      closeSheet();
-      toast((a.body?.message || 'Done.') + (Object.keys(linked).length ? ' Press Save to remember the links, so a rename updates the same area.' : ''), !!a.body?.ok);
-    };
-    body.appendChild(el('div', { class: 'fp-actions' }, go));
-  };
+  const haSheet = () => haPublishSheet(a => call(a), (rooms, floors) => {
+    history.push();
+    floorsAll().forEach(({ floor }) => {
+      if (floors[floor.Id]) floor.HaFloor = floors[floor.Id];
+      ensure(floor, 'Rooms', []).forEach((rm     ) => { if (rooms[rm.Id]) rm.HaArea = rooms[rm.Id]; });
+    });
+    changed();
+  });
 
   // --- Loading and rendering -----------------------------------------------------------------------
   let pending      = null;

@@ -1633,15 +1633,19 @@ PlanStorage:
 - Every published device carries its room as `suggested_area` in MQTT discovery. Home Assistant applies it
   only when it first sees the device.
 - With the MQTT export on, every room, area, floor and site is a tier (power, lifetime energy, energy today)
-  with a device in the room's area. A place with an unknown total is not published.
-- *Tools › Publish rooms to Home Assistant*:
-  - creates an area per room, matching existing areas by name;
-  - renames a previously linked area when the room is renamed;
-  - files this bridge's area-less devices in their room's area; devices already in an area are left alone;
-  - previews everything first;
-  - removing a room leaves its Home Assistant area;
-  - uses the URL and token under **Home Assistant › Energy Dashboard**.
-  - Save afterwards so each room keeps its area.
+  with a device in the room's area. A place with an unknown total and no climate is not published.
+- *Publish to Home Assistant* (Locations, or Floor Plans › Tools), governed by `Plugins.locations.HomeAssistant`:
+
+  | Setting | Modes | Default |
+  |---|---|---|
+  | `Areas` | `create`, `update`, `off` | `create` |
+  | `Floors` | `create`, `update`, `off` | `off` |
+  | `DeviceAreas` | `unset-only`, `off` | `unset-only` |
+  | `AreaSensors` | `fill`, `always`, `off` | `off` |
+
+  - Previews first. Areas are never deleted.
+  - Uses **Home Assistant** `Url` and `Token`.
+  - Save afterwards to keep the links (`HaArea`, `HaFloor`).
 
 ## Example Configurations
 

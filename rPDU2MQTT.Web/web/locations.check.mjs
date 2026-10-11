@@ -37,9 +37,18 @@ const nodes = [
 const totals = (q) => ({ ok: true, metric: 'realpower', units: q ? 'kWh' : 'W', problems: [], message: null, nodes, circuits: [], placements: [],
   places: [P('home', 'site', 270), P('ground', 'floor', 270), { ...P('kitchen', 'room', q ? 1.5 : 150), temperature: 21.5, humidity: null }, P('office', 'room', 120), P('front', 'area', 270)] });
 
+const haPlan = {
+  floors: [{ floor: 'ground', name: 'Ground', level: 0, action: 'create', floorId: null, floorName: null, why: 'No floor of this name.' }],
+  rooms: [{ room: 'office', name: 'Office', action: 'create', areaId: null, areaName: null, why: 'No area of this name.' }],
+  fields: [{ room: 'office', name: 'Office', field: 'temperature', value: 'sensor.x', current: null, action: 'set', why: 'Set to sensor.x.' }],
+  devices: [], leftAlone: [{ areaId: 'attic', name: 'Attic' }],
+};
+
 const { sandbox, getEl } = makeDom({
   bodies: (url) => {
     if (url.includes('/api/integrations/locations/totals')) return { ok: true, result: totals(url.includes('period=today')) };
+    if (url.includes('/api/integrations/locations/areas-preview')) return { ok: true, result: { ok: true, plan: haPlan } };
+    if (url.includes('/api/integrations/locations/areas-apply')) return { ok: true, result: { ok: true, plan: haPlan, linked: { office: 'area_office' }, linkedFloors: { ground: 'floor_ground' }, failed: [], message: 'Published.' } };
     if (url.endsWith('/api/integrations/locations/pages/locations.js')) return pageJs;
     if (url.endsWith('/api/integrations/locations/pages/locations.css')) return css;
     if (url.endsWith('/api/integrations')) return { ok: true, integrations: [{ id: 'locations', pages }] };
@@ -118,6 +127,16 @@ to.value = 'laundry'; to.onchange();
 if (st.data.EnergyFlow.Nodes[0].Ext.locations.Location !== 'laundry') fail('bulk assign did not set the config node');
 const rules = st.data.Plugins.locations.AutoLocations;
 if (!rules.some(r => r.Match === 'tv' && r.Location === 'laundry')) fail(`bulk assign did not add a rule for a discovered node: ${JSON.stringify(rules)}`);
+
+// Publish to Home Assistant: preview, apply, links written.
+const sheet = () => query(getEl('overlay'), '.sheet');
+button('Publish to Home Assistant…').click();
+await wait(20);
+if (!/Ground.*create/.test(textOf(sheet())) || !/Office · temperature/.test(textOf(sheet()))) fail('preview does not list floors and area settings');
+query(sheet(), 'button', true).find(b => /^Apply 3/.test(b.textContent)).click();
+await wait(20);
+const fl = st.data.Plugins.locations.Sites[0].Floors[0];
+if (fl.HaFloor !== 'floor_ground' || fl.Rooms.find(r => r.Id === 'office').HaArea !== 'area_office') fail('apply did not record links');
 
 // Delete a room: references go.
 row('Office').click();

@@ -3,6 +3,52 @@
 let api     , btn     , closeSheet     , el     , ensure     , openSheet     , svgEl     , toast     , formatMeasure     ,
   state     , refreshDirty     , sparkline     , analyse     , circuitSession     , searchSelect     , makeMenu     ;
 
+// ── ha-publish.ts ───────────────────────────────────────────────
+// Publish to Home Assistant: preview the plan, then apply it.
+
+const HA_WORDS                         = { create: 'create', rename: 'rename', link: 'link', ok: 'no change', set: 'set', keep: 'left alone', skip: 'skipped' };
+
+/// `call` posts an action with what is on screen; `onLinked` records the links apply made.
+function haPublishSheet(call                                  , onLinked                                                                         ) {
+  const body = el('div', { class: 'ha-sheet' });
+  body.appendChild(el('div', { class: 'desc', text: 'Reading Home Assistant…' }));
+  openSheet({ title: 'Publish to Home Assistant', body, wide: true });
+  (async () => {
+    const r      = await call('areas-preview').catch((e     ) => ({ body: { ok: false, message: e?.message } }));
+    body.innerHTML = '';
+    if (!r.body?.ok) { body.appendChild(el('div', { class: 'desc', text: `${r.body?.message || 'Could not reach Home Assistant.'} Set the URL and token under Home Assistant.` })); return; }
+    const plan = r.body.plan;
+    const table = (title        , rows       , cells                      ) => {
+      if (!rows?.length) return;
+      body.appendChild(el('h4', { text: title }));
+      const t = el('div', { class: 'ha-plan' });
+      rows.forEach(x => t.appendChild(el('div', { class: 'ha-row is-' + x.action }, ...cells(x).map(c => el('span', { text: c })))));
+      body.appendChild(t);
+    };
+    table('Floors', plan.floors, (x     ) => [x.name, HA_WORDS[x.action] || x.action, x.why]);
+    table('Rooms', plan.rooms, (x     ) => [x.name, HA_WORDS[x.action] || x.action, x.why]);
+    table('Area settings', plan.fields, (x     ) => [`${x.name} · ${x.field}`, HA_WORDS[x.action] || x.action, x.why]);
+    table('Devices', plan.devices, (x     ) => [x.deviceName, HA_WORDS[x.action] || x.action, x.why]);
+    if (plan.leftAlone?.length) body.appendChild(el('div', { class: 'desc', text: `Left alone: ${plan.leftAlone.map((a     ) => a.name).join(', ')}.` }));
+    if (!plan.rooms.length) body.appendChild(el('div', { class: 'desc', text: 'No rooms yet.' }));
+    const writes = (rows       , acts          ) => (rows || []).filter((x     ) => acts.includes(x.action)).length;
+    const changes = writes(plan.floors, ['create', 'rename', 'link']) + writes(plan.rooms, ['create', 'rename', 'link'])
+      + writes(plan.fields, ['set']) + writes(plan.devices, ['set']);
+    const go = btn(changes ? `Apply ${changes} change${changes > 1 ? 's' : ''}` : 'Nothing to change', 'primary');
+    go.disabled = !changes;
+    go.onclick = async () => {
+      go.disabled = true;
+      const a      = await call('areas-apply').catch((e     ) => ({ body: { ok: false, message: e?.message } }));
+      const rooms = a.body?.linked || {}, floors = a.body?.linkedFloors || {};
+      const any = Object.keys(rooms).length + Object.keys(floors).length > 0;
+      if (any) onLinked(rooms, floors);
+      closeSheet();
+      toast((a.body?.message || 'Done.') + (any ? ' Save to keep the links.' : ''), !!a.body?.ok);
+    };
+    body.appendChild(el('div', { class: 'ha-actions' }, go));
+  })();
+}
+
 // ── locations.ts ────────────────────────────────────────────────
 // Locations: the site › floor › room/area tree, each place's total and members, and bulk assignment.
 
@@ -11,7 +57,7 @@ const LOC_VIA                         = { own: 'set', rule: 'rule', placement: '
 const LOC_KINDS = ['site', 'floor', 'room', 'area'];
 
 function mount(sec     , host     ) {
-  ({ api, btn, el, ensure, toast, state, refreshDirty, formatMeasure, searchSelect } = host);
+  ({ api, btn, el, ensure, toast, state, refreshDirty, formatMeasure, searchSelect, openSheet, closeSheet } = host);
   const fmtTemp = (c        ) => host.temp?.fmt ? host.temp.fmt(c, 1) : `${c} °C`;
   sec.classList.add('loc');
   sec.appendChild(el('h2', { text: 'Locations' }));
@@ -85,7 +131,19 @@ function mount(sec     , host     ) {
     fresh.add(site); sitesIn().push(site);
     selected = id; changed();
   };
-  bar.append(addSite);
+  const publish = btn('Publish to Home Assistant…');
+  publish.onclick = () => haPublishSheet(async (action        ) => {
+    const r      = await api(`/api/integrations/locations/${action}`, { method: 'POST', body: onScreen() });
+    const b = r?.body || {};
+    return { body: b.ok && b.result ? b.result : b };
+  }, (rooms, floors) => {
+    for (const r of refs()) {
+      if (r.kind === 'room' && rooms[r.obj.Id]) r.obj.HaArea = rooms[r.obj.Id];
+      if (r.kind === 'floor' && floors[r.obj.Id]) r.obj.HaFloor = floors[r.obj.Id];
+    }
+    changed();
+  });
+  bar.append(addSite, publish);
 
   const fmt = (v                           , units         ) => v == null ? '—' : formatMeasure(Math.round(v * 100) / 100, units);
   const placeLive = (src                , id        ) => src?.places?.find(p => p.id === id) || null;
@@ -173,6 +231,7 @@ function mount(sec     , host     ) {
       const lvl = el('input', { type: 'number', value: String(o.Level ?? 0), step: '1' });
       lvl.onchange = () => { o.Level = Number(lvl.value) || 0; changed(); };
       detail.appendChild(field('Level', lvl));
+      detail.appendChild(field('Home Assistant floor', text(o.HaFloor, v => { o.HaFloor = v; })));
     }
     if (r.kind === 'room') detail.appendChild(field('Home Assistant area', text(o.HaArea, v => { o.HaArea = v; })));
     if (r.kind === 'area') {

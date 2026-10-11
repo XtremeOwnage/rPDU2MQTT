@@ -209,13 +209,14 @@ internal sealed class LocationEndpoints(IPluginHost host)
             using var session = await HomeAssistantSocket.OpenAsync(host.Config.HASS.Url, host.Config.HASS.Token, cts.Token);
             var sync = new HaAreaSync(session);
             var index = LocationIndex.For(cfg);
+            var modes = LocationSettings.Of(cfg).HomeAssistant ?? new();
             var deviceRooms = HaAreaSync.DeviceRooms(index, Merged(), cfg.EnergyFlow);
-            if (!apply) return new { ok = true, plan = await sync.PlanAsync(index, deviceRooms) };
+            if (!apply) return new { ok = true, plan = await sync.PlanAsync(index, deviceRooms, modes) };
 
-            var (plan, linked, failed) = await sync.ApplyAsync(index, deviceRooms);
+            var (plan, linked, linkedFloors, failed) = await sync.ApplyAsync(index, deviceRooms, modes);
             return new
             {
-                ok = failed.Count == 0, plan, linked, failed,
+                ok = failed.Count == 0, plan, linked, linkedFloors, failed,
                 message = failed.Count == 0 ? $"Published {linked.Count} room(s) as areas." : $"{failed.Count} change(s) failed: {string.Join("; ", failed)}",
             };
         }

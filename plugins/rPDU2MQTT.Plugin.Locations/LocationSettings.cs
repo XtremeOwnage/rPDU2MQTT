@@ -18,6 +18,9 @@ public sealed class LocationSettings
     [Description("Locations for derived nodes (PDUs and outlets), which have no entry of their own. Matched by node id with '*' as a wildcard; the first match wins, and an exact id beats a pattern.")]
     public List<AutoLocationRule> AutoLocations { get; set; } = new();
 
+    [Description("What publishing to Home Assistant changes.")]
+    public HaSyncConfig HomeAssistant { get; set; } = new();
+
     public const string PluginId = "locations";
 
     public static LocationSettings Of(Config cfg)
@@ -45,6 +48,42 @@ public sealed class LocationSettings
         NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString,
         Converters = { new LenientStringConverter() },
     };
+}
+
+public static class HaSyncMode
+{
+    public const string Create = "create";
+    public const string Update = "update";
+    public const string Off = "off";
+    public const string UnsetOnly = "unset-only";
+    public const string Fill = "fill";
+    public const string Always = "always";
+}
+
+/// <summary>Home Assistant sync modes.</summary>
+public sealed class HaSyncConfig
+{
+    [AllowedValues(HaSyncMode.Create, HaSyncMode.Update, HaSyncMode.Off)]
+    [DefaultValue(HaSyncMode.Create)]
+    [Description("Rooms to areas. create: make missing ones. update: only linked or same-name areas. off: never create or rename areas.")]
+    public string Areas { get; set; } = HaSyncMode.Create;
+
+    [AllowedValues(HaSyncMode.Create, HaSyncMode.Update, HaSyncMode.Off)]
+    [DefaultValue(HaSyncMode.Off)]
+    [Description("Floors to floors, and each area's floor. Same modes as Areas.")]
+    public string Floors { get; set; } = HaSyncMode.Off;
+
+    [AllowedValues(HaSyncMode.UnsetOnly, HaSyncMode.Off)]
+    [DefaultValue(HaSyncMode.UnsetOnly)]
+    [Description("Put this bridge's devices in their room's area. unset-only: only devices with no area.")]
+    public string DeviceAreas { get; set; } = HaSyncMode.UnsetOnly;
+
+    [AllowedValues(HaSyncMode.Fill, HaSyncMode.Always, HaSyncMode.Off)]
+    [DefaultValue(HaSyncMode.Off)]
+    [Description("Set each area's temperature and humidity sensors to its room's. fill: only when unset.")]
+    public string AreaSensors { get; set; } = HaSyncMode.Off;
+
+    internal static readonly HaSyncConfig Today = new();
 }
 
 public sealed class NodeLocation

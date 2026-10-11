@@ -13,7 +13,7 @@ const LOC_VIA: Record<string, string> = { own: 'set', rule: 'rule', placement: '
 const LOC_KINDS = ['site', 'floor', 'room', 'area'];
 
 export default function mount(sec: any, host: any) {
-  ({ api, btn, el, ensure, toast, state, refreshDirty, formatMeasure, searchSelect } = host);
+  ({ api, btn, el, ensure, toast, state, refreshDirty, formatMeasure, searchSelect, openSheet, closeSheet } = host);
   const fmtTemp = (c: number) => host.temp?.fmt ? host.temp.fmt(c, 1) : `${c} °C`;
   sec.classList.add('loc');
   sec.appendChild(el('h2', { text: 'Locations' }));
@@ -88,7 +88,19 @@ export default function mount(sec: any, host: any) {
     fresh.add(site); sitesIn().push(site);
     selected = id; changed();
   };
-  bar.append(addSite);
+  const publish = btn('Publish to Home Assistant…');
+  publish.onclick = () => haPublishSheet(async (action: string) => {
+    const r: any = await api(`/api/integrations/locations/${action}`, { method: 'POST', body: onScreen() });
+    const b = r?.body || {};
+    return { body: b.ok && b.result ? b.result : b };
+  }, (rooms, floors) => {
+    for (const r of refs()) {
+      if (r.kind === 'room' && rooms[r.obj.Id]) r.obj.HaArea = rooms[r.obj.Id];
+      if (r.kind === 'floor' && floors[r.obj.Id]) r.obj.HaFloor = floors[r.obj.Id];
+    }
+    changed();
+  });
+  bar.append(addSite, publish);
 
   const fmt = (v: number | null | undefined, units?: string) => v == null ? '—' : formatMeasure(Math.round(v * 100) / 100, units);
   const placeLive = (src: LocLive | null, id: string) => src?.places?.find(p => p.id === id) || null;
@@ -176,6 +188,7 @@ export default function mount(sec: any, host: any) {
       const lvl = el('input', { type: 'number', value: String(o.Level ?? 0), step: '1' });
       lvl.onchange = () => { o.Level = Number(lvl.value) || 0; changed(); };
       detail.appendChild(field('Level', lvl));
+      detail.appendChild(field('Home Assistant floor', text(o.HaFloor, v => { o.HaFloor = v; })));
     }
     if (r.kind === 'room') detail.appendChild(field('Home Assistant area', text(o.HaArea, v => { o.HaArea = v; })));
     if (r.kind === 'area') {
