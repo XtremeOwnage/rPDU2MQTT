@@ -43,6 +43,16 @@ public sealed class FlowTopology
             if (!string.IsNullOrWhiteSpace(l.From) && !string.IsNullOrWhiteSpace(l.To)) t.Link(l.From, l.To);
         foreach (var (child, parent) in flow.Parents)
             if (!string.IsNullOrWhiteSpace(child) && !string.IsNullOrWhiteSpace(parent)) t.Link(parent, child);
+
+        // The untracked node a parent asks for sits beneath it, as the graph builder places it.
+        var untracked = new HashSet<string>(flow.Nodes.Where(n => !string.IsNullOrEmpty(n.Id) && UntrackedNode.Is(n)).Select(n => n.Id), Ids);
+        foreach (var n in flow.Nodes)
+        {
+            if (string.IsNullOrWhiteSpace(n.Id) || UntrackedNode.Is(n) || !UntrackedNode.Wanted(n)) continue;
+            if (t.Children(n.Id).Any(untracked.Contains)) continue;
+            t.nodes.Add(UntrackedNode.IdFor(n.Id));
+            t.Link(n.Id, UntrackedNode.IdFor(n.Id));
+        }
         return t;
     }
 

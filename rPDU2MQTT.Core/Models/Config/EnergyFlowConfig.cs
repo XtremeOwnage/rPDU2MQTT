@@ -303,6 +303,14 @@ public class EnergyFlowNode : IExtensible
     [Description("Left off the flow diagrams. Still listed and editable.")]
     public bool Hidden { get; set; }
 
+    /// <summary>
+    /// Show what this node measures beyond its children as a node of its own beneath it. Left blank, a panel,
+    /// an inverter and the grid are switched on when the config is loaded, since unmetered load is the thing
+    /// worth seeing there.
+    /// </summary>
+    [Description("Add an 'Untracked' node beneath this one: what it measures beyond its children. Left blank, it is turned on for panels, inverters and the grid when the config loads.")]
+    public bool? CreateUntracked { get; set; }
+
     [Description("EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}.")]
     [TemplateVariables("node", "label", "kind")]
     public string? EmonCmsTag { get; set; }

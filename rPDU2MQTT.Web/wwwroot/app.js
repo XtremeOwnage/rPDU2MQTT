@@ -1257,6 +1257,8 @@ const NODE_KINDS                               = [
 ];
 /// A load is where power is used, so it feeds nothing; a circuit that feeds other nodes is a breaker.
 const feedsNothing = (kind         ) => kind === 'load';
+/// Kinds whose leftover is worth a node of its own; the bridge ticks Create untracked for them when it loads the config.
+const untrackedByDefault = (kind         ) => kind === 'panel' || kind === 'inverter' || kind === 'grid';
 const kindMeta = (kind         ) => NODE_KINDS.find(k => k[0] === (kind || 'node')) || NODE_KINDS[0];
 
 // Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type.
@@ -7217,7 +7219,9 @@ function renderNodeEditor(node     , links       , cand                  , reren
   grid.appendChild(field('Counts toward', roleSel, 'Site total it is summed into.'));
 
   const modeSel = el('select');
-  NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
+  // An untracked slice is asked for on its parent now; the mode stays listed only for a node already set to it.
+  NODE_MODES.filter(([v]) => v !== 'untracked' || node.Mode === 'untracked')
+    .forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
   modeSel.value = node.Mode || 'auto';
   modeSel.onchange = () => {
     node.Mode = modeSel.value === 'auto' ? undefined : modeSel.value;
@@ -7582,6 +7586,14 @@ function renderNodeEditor(node     , links       , cand                  , reren
   wireSec.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id),
     id => !feedsNothing((cand.get(id) || {}).kind)));
   wireSec.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
+  if (!feedsNothing(node.Kind) && node.Mode !== 'untracked') {
+    // Explicit either way once touched: left blank, the bridge turns it on for panels, inverters and the grid.
+    const untrackedBox = el('input', { type: 'checkbox', checked: node.CreateUntracked ?? untrackedByDefault(node.Kind) })                    ;
+    untrackedBox.onchange = () => { node.CreateUntracked = untrackedBox.checked; };
+    wireSec.appendChild(field('Create untracked', el('span', { class: 'ne-check' }, untrackedBox,
+      el('span', { text: `add "${node.Label || node.Id}: Untracked" beneath it` })),
+      'What this node measures beyond its children, as a node of its own. Needs a reading on this node.'));
+  }
 
   // --- Filing: tags, its circuit, and where its EmonCMS feeds go. Folded until something is set. ---
   const more = el('details', { class: 'ne-more' })                      ;

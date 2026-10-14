@@ -1,5 +1,6 @@
 using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Models.Config;
+using rPDU2MQTT.Models.PDU;
 using Xunit;
 
 /// <summary>
@@ -8,13 +9,19 @@ using Xunit;
 /// </summary>
 public class UntrackedSeriesTests
 {
+    private sealed class Fixed(Dictionary<string, double> v) : IFlowValueSource
+    {
+        public bool TryGetValue(string node, string metric, out double value) => v.TryGetValue(node + "|" + metric, out value);
+    }
+
+    /// <summary>A metered sub-panel and two metered breakers, with its untracked slice made by hand.</summary>
     private static EnergyFlowConfig SubPanel() => new()
     {
         Nodes =
         {
-            new() { Id = "sub" },
-            new() { Id = "b1" },
-            new() { Id = "b2" },
+            new() { Id = "sub", Kind = "panel" },
+            new() { Id = "b1", Kind = "breaker" },
+            new() { Id = "b2", Kind = "breaker" },
             new() { Id = "sub_untracked", Mode = "untracked" },
         },
         Links =
@@ -25,7 +32,13 @@ public class UntrackedSeriesTests
         },
     };
 
-    private static FlowTopology Topology(EnergyFlowConfig flow) => FlowTopology.Of(flow.Links.Select(l => (l.From, l.To)));
+    private static FlowGraph Graph(EnergyFlowConfig flow, string metric = "energy")
+        => FlowGraphBuilder.Build(new PduData(), flow, metric, new Fixed(new()
+        {
+            [$"sub|{metric}"] = 1000, [$"b1|{metric}"] = 600, [$"b2|{metric}"] = 300,
+        }));
+
+    private static IReadOnlyList<UntrackedSeries.Plan> Plans(EnergyFlowConfig flow) => UntrackedSeries.For(Graph(flow));
 
     private static IReadOnlyList<IReadOnlyDictionary<string, double>> Steps(params (string Node, double?[] Values)[] lanes)
     {
@@ -44,8 +57,7 @@ public class UntrackedSeriesTests
     [Fact]
     public void ThePlanNamesTheParentAndTheTrackedSiblings()
     {
-        var flow = SubPanel();
-        var plan = Assert.Single(UntrackedSeries.For(flow, Topology(flow)));
+        var plan = Assert.Single(Plans(SubPanel()));
         Assert.Equal("sub_untracked", plan.Node);
         Assert.Equal("sub", plan.Parent);
         Assert.Equal(new[] { "b1", "b2" }, plan.Tracked.OrderBy(x => x));
@@ -57,7 +69,7 @@ public class UntrackedSeriesTests
         var flow = SubPanel();
         flow.Nodes.Add(new() { Id = "other_untracked", Mode = "untracked" });
         flow.Links.Add(new() { From = "sub", To = "other_untracked" });
-        Assert.Empty(UntrackedSeries.For(flow, Topology(flow)));
+        Assert.Empty(Plans(flow));
     }
 
     [Fact]
@@ -89,11 +101,11 @@ public class UntrackedSeriesTests
         var steps = Steps(("sub", sub), ("b1", b1), ("b2", b2), ("sub_untracked", recorded));
 
         var flow = SubPanel();
-        var rebuilt = Lane(UntrackedSeries.Apply(UntrackedSeries.For(flow, Topology(flow)), steps), "sub_untracked");
+        var rebuilt = Lane(UntrackedSeries.Apply(Plans(flow), steps), "sub_untracked");
 
         // b1's reset books what it ran since (2), so the panel's 10 is 2 + 4 tracked and 4 untracked that day only.
         Assert.Equal(new double?[] { 0, 0, 4, 4, 4 }, rebuilt);
-        Assert.Equal(sub, Lane(UntrackedSeries.Apply(UntrackedSeries.For(flow, Topology(flow)), steps), "sub"));
+        Assert.Equal(sub, Lane(UntrackedSeries.Apply(Plans(flow), steps), "sub"));
     }
 
     [Fact]
@@ -107,7 +119,7 @@ public class UntrackedSeriesTests
         var steps = Steps(("sub", sub), ("b1", b1), ("b2", b2), ("sub_untracked", new double?[] { 500, 499, 498, 497 }));
 
         var flow = SubPanel();
-        Assert.Equal(new double?[] { 0, 0, 0, 0 }, Lane(UntrackedSeries.Apply(UntrackedSeries.For(flow, Topology(flow)), steps), "sub_untracked"));
+        Assert.Equal(new double?[] { 0, 0, 0, 0 }, Lane(UntrackedSeries.Apply(Plans(flow), steps), "sub_untracked"));
     }
 
     [Fact]
@@ -120,7 +132,7 @@ public class UntrackedSeriesTests
 
         var flow = SubPanel();
         // 12 - 10 = 2 untracked; then the panel's gap, and b2's, leave steps nothing can say about.
-        Assert.Equal(new double?[] { 0, 2, null, null, null }, Lane(UntrackedSeries.Apply(UntrackedSeries.For(flow, Topology(flow)), steps), "sub_untracked"));
+        Assert.Equal(new double?[] { 0, 2, null, null, null }, Lane(UntrackedSeries.Apply(Plans(flow), steps), "sub_untracked"));
     }
 
     [Fact]
@@ -128,6 +140,79 @@ public class UntrackedSeriesTests
     {
         var steps = Steps(("sub", new double?[] { 100, 110, 120 }), ("b1", new double?[] { 50, 56, 62 }));
         var flow = SubPanel();
-        Assert.Equal(new double?[] { 0, 4, 8 }, Lane(UntrackedSeries.Apply(UntrackedSeries.For(flow, Topology(flow)), steps), "sub_untracked"));
+        Assert.Equal(new double?[] { 0, 4, 8 }, Lane(UntrackedSeries.Apply(Plans(flow), steps), "sub_untracked"));
+    }
+
+    /// <summary>The same panel with no untracked node of its own, asking for one.</summary>
+    private static EnergyFlowConfig Asking(bool? create)
+    {
+        var flow = SubPanel();
+        flow.Nodes.RemoveAll(n => n.Id == "sub_untracked");
+        flow.Links.RemoveAll(l => l.To == "sub_untracked");
+        flow.Nodes[0].CreateUntracked = create;
+        return flow;
+    }
+
+    [Fact]
+    public void ANodeThatAsksGetsItsUntrackedSliceBeneathIt()
+    {
+        var g = Graph(Asking(true), FlowGraphBuilder.DefaultMetric);
+        var id = UntrackedNode.IdFor("sub");
+
+        var node = Assert.Single(g.Nodes, n => n.Id == id);
+        Assert.Equal("sub: Untracked", node.Label);
+        Assert.Equal((double?)100, node.Value);
+        Assert.False(node.Synthetic);
+        Assert.Contains(g.Links, l => l.Source == "sub" && l.Target == id && l.Value == 100);
+        // It is the remainder, so the diagram does not draw it a second time as unmetered load.
+        Assert.DoesNotContain(g.Nodes, n => n.Id == "sub#unmeasured");
+        // …and it is counted inside its panel, not beside it.
+        Assert.Equal("sub", node.Within);
+
+        var plan = Assert.Single(UntrackedSeries.For(Graph(Asking(true))));
+        Assert.Equal(id, plan.Node);
+        Assert.Equal(new[] { "b1", "b2" }, plan.Tracked.OrderBy(x => x));
+    }
+
+    [Fact]
+    public void ANodeThatDoesNotAskGetsNone()
+    {
+        Assert.DoesNotContain(Graph(Asking(false), FlowGraphBuilder.DefaultMetric).Nodes, n => n.Id == UntrackedNode.IdFor("sub"));
+        Assert.DoesNotContain(Graph(Asking(null), FlowGraphBuilder.DefaultMetric).Nodes, n => n.Id == UntrackedNode.IdFor("sub"));
+    }
+
+    [Fact]
+    public void AHandMadeUntrackedChildIsKeptInsteadOfASecondOne()
+    {
+        var flow = SubPanel();
+        flow.Nodes[0].CreateUntracked = true;
+        var g = Graph(flow, FlowGraphBuilder.DefaultMetric);
+        Assert.DoesNotContain(g.Nodes, n => n.Id == UntrackedNode.IdFor("sub"));
+        Assert.Equal((double?)100, Assert.Single(g.Nodes, n => n.Id == "sub_untracked").Value);
+    }
+
+    [Fact]
+    public void LoadingTurnsItOnForPanelsInvertersAndTheGrid_AndLeavesAnAnswerAlone()
+    {
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new() { Id = "main", Kind = "panel" },
+                new() { Id = "inv", Kind = "inverter" },
+                new() { Id = "grid", Kind = "grid" },
+                new() { Id = "sub", Kind = "panel", CreateUntracked = false },
+                new() { Id = "fridge", Kind = "load" },
+                new() { Id = "spare", Kind = "panel", Mode = "untracked" },
+            },
+        };
+        UntrackedNode.ApplyDefaults(flow);
+        bool? Of(string id) => flow.Nodes.Single(n => n.Id == id).CreateUntracked;
+        Assert.True(Of("main"));
+        Assert.True(Of("inv"));
+        Assert.True(Of("grid"));
+        Assert.False(Of("sub"));
+        Assert.Null(Of("fridge"));
+        Assert.Null(Of("spare"));
     }
 }

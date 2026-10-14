@@ -479,7 +479,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
             // An untracked node's recorded counter is a difference of counters, so it is rebuilt from theirs.
             var untracked = UntrackedSeries.Differenced(metric, labels is not null)
-                ? UntrackedSeries.For(config.EnergyFlow, FlowTopology.For(data, config.EnergyFlow))
+                ? UntrackedSeries.For(shape)
                     .Where(p => lanes.Any(l => string.Equals(l.Id, p.Node, StringComparison.OrdinalIgnoreCase))).ToList()
                 : new List<UntrackedSeries.Plan>();
             var asked = lanes.Select(l => l.Id).Concat(UntrackedSeries.Inputs(untracked)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();

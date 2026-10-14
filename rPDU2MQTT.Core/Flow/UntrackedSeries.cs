@@ -1,5 +1,3 @@
-using rPDU2MQTT.Models.Config;
-
 namespace rPDU2MQTT.Core.Flow;
 
 /// <summary>
@@ -29,23 +27,23 @@ public static class UntrackedSeries
         => FlowUnits.Epoch(metric) switch { "lifetime" => true, "period" => !perDay, _ => false };
 
     /// <summary>
-    /// The untracked nodes that can be rebuilt: one feeder, and the only untracked child of it. Several untracked
-    /// children of one parent share a spare that nothing apportions, so those are left as recorded.
+    /// The untracked nodes in <paramref name="graph"/> that can be rebuilt: one feeder, and the only untracked
+    /// child of it. Several untracked children of one parent share a spare that nothing apportions, so those
+    /// are left as recorded. Siblings come from the graph's edges, so a panel's breakers count as they do on
+    /// the diagram.
     /// </summary>
-    public static IReadOnlyList<Plan> For(EnergyFlowConfig flow, FlowTopology topology)
+    public static IReadOnlyList<Plan> For(FlowGraph graph)
     {
-        var mode = flow.Nodes.Where(n => !string.IsNullOrEmpty(n.Id))
-            .GroupBy(n => n.Id, Ids)
-            .ToDictionary(g => g.Key, g => (g.First().Mode ?? "").Trim(), Ids);
-        bool Untracked(string id) => mode.TryGetValue(id, out var m) && string.Equals(m, "untracked", StringComparison.OrdinalIgnoreCase);
-
         var plans = new List<Plan>();
-        foreach (var node in mode.Keys.Where(Untracked))
+        foreach (var node in graph.Nodes.Select(n => n.Id).Where(graph.Untracked.Contains))
         {
-            if (topology.Feeders(node) is not [var parent]) continue;
-            var siblings = topology.Children(parent);
-            if (siblings.Count(Untracked) != 1) continue;
-            plans.Add(new Plan(node, parent, siblings.Where(c => !Untracked(c)).ToList()));
+            var feeders = graph.Edges.Where(e => Ids.Equals(e.Target, node)).Select(e => e.Source).Distinct(Ids).ToList();
+            if (feeders is not [var parent]) continue;
+            // A return lane or an unmetered remainder is the builder's own, not a child the parent feeds.
+            var siblings = graph.Edges.Where(e => Ids.Equals(e.Source, parent) && !e.Target.Contains('#'))
+                .Select(e => e.Target).Distinct(Ids).ToList();
+            if (siblings.Count(graph.Untracked.Contains) != 1) continue;
+            plans.Add(new Plan(node, parent, siblings.Where(c => !graph.Untracked.Contains(c)).ToList()));
         }
         return plans;
     }
