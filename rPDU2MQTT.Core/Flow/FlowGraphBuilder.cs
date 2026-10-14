@@ -236,6 +236,21 @@ public static class FlowGraphBuilder
             if (!string.IsNullOrEmpty(b.PanelNode) && label.ContainsKey(b.PanelNode)) AddEdgeSafe(b.PanelNode, b.Id);
         }
 
+        // What a measured node carries beyond its children, as a node of its own where it asks for one. A node
+        // already wired with an untracked child by hand keeps that one.
+        var untrackedIds = new HashSet<string>(flow.Nodes.Where(n => !string.IsNullOrEmpty(n.Id) && UntrackedNode.Is(n)).Select(n => n.Id),
+                                               StringComparer.OrdinalIgnoreCase);
+        foreach (var n in flow.Nodes)
+        {
+            if (string.IsNullOrEmpty(n.Id) || UntrackedNode.Is(n) || !UntrackedNode.Wanted(n)) continue;
+            if (!leaf.ContainsKey(n.Id) || !outgoing.TryGetValue(n.Id, out var below) || below.Count == 0) continue;
+            if (below.Any(untrackedIds.Contains)) continue;
+            var uid = UntrackedNode.IdFor(n.Id);
+            if (!label.ContainsKey(uid)) label[uid] = UntrackedNode.LabelFor(label.TryGetValue(n.Id, out var pl) ? pl : n.Id);
+            if (!kind.ContainsKey(uid)) kind[uid] = "unmeasured";
+            if (AddEdgeSafe(n.Id, uid)) untrackedIds.Add(uid);
+        }
+
         // Which feeders point into each node.
         var incoming = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (from, kids) in outgoing)
@@ -250,6 +265,7 @@ public static class FlowGraphBuilder
         foreach (var n in flow.Nodes)
             if (!string.IsNullOrEmpty(n.Id))
                 mode[n.Id] = string.IsNullOrWhiteSpace(n.Mode) ? "auto" : n.Mode.Trim().ToLowerInvariant();
+        foreach (var id in untrackedIds) mode[id] = UntrackedNode.Mode;
         string Mode(string id) => mode.TryGetValue(id, out var m) ? m : "auto";
 
         // Need(id): power this node must receive = its known value (outlet sink or producer).
@@ -643,7 +659,7 @@ public static class FlowGraphBuilder
             .OrderBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        return new FlowGraph(nodes, links, metric, units);
+        return new FlowGraph(nodes, links, metric, units) { Edges = edges, Untracked = untrackedIds };
 
         static string BaseOf(string id) => id.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal) ? id[..^FlowMetricKey.InSuffix.Length] : id;
         string KindOf(string id) => kind.TryGetValue(BaseOf(id), out var bk) ? bk : kind.TryGetValue(id, out var k2) ? k2 : "node";

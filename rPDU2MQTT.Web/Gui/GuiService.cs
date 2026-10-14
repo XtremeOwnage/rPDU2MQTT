@@ -477,7 +477,13 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             if (only is { Count: > 0 }) lanes = lanes.Where(l => only.Contains(l.Id, StringComparer.OrdinalIgnoreCase)).ToList();
             if (lanes.Count == 0) return new { ok = false, message = "No nodes to chart yet." };
 
-            var perDay = await history.SeriesAsync(lanes.Select(l => l.Id).ToList(), metric, when, cts.Token);
+            // An untracked node's recorded counter is a difference of counters, so it is rebuilt from theirs.
+            var untracked = UntrackedSeries.Differenced(metric, labels is not null)
+                ? UntrackedSeries.For(shape)
+                    .Where(p => lanes.Any(l => string.Equals(l.Id, p.Node, StringComparison.OrdinalIgnoreCase))).ToList()
+                : new List<UntrackedSeries.Plan>();
+            var asked = lanes.Select(l => l.Id).Concat(UntrackedSeries.Inputs(untracked)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var perDay = UntrackedSeries.Apply(untracked, await history.SeriesAsync(asked, metric, when, cts.Token));
 
             var drawn = lanes
                 .Select(n => new

@@ -159,6 +159,7 @@ internal class YamlConfigLoader
         dashboard.LegacyToken = null;
 
         Models.Config.LegacyLocations.Migrate(config);
+        Core.Flow.UntrackedNode.ApplyDefaults(config.EnergyFlow);
 
         ApplyEnvironmentOverrides(config);
 

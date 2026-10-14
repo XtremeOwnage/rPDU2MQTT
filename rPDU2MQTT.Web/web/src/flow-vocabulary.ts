@@ -35,6 +35,8 @@ export const NODE_KINDS: [string, string, string[]][] = [
 ];
 /// A load is where power is used, so it feeds nothing; a circuit that feeds other nodes is a breaker.
 export const feedsNothing = (kind?: string) => kind === 'load';
+/// Kinds whose leftover is worth a node of its own; the bridge ticks Create untracked for them when it loads the config.
+export const untrackedByDefault = (kind?: string) => kind === 'panel' || kind === 'inverter' || kind === 'grid';
 export const kindMeta = (kind?: string) => NODE_KINDS.find(k => k[0] === (kind || 'node')) || NODE_KINDS[0];
 
 // Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type.
