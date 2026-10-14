@@ -49,19 +49,23 @@ const charted = (sec) => query(sec, 'button', true)
 
 let page = await open();
 
-// The filters stay out of the chart's way: the node list starts folded into one line that says what is charted.
-const nodesLine = (sec) => (query(sec, 'span', true).find(s => /^Nodes: \d+ of \d+ charted$/.test(s.textContent || '')) || {}).textContent;
-const nodeList = (sec) => query(sec, 'input', true).find(i => i.type === 'search')?.parent?.parent;
-if (nodesLine(page.sec) !== 'Nodes: 2 of 7 charted') fail(`no one-line summary of what is charted: "${nodesLine(page.sec)}"`);
-if (!nodeList(page.sec) || nodeList(page.sec).hidden !== true) fail('the node list is open before anyone asked for it');
-const toggleOf = (sec) => query(sec, 'button', true).find(b => /^(Choose nodes|Hide node list)/.test(b.textContent || ''));
-toggleOf(page.sec).onclick();
-if (nodeList(page.sec).hidden) fail('Choose nodes did not open the node list');
-// Opened, it stays open next time.
+// The filters stay out of the chart's way: one button above the chart says what is charted, and the kinds,
+// tags and node list sit behind it until it is pressed.
+const face = (sec) => (query(sec, '.nt-btn') || {}).textContent;
+const pop = (sec) => query(sec, '.nt-pop');
+if (face(page.sec) !== 'Breaker / circuit · 2 of 7 nodes▾') fail(`the picker does not say what is charted: "${face(page.sec)}"`);
+if (!pop(page.sec) || pop(page.sec).hidden !== true) fail('the picker is open before anyone asked for it');
+query(page.sec, '.nt-btn').onclick();
+if (pop(page.sec).hidden) fail('pressing the picker did not open it');
+query(page.sec, '.nt-btn').onclick();
+if (!pop(page.sec).hidden) fail('pressing the picker again did not close it');
+query(page.sec, '.nt-btn').onclick();
+pop(page.sec).onkeydown({ key: 'Escape', preventDefault() {} });
+if (!pop(page.sec).hidden) fail('Escape did not close the picker');
+// Reopened, it does not stay open across visits.
+query(page.sec, '.nt-btn').onclick();
 page = await open(page.storage);
-if (nodeList(page.sec).hidden) fail('the node list did not stay open once opened');
-toggleOf(page.sec).onclick();
-if (!nodeList(page.sec).hidden) fail('the node list would not fold away again');
+if (!pop(page.sec).hidden) fail('the picker opened by itself on the next visit');
 
 // A chip per kind on the page, with how many nodes it holds.
 const names = kindChips(page.sec).map(b => b.textContent.slice(2));
@@ -77,7 +81,7 @@ kindChip(page.sec, 'Load').onclick();
 await wait(60);
 if (JSON.stringify(charted(page.sec)) !== JSON.stringify(['fridge', 'n30_1', 'n30_2', 'office']))
   fail(`adding a kind did not add to what was charted: ${charted(page.sec).join(', ')}`);
-if (nodesLine(page.sec) !== 'Nodes: 4 of 7 charted') fail(`the summary does not follow the selection: "${nodesLine(page.sec)}"`);
+if (face(page.sec) !== 'Breaker / circuit + Load · 4 of 7 nodes▾') fail(`the picker does not follow the selection: "${face(page.sec)}"`);
 
 // …and a kind comes off as a whole.
 kindChip(page.sec, 'Breaker / circuit').onclick();
@@ -99,6 +103,6 @@ page = await open(page.storage);
 if (JSON.stringify(charted(page.sec)) !== JSON.stringify(['n30_1', 'n30_2']))
   fail(`Reset did not forget the kinds chosen: ${charted(page.sec).join(', ')}`);
 
-console.log('node trends kinds: the node list folds into one line that follows the selection and remembers being opened; a chip per kind with its count; opens on circuits alone rather than grid beside everything; '
+console.log('node trends kinds: kinds, tags and nodes sit behind one button that names what is charted, opens on a press and closes on a second or Escape; a chip per kind with its count; opens on circuits alone rather than grid beside everything; '
   + 'kinds combine and come off whole; the choice is remembered, and Reset returns to the default and forgets it');
 process.exit(0);
