@@ -1513,6 +1513,32 @@
 .ss-hint { flex: none; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .ss-none { padding: 10px 8px; color: var(--muted); font-size: 13px; }
 
+/* Node Trends: what is charted, behind one button above the chart. */
+.nt-bar { position: relative; display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; flex-wrap: wrap; }
+.nt-anchor { min-width: 0; }
+.nt-btn { width: auto; min-height: 32px; padding: 4px 10px; font-size: 13px; max-width: 420px; }
+.nt-pop {
+  position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; width: min(680px, 100%);
+  display: grid; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--panel); box-shadow: var(--shadow-lg);
+}
+.nt-pop[hidden], .nt-block[hidden] { display: none; }
+.nt-head { margin-bottom: 6px; color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.nt-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.nt-search { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.nt-search .trend-search { flex: 1; min-width: 0; }
+.nt-tools { display: flex; gap: 6px; }
+.nt-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 2px;
+  max-height: 260px; overflow: auto; padding: 2px; border: 1px solid var(--line-soft); border-radius: var(--r-sm);
+}
+.nt-list button.nt-node {
+  justify-content: flex-start; text-align: left; border-color: transparent; background: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nt-list button.nt-node:hover { background: var(--panel3); }
+.nt-list button.nt-node.chip-on { background: var(--accent-bg); }
+
 /* Panel schedule: what the mapping or the readings contradict. */
 .ps-checks { display: grid; gap: 6px; margin: 0 0 var(--sp-3); }
 .ps-checks-head { margin: 0; font-size: 13px; color: var(--muted); font-weight: 600; }
