@@ -237,14 +237,16 @@ public static class FlowGraphBuilder
         }
 
         // What a measured node carries beyond its children, as a node of its own where it asks for one. A node
-        // already wired with an untracked child by hand keeps that one.
+        // already wired with an untracked or residual child by hand keeps that one.
+        var takesSpare = new HashSet<string>(flow.Nodes.Where(n => !string.IsNullOrEmpty(n.Id) && UntrackedNode.TakesSpare(n)).Select(n => n.Id),
+                                             StringComparer.OrdinalIgnoreCase);
         var untrackedIds = new HashSet<string>(flow.Nodes.Where(n => !string.IsNullOrEmpty(n.Id) && UntrackedNode.Is(n)).Select(n => n.Id),
                                                StringComparer.OrdinalIgnoreCase);
         foreach (var n in flow.Nodes)
         {
             if (string.IsNullOrEmpty(n.Id) || UntrackedNode.Is(n) || !UntrackedNode.Wanted(n)) continue;
             if (!leaf.ContainsKey(n.Id) || !outgoing.TryGetValue(n.Id, out var below) || below.Count == 0) continue;
-            if (below.Any(untrackedIds.Contains)) continue;
+            if (below.Any(takesSpare.Contains)) continue;
             var uid = UntrackedNode.IdFor(n.Id);
             if (!label.ContainsKey(uid)) label[uid] = UntrackedNode.LabelFor(label.TryGetValue(n.Id, out var pl) ? pl : n.Id);
             if (!kind.ContainsKey(uid)) kind[uid] = "unmeasured";

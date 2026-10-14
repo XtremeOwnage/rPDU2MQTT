@@ -37,6 +37,13 @@ public static class UntrackedNode
             if (n.CreateUntracked is null && DefaultFor(n.Kind) && !Is(n)) n.CreateUntracked = true;
     }
 
+    /// <summary>
+    /// A node that already takes its parent's spare: an untracked slice, or a residual one. Either way a
+    /// generated node beside it would show the same spare twice.
+    /// </summary>
+    public static bool TakesSpare(EnergyFlowNode node)
+        => Is(node) || string.Equals((node.Mode ?? "").Trim(), "residual", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>A node set to be the untracked slice of its parent, by hand or by id.</summary>
     public static bool Is(EnergyFlowNode node)
         => string.Equals((node.Mode ?? "").Trim(), Mode, StringComparison.OrdinalIgnoreCase)

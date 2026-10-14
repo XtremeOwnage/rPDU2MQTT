@@ -7586,7 +7586,8 @@ function renderNodeEditor(node     , links       , cand                  , reren
   wireSec.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id),
     id => !feedsNothing((cand.get(id) || {}).kind)));
   wireSec.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
-  if (!feedsNothing(node.Kind) && node.Mode !== 'untracked') {
+  // A residual or untracked node is itself a remainder, with no reading of its own to be beyond.
+  if (!feedsNothing(node.Kind) && node.Mode !== 'untracked' && node.Mode !== 'residual') {
     // Explicit either way once touched: left blank, the bridge turns it on for panels, inverters and the grid.
     const untrackedBox = el('input', { type: 'checkbox', checked: node.CreateUntracked ?? untrackedByDefault(node.Kind) })                    ;
     untrackedBox.onchange = () => { node.CreateUntracked = untrackedBox.checked; };

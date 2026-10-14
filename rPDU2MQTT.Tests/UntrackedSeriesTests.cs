@@ -192,6 +192,17 @@ public class UntrackedSeriesTests
     }
 
     [Fact]
+    public void AResidualChildIsKeptInsteadOfASecondOne()
+    {
+        var flow = SubPanel();
+        flow.Nodes.Single(n => n.Id == "sub_untracked").Mode = "residual";
+        flow.Nodes[0].CreateUntracked = true;
+        var g = Graph(flow, FlowGraphBuilder.DefaultMetric);
+        Assert.DoesNotContain(g.Nodes, n => n.Id == UntrackedNode.IdFor("sub"));
+        Assert.DoesNotContain(FlowTopology.For(new PduData(), flow).Children("sub"), c => c == UntrackedNode.IdFor("sub"));
+    }
+
+    [Fact]
     public void LoadingTurnsItOnForPanelsInvertersAndTheGrid_AndLeavesAnAnswerAlone()
     {
         var flow = new EnergyFlowConfig
