@@ -308,7 +308,7 @@ public class EnergyFlowNode : IExtensible
     /// an inverter and the grid are switched on when the config is loaded, since unmetered load is the thing
     /// worth seeing there.
     /// </summary>
-    [Description("Add an 'Untracked' node beneath this one: what it measures beyond its children. Left blank, it is turned on for panels, inverters and the grid when the config loads.")]
+    [Description("Add an Untracked node beneath this one, for what it measures beyond its children. Left blank, it is turned on for panels, inverters and the grid when the config loads.")]
     public bool? CreateUntracked { get; set; }
 
     [Description("EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}.")]

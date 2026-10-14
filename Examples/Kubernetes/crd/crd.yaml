@@ -986,6 +986,9 @@ spec:
                         Hidden:
                           type: boolean
                           description: Left off the flow diagrams. Still listed and editable.
+                        CreateUntracked:
+                          type: boolean
+                          description: Add an Untracked node beneath this one, for what it measures beyond its children. Left blank, it is turned on for panels, inverters and the grid when the config loads.
                         EmonCmsTag:
                           type: string
                           description: "EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}."
