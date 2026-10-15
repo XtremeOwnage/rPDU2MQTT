@@ -636,7 +636,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     /// <summary>HTTP Basic auth against the configured username/password.</summary>
     private async Task AuthMiddleware(HttpContext ctx, Func<Task> next)
     {
-        if (IsAuthorized(ctx.Request))
+        if (IsAuthorized(ctx.Request) || InstallAssets.ContainsKey(ctx.Request.Path.Value ?? ""))
         {
             await next();
             return;
@@ -686,6 +686,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         app.MapGet("/", () => Results.Content(LoadIndexHtml(), "text/html"));
         app.MapGet("/styles.css", () => Results.Content(LoadAsset("styles.css") ?? "", "text/css"));
         app.MapGet("/app.js", () => Results.Content(LoadAsset("app.js") ?? "", "text/javascript"));
+
+        // Install-as-app assets. Anonymous: the browser and home screen fetch them without the user's credentials.
+        foreach (var (path, type) in InstallAssets)
+            app.MapGet(path, () => LoadAssetBytes(path[1..]) is { } bytes ? Results.Bytes(bytes, type) : Results.NotFound()).AllowAnonymous();
 
         // OIDC sign-out: clears the cookie and ends the IdP session.
         if (UseOidc)
@@ -2465,6 +2469,30 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
     private static string LoadIndexHtml()
         => LoadAsset("index.html") ?? "<html><body><h1>rPDU2MQTT</h1><p>GUI assets missing.</p></body></html>";
+
+    /// <summary>The web app manifest and its icons, by route.</summary>
+    private static readonly Dictionary<string, string> InstallAssets = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["/manifest.webmanifest"] = "application/manifest+json",
+        ["/icon-192.png"] = "image/png",
+        ["/icon-512.png"] = "image/png",
+        ["/maskable-512.png"] = "image/png",
+        ["/apple-touch-icon.png"] = "image/png",
+    };
+
+    /// <summary>Read an embedded wwwroot asset's bytes by exact file name.</summary>
+    private static byte[]? LoadAssetBytes(string file)
+    {
+        var asm = Assembly.GetExecutingAssembly();
+        var name = asm.GetManifestResourceNames().FirstOrDefault(n => n.EndsWith(".wwwroot." + file, StringComparison.OrdinalIgnoreCase));
+        if (name is null)
+            return null;
+
+        using var stream = asm.GetManifestResourceStream(name)!;
+        using var copy = new MemoryStream();
+        stream.CopyTo(copy);
+        return copy.ToArray();
+    }
 
     /// <summary>Read an embedded wwwroot asset by file-name suffix.</summary>
     private static string? LoadAsset(string endsWith)

@@ -27,6 +27,8 @@
 		<EmbeddedResource Include="wwwroot\index.html" />
 		<EmbeddedResource Include="wwwroot\styles.css" />
 		<EmbeddedResource Include="wwwroot\app.js" />
+		<EmbeddedResource Include="wwwroot\manifest.webmanifest" />
+		<EmbeddedResource Include="wwwroot\*.png" />
 	</ItemGroup>
 
 	<ItemGroup>
