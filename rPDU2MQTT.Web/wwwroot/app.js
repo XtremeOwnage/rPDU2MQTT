@@ -3422,6 +3422,67 @@ function initPalette() {
   });
 }
 
+// ── stack-tables.ts ─────────────────────────────────────────────
+/// On a phone, a table wider than the screen stacks: each row becomes a card, each cell headed by its column.
+///
+/// Decided by measurement, not per page: a table that fits stays a table, so a short numeric one keeps its
+/// columns to compare down, and only the ones that would scroll sideways change shape. A table that must keep
+/// its columns opts out with `ld-nostack`. Every page renders its own tables, often on each live update, so
+/// one observer heads the cells wherever they are drawn.
+const PHONE = '(max-width: 560px)';
+
+const headings = (table                  )           => {
+  const row = table.tHead?.rows[table.tHead.rows.length - 1];
+  const out           = [];
+  if (!row) return out;
+  for (const th of Array.from(row.cells)) {
+    const text = (th.textContent || '').trim();
+    for (let i = 0; i < (th.colSpan || 1); i++) out.push(text);
+  }
+  return out;
+};
+
+const label = (table                  ) => {
+  const names = headings(table);
+  if (!names.length) return;
+  for (const body of Array.from(table.tBodies)) for (const tr of Array.from(body.rows)) {
+    let col = 0;
+    for (const td of Array.from(tr.cells)) {
+      // A cell the page headed itself keeps its own words.
+      if (!td.dataset.label && names[col]) td.dataset.label = names[col];
+      // A card has no column to keep aligned, so a cell saying only "nothing here" is left out of it.
+      td.classList.toggle('ld-blank', !td.querySelector('input, select, button, textarea, svg, img') && /^[\s—–-]*$/.test(td.textContent || ''));
+      col += td.colSpan || 1;
+    }
+  }
+};
+
+const settle = (phone         ) => {
+  document.querySelectorAll                  ('table.ld:not(.ld-nostack)').forEach(table => {
+    const auto = table.classList.contains('ld-auto-stack');
+    if (!phone) { if (auto) table.classList.remove('ld-stack', 'ld-auto-stack'); return; }
+    if (table.classList.contains('ld-stack')) { label(table); return; }
+    // Hidden (another page, a closed panel): measured when it is shown.
+    if (!table.offsetParent) return;
+    const room = (table.parentElement?.clientWidth || 0);
+    if (room && table.scrollWidth > room + 2) {
+      table.classList.add('ld-stack', 'ld-auto-stack');
+      label(table);
+    }
+  });
+};
+
+function initStackTables() {
+  const mq = typeof window !== 'undefined' ? window.matchMedia?.(PHONE) : null;
+  if (!mq || typeof MutationObserver === 'undefined') return;
+  let queued = false;
+  const run = () => { queued = false; settle(mq.matches); };
+  const queue = () => { if (!queued) { queued = true; requestAnimationFrame(run); } };
+  new MutationObserver(queue).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden', 'open'] });
+  mq.addEventListener?.('change', queue);
+  queue();
+}
+
 // ── overrides.ts ────────────────────────────────────────────────
 // Overrides editor (driven by live PDU data) + the config export/prune helpers.
 
@@ -5710,7 +5771,7 @@ function addFlowSection(nav     , sections     ) {
     const padTop = 22 + outlineTop, nodeW = 12;
     const usableH = phone ? Math.min(520, Math.max(160, ((graph.nodes || []).length - 1) * 110)) : 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
-    const leftPad = phone ? 8 : 16, rightGutter = phone ? Math.round(W * 0.48) : 232;
+    const leftPad = phone ? 8 : 16, rightGutter = phone ? Math.round(W * 0.52) : 232;
     // What the node has to be tall enough to carry: its own reading.
     const throughput = (id        ) => {
       let inSum = 0, outSum = 0;
@@ -6176,7 +6237,7 @@ function addFlowSection(nav     , sections     ) {
       });
       svg.appendChild(rect);
       const lab = svgEl('text', {
-        x: p.x + nodeW + 6, y: labelY(n.id, p), fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
+        x: p.x + nodeW + 6, y: labelY(n.id, p), fill: 'var(--fg)', 'font-size': phone ? '12.5' : '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
         'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
         'data-node': n.id,
       });
@@ -6190,7 +6251,7 @@ function addFlowSection(nav     , sections     ) {
       // An inferred figure is never dressed as a measured one.
       const inferredNode = n.derivation === 'inferred';
       // A phone's gutter holds about twenty characters; the full name is in the node's card.
-      const name = phone && String(n.label).length > 18 ? String(n.label).slice(0, 17).trimEnd() + '…' : n.label;
+      const name = phone && String(n.label).length > 15 ? String(n.label).slice(0, 14).trimEnd() + '…' : n.label;
       lab.textContent = unknownNode ? `${name} · no data`
         : `${name} · ${formatMeasure(nodeValue(n.id), units)}${inferredNode ? ' · inferred' : ''}`;
       if (deeper.has(n.id)) lab.textContent += ' ›';
@@ -6305,6 +6366,19 @@ function addFlowSection(nav     , sections     ) {
           : `In ${grp.Label || grp.Id}. Click to collapse.`;
         rect.appendChild(hint);
         if (n.group || anchorOf) lab.textContent = (n.group && !n.expanded ? '▸ ' : '▾ ') + lab.textContent;
+      }
+      // On a phone the space between two columns is narrower than a name and its reading: a node with a
+      // column to its right puts the reading under its name, or the two columns' labels run into each other.
+      if (phone && (outgoing[n.id] || []).length) {
+        const whole = lab.textContent || '';
+        const at = whole.indexOf(' · ');
+        if (at > 0) {
+          lab.textContent = '';
+          const x = lab.getAttribute('x');
+          const line = (text        , dy        ) => { const t = svgEl('tspan', { x, dy }); t.textContent = text; lab.appendChild(t); };
+          line(whole.slice(0, at), '-0.6em');
+          line(whole.slice(at + 3), '1.2em');
+        }
       }
     });
 
@@ -6587,7 +6661,8 @@ function addFlowSection(nav     , sections     ) {
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, style: 'background:var(--panel2); display:block' });
     scroll.appendChild(svg); ed.appendChild(scroll);
     ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 2px 0', fontSize: '11px' }, text: 'Drag the canvas background to pan · scroll to move · Ctrl/⌘ + scroll to zoom · drag a node onto another to set its feeder · drag a node’s ● onto another to add a feed.' }));
-    const detachZoom = attachZoom(scroll, svg, W, H);
+    // Fitted whole on a phone, the node names are a few pixels tall: open where they can be read, and pan.
+    const detachZoom = attachZoom(scroll, svg, W, H, false, undefined, 0.85);
     const defs = svgEl('defs', {}); svg.appendChild(defs);
     [['fh-arrow', 'var(--faint)'], ['fh-arrow-c', '#7cc0ff']].forEach(([id, fill]) => {
       const mk = svgEl('marker', { id, viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' });
@@ -8586,9 +8661,12 @@ function mountMqttExplorer(body     , close            , showing               )
   bar.append(search, expandAll, collapseAll, status);
   body.appendChild(bar);
 
-  const tbl = el('table', { class: 'ld' });
+  // A tree keeps its rows: it is read by its indentation, which a card per topic would lose. A phone shows
+  // the topic and its value, and the rest is a tap away in the payload row.
+  const tbl = el('table', { class: 'ld ld-nostack explorer-table' });
   const head = el('tr');
-  ['', 'Topic', 'Last value', 'Trend', 'Last seen', 'Messages', 'Looks like'].forEach(h => head.appendChild(el('th', { text: h })));
+  const cols = ['ex-pick', 'ex-name', 'ex-value', 'ex-trend', 'ex-seen', 'ex-count', 'ex-kind'];
+  ['', 'Topic', 'Last value', 'Trend', 'Last seen', 'Messages', 'Looks like'].forEach((h, i) => head.appendChild(el('th', { class: cols[i], text: h })));
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
@@ -8668,13 +8746,15 @@ function mountMqttExplorer(body     , close            , showing               )
       footer.sync();
     };
 
-    const name = el('td', { style: { paddingLeft: `${6 + depth * 18}px`, whiteSpace: 'nowrap' } });
+    const name = el('td', { class: 'ex-name', style: { paddingLeft: `${6 + depth * 18}px`, whiteSpace: 'nowrap' } });
+    name.style.setProperty?.('--depth', String(depth));
     if (branch) {
       const toggle = el('span', { text: isOpen ? '▾' : '▸', style: { cursor: 'pointer', marginRight: '6px', color: 'var(--muted)' } });
       toggle.onclick = () => { decided.add(n.path); open.has(n.path) ? open.delete(n.path) : open.add(n.path); draw(); };
       name.appendChild(toggle);
     }
-    const code = el('code', { text: label });
+    // A topic breaks at its own separators when it has to wrap, not mid-word.
+    const code = el('code', {}, ...String(label).split(/(?<=[/_])/).flatMap((part, i) => i ? [el('wbr'), part] : [part]));
     if (branch) {
       code.style.cursor = 'pointer';
       code.onclick = () => { decided.add(n.path); open.has(n.path) ? open.delete(n.path) : open.add(n.path); draw(); };
@@ -8691,7 +8771,7 @@ function mountMqttExplorer(body     , close            , showing               )
     }
 
     const t = n.row;
-    const value = el('td', { class: 'num', text: t ? (t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48)) : '' });
+    const value = el('td', { class: 'num ex-value', text: t ? (t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48)) : '' });
     // A truncated line of JSON tells you nothing, and there is nowhere else to read it.
     if (t && (t.payload || t.value != null)) {
       value.title = t.payload || '';
@@ -8700,22 +8780,22 @@ function mountMqttExplorer(body     , close            , showing               )
       // What it last published, in full — not the 48 characters the cell has room for.
       value.append(' ', copyButton('Copy the last value', 'value', () => t.payload || String(t.value ?? '')));
     }
-    const trend = el('td', { style: { width: '140px' } });
+    const trend = el('td', { class: 'ex-trend', style: { width: '140px' } });
     if (t && Array.isArray(t.trend) && t.trend.length > 1)
       trend.appendChild(sparkline({ values: t.trend, color: '#4f8ff7', units: t.unit || '', width: 132, height: 22, fromZero: false }));
     // A branch reports its freshest topic and the messages under it.
     const newest = topics.reduce((m        , x     ) => (x.seenUtc && x.seenUtc > m ? x.seenUtc : m), '');
-    const seen = el('td', { class: 'desc', style: { whiteSpace: 'nowrap', margin: '0' }, text: newest ? seenAgo(newest) : '' });
+    const seen = el('td', { class: 'desc ex-seen', style: { whiteSpace: 'nowrap', margin: '0' }, text: newest ? seenAgo(newest) : '' });
     if (newest) { seen.title = new Date(newest).toLocaleString(); ages.push({ cell: seen, at: newest }); }
     const count = topics.reduce((n        , x     ) => n + (Number(x.messages) || 0), 0);
     tbody.appendChild(el('tr', {},
-      el('td', {}, box),
+      el('td', { class: 'ex-pick' }, box),
       name,
       value,
       trend,
       seen,
-      el('td', { class: 'num', text: count ? formatNum(count) : '' }),
-      el('td', { text: t ? (t.isJson ? `JSON · ${fieldNames(t.fields).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—')) : '' })));
+      el('td', { class: 'num ex-count', text: count ? formatNum(count) : '' }),
+      el('td', { class: 'ex-kind', text: t ? (t.isJson ? `JSON · ${fieldNames(t.fields).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—')) : '' })));
     if (t && opened.has(t.topic)) tbody.appendChild(payloadRow(t));
 
     if (branch && isOpen) [...n.children.values()].sort(byName).forEach(c => drawBranch(c, depth + 1, searching));
@@ -13109,6 +13189,9 @@ function addPanelScheduleSection(nav     , sections     ) {
           style: { gridColumn: left ? '1' : '4', gridRow: place },
         }, ...(cell.span === 2 ? [cell.slot, cell.slot + 2] : [cell.slot]).map(n => el('span', { text: String(n) })));
         stamped.setAttribute('aria-hidden', 'true');
+        // One column on a phone, read in slot order as the directory is numbered; each number before its slot.
+        stamped.style.setProperty?.('--ps-order', String(cell.slot * 2));
+        box.style.setProperty?.('--ps-order', String(cell.slot * 2 + 1));
         grid.appendChild(stamped);
         if (!cell.halves.length) {
           const blank = el('span', { class: 'ps-breaker is-empty' }, el('span', { class: 'ps-pole is-empty' }));
@@ -15371,6 +15454,7 @@ function discardAll() {
 // --- Wiring ----------------------------------------------------------------------------------------
 
 function initShell() {
+  initStackTables();
   const on = (id        , fn     ) => { const e      = document.getElementById(id); if (e) e.onclick = fn; };
   on('st-update', checkUpdatesNow);
   on('btn-save', saveConfigChanges);

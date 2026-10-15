@@ -206,6 +206,8 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-tool-row { display: grid; gap: 4px; justify-items: start; margin-bottom: var(--sp-3); }
 .fp-keys { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
 .fp-keys kbd { display: inline-block; min-width: 7.5em; color: var(--fg); font: 12px var(--mono); }
+/* A touch screen has no keyboard to press them on. */
+@media (hover: none) and (pointer: coarse) { .fp-keys, .fp-keys-head { display: none; } }
 .fp-drop {
   display: grid; justify-items: center; gap: 10px; padding: var(--sp-5) var(--sp-4); border: 2px dashed var(--line);
   border-radius: var(--r-lg); background: var(--panel2); color: var(--muted); text-align: center;

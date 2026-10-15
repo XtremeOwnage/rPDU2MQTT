@@ -152,6 +152,9 @@ export default function mount(sec: any, host: any) {
   let spaceDown = false;
   let gfciNext = remembered('gfci', '0') === '1';
   let showCons = remembered('cons', '1') === '1';
+  // The constraints are drafting marks. On a phone's plan they sit on top of the room names they are about,
+  // so viewing there leaves them out; Edit still shows them.
+  const consShown = () => showCons && !(mode === 'view' && !!window.matchMedia?.('(max-width: 560px)').matches);
   let itemPreset = '';
   let selectedCorner = -1;
   let selectedBend = -1;
@@ -882,7 +885,7 @@ export default function mount(sec: any, host: any) {
       }
     });
     // Constraints, where they hold: a pill on each wall or corner, red where they cannot.
-    if (showCons) {
+    if (consShown()) {
       const pill = (at: Pt, text: string, unmet: boolean) => {
         const w = (text.length * 6.5 + 10) * u, hh = 15 * u;
         const g = svgEl('g', { class: 'fp-cons' + (unmet ? ' is-unmet' : ''), transform: `translate(${at.X},${at.Y})` });
@@ -1608,7 +1611,7 @@ export default function mount(sec: any, host: any) {
         'Shade by what each room is drawing now, or by the energy it has used over a period.'));
     }
     subBar.appendChild(check('Wiring', showWiring, v => { showWiring = v; remember('wiring', v ? '1' : '0'); drawPlan(); }, 'Show cable runs, and ring each item in its circuit’s colour.'));
-    if (constraintsNow().length) subBar.appendChild(check('Constraints', showCons, v => { showCons = v; remember('cons', v ? '1' : '0'); drawPlan(); }, 'Show the constraints held on this floor: fixed lengths, angles, parallel and square walls.'));
+    if (constraintsNow().length && !(mode === 'view' && window.matchMedia?.('(max-width: 560px)').matches)) subBar.appendChild(check('Constraints', showCons, v => { showCons = v; remember('cons', v ? '1' : '0'); drawPlan(); }, 'Show the constraints held on this floor: fixed lengths, angles, parallel and square walls.'));
     subBar.appendChild(check('Sizes', showSizes, v => { showSizes = v; remember('sizes', v ? '1' : '0'); drawPlan(); }, 'Show every wall’s length and each room’s floor area.'));
     if (mode === 'edit' && floorBelow()) subBar.appendChild(check('Floor below', showBelow, v => { showBelow = v; remember('below', v ? '1' : '0'); drawPlan(); }, 'Show the floor beneath this one faintly, to line this one up with it.'));
     if (mode === 'edit') subBar.appendChild(check('Snap', snapOn, v => { snapOn = v; remember('snap', v ? '1' : '0'); }, 'Corners snap to other rooms’ corners and edges, and everything to a fine grid.'));
@@ -2824,7 +2827,7 @@ export default function mount(sec: any, host: any) {
     body.append(
       el('div', { class: 'fp-tool-row' }, tags, el('div', { class: 'desc', text: 'Turn Version 2.0 room and area tags into rooms, with a preview of what each becomes before anything is written.' })),
       el('div', { class: 'fp-tool-row' }, ha, el('div', { class: 'desc', text: 'Create or match a Home Assistant area for each room, and file this bridge’s devices in them.' })),
-      el('h4', { text: 'Keys' }),
+      el('h4', { class: 'fp-keys-head', text: 'Keys' }),
       el('div', { class: 'fp-keys' }, ...[
         ['Ctrl+Z / Ctrl+Y', 'undo / redo'], ['V H R P O A', 'select, pan, room, outline, outdoor, area'], ['D W I L M', 'door, window, item, wire, measure'],
         ['Delete', 'remove the selection'], ['Arrows', 'nudge; Shift for more'], ['Esc', 'stop drawing'], ['+ − 0', 'zoom in, out, fit'],

@@ -559,7 +559,7 @@ export function addFlowSection(nav: any, sections: any) {
     const padTop = 22 + outlineTop, nodeW = 12;
     const usableH = phone ? Math.min(520, Math.max(160, ((graph.nodes || []).length - 1) * 110)) : 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
-    const leftPad = phone ? 8 : 16, rightGutter = phone ? Math.round(W * 0.48) : 232;
+    const leftPad = phone ? 8 : 16, rightGutter = phone ? Math.round(W * 0.52) : 232;
     // What the node has to be tall enough to carry: its own reading.
     const throughput = (id: string) => {
       let inSum = 0, outSum = 0;
@@ -1025,7 +1025,7 @@ export function addFlowSection(nav: any, sections: any) {
       });
       svg.appendChild(rect);
       const lab = svgEl('text', {
-        x: p.x + nodeW + 6, y: labelY(n.id, p), fill: 'var(--fg)', 'font-size': '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
+        x: p.x + nodeW + 6, y: labelY(n.id, p), fill: 'var(--fg)', 'font-size': phone ? '12.5' : '11', 'font-weight': n.kind === 'outlet' ? '400' : '600',
         'dominant-baseline': 'middle', 'paint-order': 'stroke', stroke: 'var(--panel2)', 'stroke-width': '3', 'stroke-linejoin': 'round',
         'data-node': n.id,
       });
@@ -1039,7 +1039,7 @@ export function addFlowSection(nav: any, sections: any) {
       // An inferred figure is never dressed as a measured one.
       const inferredNode = n.derivation === 'inferred';
       // A phone's gutter holds about twenty characters; the full name is in the node's card.
-      const name = phone && String(n.label).length > 18 ? String(n.label).slice(0, 17).trimEnd() + '…' : n.label;
+      const name = phone && String(n.label).length > 15 ? String(n.label).slice(0, 14).trimEnd() + '…' : n.label;
       lab.textContent = unknownNode ? `${name} · no data`
         : `${name} · ${formatMeasure(nodeValue(n.id), units)}${inferredNode ? ' · inferred' : ''}`;
       if (deeper.has(n.id)) lab.textContent += ' ›';
@@ -1154,6 +1154,19 @@ export function addFlowSection(nav: any, sections: any) {
           : `In ${grp.Label || grp.Id}. Click to collapse.`;
         rect.appendChild(hint);
         if (n.group || anchorOf) lab.textContent = (n.group && !n.expanded ? '▸ ' : '▾ ') + lab.textContent;
+      }
+      // On a phone the space between two columns is narrower than a name and its reading: a node with a
+      // column to its right puts the reading under its name, or the two columns' labels run into each other.
+      if (phone && (outgoing[n.id] || []).length) {
+        const whole = lab.textContent || '';
+        const at = whole.indexOf(' · ');
+        if (at > 0) {
+          lab.textContent = '';
+          const x = lab.getAttribute('x');
+          const line = (text: string, dy: string) => { const t = svgEl('tspan', { x, dy }); t.textContent = text; lab.appendChild(t); };
+          line(whole.slice(0, at), '-0.6em');
+          line(whole.slice(at + 3), '1.2em');
+        }
       }
     });
 
@@ -1436,7 +1449,8 @@ export function addFlowSection(nav: any, sections: any) {
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, style: 'background:var(--panel2); display:block' });
     scroll.appendChild(svg); ed.appendChild(scroll);
     ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 2px 0', fontSize: '11px' }, text: 'Drag the canvas background to pan · scroll to move · Ctrl/⌘ + scroll to zoom · drag a node onto another to set its feeder · drag a node’s ● onto another to add a feed.' }));
-    const detachZoom = attachZoom(scroll, svg, W, H);
+    // Fitted whole on a phone, the node names are a few pixels tall: open where they can be read, and pan.
+    const detachZoom = attachZoom(scroll, svg, W, H, false, undefined, 0.85);
     const defs = svgEl('defs', {}); svg.appendChild(defs);
     [['fh-arrow', 'var(--faint)'], ['fh-arrow-c', '#7cc0ff']].forEach(([id, fill]) => {
       const mk = svgEl('marker', { id, viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' });

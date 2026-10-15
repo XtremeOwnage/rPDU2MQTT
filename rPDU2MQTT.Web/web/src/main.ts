@@ -8,6 +8,7 @@ import { subscribeLive, onRealtimeState, expectedRestart, restartFinished, expec
 import { initTheme } from './theme.js';
 import { initPalette } from './palette.js';
 import { loadPluginPages } from './plugin-pages.js';
+import { initStackTables } from './stack-tables.js';
 
 // Back/forward and hash edits: open the matching tab if it isn't already active.
 window.addEventListener('hashchange', () => {
@@ -384,6 +385,7 @@ function discardAll() {
 // --- Wiring ----------------------------------------------------------------------------------------
 
 function initShell() {
+  initStackTables();
   const on = (id: string, fn: any) => { const e: any = document.getElementById(id); if (e) e.onclick = fn; };
   on('st-update', checkUpdatesNow);
   on('btn-save', saveConfigChanges);
