@@ -66,12 +66,14 @@ if (!link) fail(`no nav entry for the plugin; saw ${links.map(a => a.dataset.lab
 
 // PDU tabs stay under the PDU; the Sources plugin follows them.
 const order = links.map(a => a.dataset.label);
-const want = ['Vertiv rPDU', 'Overrides', 'Live Data', 'PDU Control', 'Paths', 'Bus Reader'];
+const want = ['Vertiv rPDU', 'Overrides', 'PDU Control', 'Paths', 'Bus Reader'];
 const got = order.filter(l => want.includes(l));
 if (got.join() !== want.join()) fail(`Sources is ordered ${got.join(', ')}, not ${want.join(', ')}`);
 const busLink = links.find(a => a.dataset.label === 'Bus Reader');
 if (busLink.classList.contains('nav-child')) fail('the Sources plugin is indented as a child');
-if (!links.find(a => a.dataset.label === 'Live Data').classList.contains('nav-child')) fail('the PDU tabs are not indented under the PDU');
+if (!links.find(a => a.dataset.label === 'PDU Control').classList.contains('nav-child')) fail('the PDU tabs are not indented under the PDU');
+// Live Data is for reading, so it is listed with the other data pages, above the PDU's setup.
+if (order.indexOf('Live Data') < 0 || order.indexOf('Live Data') > order.indexOf('Vertiv rPDU')) fail('Live Data is not listed above the PDU setup pages');
 
 const groupTitles = query(getEl('nav'), '.nav-group-title', true).map(t => t.textContent);
 if (groupTitles.length && !groupTitles.includes('Destinations'))

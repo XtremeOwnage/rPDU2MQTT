@@ -60,11 +60,11 @@ export function makeEl(tag = 'div') {
     set textContent(v) { this._text = String(v); this.children = []; },
     set innerHTML(v) { if (!v) this.children = []; },
     get innerHTML() { return ''; },
-    // Parentage is tracked so remove() detaches.
+    // Parentage is tracked so remove() detaches, and appending a node moves it as the DOM does.
     parent: null,
     appendChild(c) {
       c = asNode(c);
-      if (c && c.tag) { c.parent = this; this.children.push(c); this._adoptOption(c); }
+      if (c && c.tag) { c.parent?.removeChild(c); c.parent = this; this.children.push(c); this._adoptOption(c); }
       return c;
     },
     // A <select> takes its first option's value until one is set.
@@ -73,7 +73,7 @@ export function makeEl(tag = 'div') {
       this._adopted = true;
       this.value = c.value || (c.attrs && c.attrs.value) || '';
     },
-    append(...cs) { cs.forEach(c => { c = asNode(c); if (c && c.tag) { c.parent = this; this.children.push(c); this._adoptOption(c); } }); },
+    append(...cs) { cs.forEach(c => { c = asNode(c); if (c && c.tag) { c.parent?.removeChild(c); c.parent = this; this.children.push(c); this._adoptOption(c); } }); },
     removeChild(c) { this.children = this.children.filter(x => x !== c); if (c) c.parent = null; },
     remove() { if (this.parent) this.parent.removeChild(this); },
     replaceWith(next) {

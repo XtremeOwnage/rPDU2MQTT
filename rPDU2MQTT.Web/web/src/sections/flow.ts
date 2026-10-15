@@ -174,11 +174,13 @@ export function addFlowSection(nav: any, sections: any) {
   syncPanels();
   const wrap = document.createElement('div'); sec.appendChild(wrap);
 
-  // Each job below the diagram gets its own page under Energy Flow, so the Flow page is the diagram.
-  const subPage = (label: string, icon: string, desc: string, paths?: string) => {
+  // Each job below the diagram gets its own page, so the Flow page is the diagram.
+  const subPage = (label: string, icon: string, desc: string, paths?: string, group?: string) => {
     const l = navLink(nav, label, icon);
     l.classList.add('nav-child');
     if (paths) l.dataset.section = paths;
+    // Setup pages are listed with the rest of the energy setup, away from the diagram.
+    if (group) l.dataset.navGroup = group;
     const s = document.createElement('div'); s.className = 'section'; sections.appendChild(s);
     s.appendChild(el('h2', { text: label }));
     s.appendChild(el('div', { class: 'desc', text: desc }));
@@ -190,10 +192,10 @@ export function addFlowSection(nav: any, sections: any) {
     'What each node rolls up, per metric: measured leaves report their source, aggregates sum their children, residuals take the remainder.');
   const treePanel = treePage.body;
   const edPage = subPage('Hierarchy', '⑃',
-    'How the nodes are wired together. Energy flows left → right.', 'EnergyFlow.Links,EnergyFlow.Parents');
+    'How the nodes are wired together. Energy flows left → right.', 'EnergyFlow.Links,EnergyFlow.Parents', 'Energy Setup');
   const ed: any = edPage.body;
   const settingsPage = subPage('Settings', '⚙',
-    'Energy roll-up and export settings.', 'EnergyFlow.*');
+    'Energy roll-up and export settings.', 'EnergyFlow.*', 'Energy Setup');
   let lastGraph: any = null;
   // Bindings the server is dropping on purpose.
   let withheldSources: any[] = [];
