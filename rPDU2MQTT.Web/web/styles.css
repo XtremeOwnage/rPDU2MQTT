@@ -186,7 +186,7 @@
   .pill.busy { opacity:.6; cursor:default; }
 
   .icon-btn {
-    display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; padding:0;
+    display:inline-flex; flex:none; align-items:center; justify-content:center; width:30px; height:30px; padding:0;
     font:inherit; font-size:14px; color:var(--muted); background:transparent; border:1px solid transparent;
     border-radius:var(--r-sm); cursor:pointer; transition:background .12s, color .12s, border-color .12s;
   }
@@ -340,6 +340,8 @@
   input[type=checkbox].switch:focus-visible { outline:none; box-shadow:var(--ring); }
   input[type=checkbox].switch:disabled { opacity:.5; cursor:not-allowed; }
   .switch-wrap { display:inline-flex; align-items:center; gap:9px; }
+  /* A config field's label is a block; the switch's own label must stay a row, or its On/Off drops below it. */
+  .field > label.switch-wrap { display:inline-flex; margin-bottom:0; }
   .switch-state { font-size:12px; font-weight:600; color:var(--muted); user-select:none; }
 
   fieldset {
@@ -1717,3 +1719,16 @@
 .emon-plan-step { color:var(--muted); }
 .emon-plan-step.calc { color:var(--accent-fg); background:var(--accent); }
 .emon-plan-arrow { color:var(--faint); }
+
+/* A table too wide for a phone stacks each row into a card, every cell headed by its column. */
+@media (max-width: 560px) {
+  table.ld.ld-stack, .ld-stack tbody, .ld-stack tr, .ld-stack td { display:block; width:auto; }
+  .ld-stack thead { display:none; }
+  .ld-stack tr { padding:var(--sp-2) 0; border-bottom:1px solid var(--line-soft); }
+  .ld-stack tbody tr:last-child { border-bottom:none; }
+  table.ld.ld-stack td { border-bottom:none; padding:4px 13px; }
+  .ld-stack td[data-label]::before {
+    content:attr(data-label); display:block; margin-bottom:2px;
+    font-size:10.5px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--faint);
+  }
+}

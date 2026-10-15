@@ -8923,9 +8923,10 @@ function addTagsSection(nav     , sections     ) {
     }
 
     // --- What exists, what carries it, what decides on it ----------------------------------------------
-    const t = el('table', { class: 'ld' });
+    const t = el('table', { class: 'ld ld-stack' });
     const head = el('tr');
-    ['Tag', 'What it is for', 'Carried by', 'Destinations that decide on it', ''].forEach(h =>
+    const columns = ['Tag', 'What it is for', 'Carried by', 'Destinations that decide on it', ''];
+    columns.forEach(h =>
       head.appendChild(el('th', { text: h })));
     t.appendChild(el('thead', {}, head));
     const tb = el('tbody');
@@ -8994,6 +8995,8 @@ function addTagsSection(nav     , sections     ) {
         removeTag(tag); refreshDirty(); render();
       };
       tr.appendChild(el('td', {}, del));
+      // Headings for the stacked layout a phone uses.
+      [...tr.children].forEach((td     , i) => { if (columns[i]) td.dataset.label = columns[i]; });
       tb.appendChild(tr);
     });
 
