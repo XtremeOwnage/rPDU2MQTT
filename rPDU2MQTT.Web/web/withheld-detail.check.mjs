@@ -79,6 +79,19 @@ more.click();
 await new Promise(r => setTimeout(r, 20));
 if (detail.hidden) fail('clicking the control did not reveal the bindings');
 
+// --- …and stays open when the data refreshes ----------------------------------------------------------
+// The alerts are rebuilt on every refresh; the list used to fold shut each time, usually mid-read.
+const refreshBtn = query(sec, 'button', true).find(b => (b.textContent || '').trim() === 'Refresh');
+if (!refreshBtn) fail('the Overview has no Refresh button');
+refreshBtn.click();
+await new Promise(r => setTimeout(r, 200));
+const alertAfter = query(sec, '.ov-alert', true).find(a => (a.textContent || '').includes('MQTT sources'));
+if (!alertAfter || alertAfter === alert) fail('the refresh did not redraw the alert, so this proves nothing');
+const detailAfter = query(alertAfter, '.ov-alert-detail', true)[0];
+if (!detailAfter || detailAfter.hidden) fail('refreshing the data folded the withheld bindings shut');
+if (!/^Hide /.test(query(alertAfter, '.ov-alert-more', true)[0]?.textContent || ''))
+  fail('the reopened list is labelled as if it were closed');
+
 // --- What it reveals is the reason, not another count -------------------------------------------------
 const text = detail.textContent || '';
 for (const want of ['deep_freezer', 'restarts each day', 'eg4-flexboss21-solar', 'below the 432.24'])
@@ -92,9 +105,9 @@ if (text.includes('main_panel') || text.includes('register 40088'))
   fail('the MQTT card is showing a Modbus binding — a card must account for its own withheld readings only');
 
 // --- It closes again ----------------------------------------------------------------------------------
-more.click();
+query(alertAfter, '.ov-alert-more', true)[0].click();
 await new Promise(r => setTimeout(r, 20));
-if (!detail.hidden) fail('the detail cannot be closed again');
+if (!detailAfter.hidden) fail('the detail cannot be closed again');
 
 // --- A healthy card is not given a control it has nothing to show behind -------------------------------
 const good = query(sec, '.ov-alert', true).find(a => (a.textContent || '').includes('Vertiv rPDU'));
@@ -102,4 +115,4 @@ if (good && query(good, '.ov-alert-more', true).length) fail('a card with nothin
 
 console.log('withheld-detail: the Overview alert keeps its count and opens onto the bindings behind it — '
   + 'each with its node, metric, topic and the reason it is being dropped — showing only the bindings '
-  + 'belonging to that card, and closing again when asked');
+  + 'belonging to that card, and staying open across refreshes and closing again when asked');
