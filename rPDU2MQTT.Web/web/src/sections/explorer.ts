@@ -217,9 +217,12 @@ function mountMqttExplorer(body: any, close: () => void, showing: () => boolean)
   bar.append(search, expandAll, collapseAll, status);
   body.appendChild(bar);
 
-  const tbl = el('table', { class: 'ld' });
+  // A tree keeps its rows: it is read by its indentation, which a card per topic would lose. A phone shows
+  // the topic and its value, and the rest is a tap away in the payload row.
+  const tbl = el('table', { class: 'ld ld-nostack explorer-table' });
   const head = el('tr');
-  ['', 'Topic', 'Last value', 'Trend', 'Last seen', 'Messages', 'Looks like'].forEach(h => head.appendChild(el('th', { text: h })));
+  const cols = ['ex-pick', 'ex-name', 'ex-value', 'ex-trend', 'ex-seen', 'ex-count', 'ex-kind'];
+  ['', 'Topic', 'Last value', 'Trend', 'Last seen', 'Messages', 'Looks like'].forEach((h, i) => head.appendChild(el('th', { class: cols[i], text: h })));
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
@@ -299,13 +302,15 @@ function mountMqttExplorer(body: any, close: () => void, showing: () => boolean)
       footer.sync();
     };
 
-    const name = el('td', { style: { paddingLeft: `${6 + depth * 18}px`, whiteSpace: 'nowrap' } });
+    const name = el('td', { class: 'ex-name', style: { paddingLeft: `${6 + depth * 18}px`, whiteSpace: 'nowrap' } });
+    name.style.setProperty?.('--depth', String(depth));
     if (branch) {
       const toggle = el('span', { text: isOpen ? '▾' : '▸', style: { cursor: 'pointer', marginRight: '6px', color: 'var(--muted)' } });
       toggle.onclick = () => { decided.add(n.path); open.has(n.path) ? open.delete(n.path) : open.add(n.path); draw(); };
       name.appendChild(toggle);
     }
-    const code = el('code', { text: label });
+    // A topic breaks at its own separators when it has to wrap, not mid-word.
+    const code = el('code', {}, ...String(label).split(/(?<=[/_])/).flatMap((part, i) => i ? [el('wbr'), part] : [part]));
     if (branch) {
       code.style.cursor = 'pointer';
       code.onclick = () => { decided.add(n.path); open.has(n.path) ? open.delete(n.path) : open.add(n.path); draw(); };
@@ -322,7 +327,7 @@ function mountMqttExplorer(body: any, close: () => void, showing: () => boolean)
     }
 
     const t = n.row;
-    const value = el('td', { class: 'num', text: t ? (t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48)) : '' });
+    const value = el('td', { class: 'num ex-value', text: t ? (t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48)) : '' });
     // A truncated line of JSON tells you nothing, and there is nowhere else to read it.
     if (t && (t.payload || t.value != null)) {
       value.title = t.payload || '';
@@ -331,22 +336,22 @@ function mountMqttExplorer(body: any, close: () => void, showing: () => boolean)
       // What it last published, in full — not the 48 characters the cell has room for.
       value.append(' ', copyButton('Copy the last value', 'value', () => t.payload || String(t.value ?? '')));
     }
-    const trend = el('td', { style: { width: '140px' } });
+    const trend = el('td', { class: 'ex-trend', style: { width: '140px' } });
     if (t && Array.isArray(t.trend) && t.trend.length > 1)
       trend.appendChild(sparkline({ values: t.trend, color: '#4f8ff7', units: t.unit || '', width: 132, height: 22, fromZero: false }));
     // A branch reports its freshest topic and the messages under it.
     const newest = topics.reduce((m: string, x: any) => (x.seenUtc && x.seenUtc > m ? x.seenUtc : m), '');
-    const seen = el('td', { class: 'desc', style: { whiteSpace: 'nowrap', margin: '0' }, text: newest ? seenAgo(newest) : '' });
+    const seen = el('td', { class: 'desc ex-seen', style: { whiteSpace: 'nowrap', margin: '0' }, text: newest ? seenAgo(newest) : '' });
     if (newest) { seen.title = new Date(newest).toLocaleString(); ages.push({ cell: seen, at: newest }); }
     const count = topics.reduce((n: number, x: any) => n + (Number(x.messages) || 0), 0);
     tbody.appendChild(el('tr', {},
-      el('td', {}, box),
+      el('td', { class: 'ex-pick' }, box),
       name,
       value,
       trend,
       seen,
-      el('td', { class: 'num', text: count ? formatNum(count) : '' }),
-      el('td', { text: t ? (t.isJson ? `JSON · ${fieldNames(t.fields).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—')) : '' })));
+      el('td', { class: 'num ex-count', text: count ? formatNum(count) : '' }),
+      el('td', { class: 'ex-kind', text: t ? (t.isJson ? `JSON · ${fieldNames(t.fields).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—')) : '' })));
     if (t && opened.has(t.topic)) tbody.appendChild(payloadRow(t));
 
     if (branch && isOpen) [...n.children.values()].sort(byName).forEach(c => drawBranch(c, depth + 1, searching));

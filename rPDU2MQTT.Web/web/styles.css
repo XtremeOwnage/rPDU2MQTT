@@ -69,7 +69,7 @@
     --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px; --sp-7:48px;
     --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;
-    --appbar-h:56px;
+    --tabbar-h:58px; --appbar-h:56px;
     /* Save bar height, set by main.ts. */
     --savebar-h:96px;
     --nav-w:236px;
@@ -168,7 +168,7 @@
 
   .appbar-status { margin-left:auto; display:flex; gap:var(--sp-2); align-items:center; font-size:12px; }
   .appbar-user { color:var(--faint); max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .appbar-logout { color:var(--accent); text-decoration:none; }
+  .appbar-logout { color:var(--accent); text-decoration:none; white-space:nowrap; }
   .appbar-logout:hover { text-decoration:underline; }
 
   /* Pills: the compact status readouts in the app bar. */
@@ -186,7 +186,7 @@
   .pill.busy { opacity:.6; cursor:default; }
 
   .icon-btn {
-    display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; padding:0;
+    display:inline-flex; flex:none; align-items:center; justify-content:center; width:30px; height:30px; padding:0;
     font:inherit; font-size:14px; color:var(--muted); background:transparent; border:1px solid transparent;
     border-radius:var(--r-sm); cursor:pointer; transition:background .12s, color .12s, border-color .12s;
   }
@@ -246,7 +246,7 @@
   }
   nav a.nav-child { padding-left:26px; font-size:13px; }
   /* A leading glyph per page, set from script. */
-  .nav-icon { width:16px; flex:none; text-align:center; font-size:13px; opacity:.85; }
+  .nav-icon { width:16px; flex:none; text-align:center; font-size:13px; line-height:1; opacity:.85; font-variant-emoji:text; }
   .nav-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   /* Count of unsaved edits inside that page. */
   .nav-badge {
@@ -340,6 +340,8 @@
   input[type=checkbox].switch:focus-visible { outline:none; box-shadow:var(--ring); }
   input[type=checkbox].switch:disabled { opacity:.5; cursor:not-allowed; }
   .switch-wrap { display:inline-flex; align-items:center; gap:9px; }
+  /* A config field's label is a block; the switch's own label must stay a row, or its On/Off drops below it. */
+  .field > label.switch-wrap { display:inline-flex; margin-bottom:0; }
   .switch-state { font-size:12px; font-weight:600; color:var(--muted); user-select:none; }
 
   fieldset {
@@ -852,8 +854,9 @@
   }
   /* The node editor: a readable column width. */
   .sheet-panel.node-sheet { width:min(94vw, 1320px); }
-  /* Header and footer pinned to the panel's edges while its body scrolls between them. */
-  .sheet-head {
+  /* Header and footer pinned to the panel's edges while its body scrolls between them. Scoped to the panel:
+     `--sheet-pad` exists only there, and anywhere else this padding is invalid and falls back to none. */
+  .sheet-panel .sheet-head {
     position:sticky; top:calc(-1 * var(--sheet-pad)); z-index:3;
     display:flex; align-items:center; justify-content:space-between; gap:12px;
     margin:calc(-1 * var(--sheet-pad)) calc(-1 * var(--sheet-pad)) 10px; padding:12px var(--sheet-pad) 10px;
@@ -954,6 +957,8 @@
   /* The MQTT explorer's table too. */
   .explorer-scroll { overflow-x:auto; }
   .explorer-scroll table.ld th { position:static; }
+  /* Set per row by the page: how deep in the tree the topic is. */
+  .explorer-table td.ex-name { --depth: 0; }
 
 
   .cmd-item {
@@ -1020,16 +1025,48 @@
     .appbar-user, .brand-tag { display:none; }
   }
 
+  /* The phone's tab bar: the pages read most, and the drawer for the rest. */
+  .tabbar { display:none; }
+
   /* Phone app bar: everything but the brand gives way. */
   @media (max-width: 560px) {
     .brand { overflow:hidden; }
     .brand-name { overflow:hidden; text-overflow:ellipsis; min-width:0; }
+    .tabbar {
+      display:grid; grid-auto-flow:column; grid-auto-columns:1fr; position:fixed; left:0; right:0; bottom:0; z-index:45;
+      height:calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); padding-bottom:env(safe-area-inset-bottom, 0px);
+      background:var(--appbar-bg); backdrop-filter:blur(12px) saturate(1.4); border-top:1px solid var(--line);
+    }
+    .tab {
+      display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; min-width:0;
+      background:none; border:0; padding:0 2px; color:var(--faint); font:inherit; font-size:10.5px; font-weight:600; cursor:pointer;
+    }
+    .tab[hidden] { display:none; }
+    .tab-icon { font-size:18px; line-height:1; font-variant-emoji:text; }
+    .tab-label { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+    .tab, .tab:hover, .tab:active, .tab:focus { background:none; box-shadow:none; }
+    .tab.is-active { color:var(--accent); }
+    .tab.is-active .tab-icon { background:var(--accent-bg); border-radius:var(--r-pill); padding:3px 14px; margin:-3px 0; }
+    main { padding-bottom:calc(var(--tabbar-h) + var(--sp-6)); }
+    body:has(#savebar:not(.is-hidden)) main { padding-bottom:calc(var(--savebar-h) + var(--tabbar-h) + var(--sp-4)); }
+    .savebar { bottom:calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); }
+    .toasts { bottom:calc(var(--tabbar-h) + var(--sp-3)); }
+    /* The drawer stops at the tab bar, wider, with rows sized for a thumb. */
+    nav { width:min(320px, 88vw); height:auto; bottom:calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); padding-bottom:var(--sp-3); }
+    body.nav-open .nav-scrim { bottom:var(--tabbar-h); }
+    nav a { padding:11px 12px; font-size:15px; gap:12px; }
+    nav a.nav-child { padding-left:30px; font-size:14.5px; }
+    .nav-icon { font-size:15px; width:18px; }
+    .nav-group { padding:14px 12px 8px; font-size:11px; }
+    .nav-group::after { font-size:12px; }
     /* Hide the build string on a phone. */
     .appbar-status .pill-mono { display:none; }
     .appbar-status { gap:var(--sp-1); }
     /* Connection pills keep their dot and drop the word. */
     .appbar-status #st-live, .appbar-status #st-mqtt { font-size:0; padding:4px 6px; gap:0; }
     .appbar-status #st-live .dot, .appbar-status #st-mqtt .dot { margin:0; }
+    /* "Up to date" can wait for a wider screen; an available update still shows. */
+    .appbar-status #st-update.good { display:none; }
 
     /* Dialogs sit at the top and take the full width. */
     .overlay, .sheet-backdrop { padding:var(--sp-2); align-items:flex-start; }
@@ -1044,7 +1081,7 @@
     .node-sheet .ne-more .node-editor-fields { padding:12px 0 14px; }
     .node-sheet .ne-binding { padding:10px; }
     /* The source on a line of its own; the small settings share the next as an even grid. */
-    .node-sheet .ne-bind-body { display:grid; grid-template-columns:repeat(auto-fill, minmax(66px, 1fr)); gap:8px; }
+    .node-sheet .ne-bind-body { display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:8px; }
     .node-sheet .ne-bind-body > .ne-grow { grid-column:1 / -1; }
     .node-sheet .ne-bind-body select, .node-sheet .ne-bind-body input.ne-narrow { width:100%; min-width:0; }
     .node-sheet .ne-check { font-size:11.5px; }
@@ -1052,7 +1089,12 @@
     .ne-section { padding:10px; }
     .ne-slot.ne-grow { flex-basis:100%; }
     .node-editor-fields > .ne-wide { grid-column:auto; }
-    .ne-bind-head { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr) auto auto; }
+    /* Metric, source and remove on one line; the live reading under them, where it has the room to be read. */
+    .ne-bind-head { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr) auto; grid-template-areas:'metric type rm' 'live live live'; row-gap:4px; }
+    .ne-bind-head .ne-metric { grid-area:metric; }
+    .ne-bind-head .ne-type { grid-area:type; }
+    .ne-bind-head .ne-live { grid-area:live; }
+    .ne-bind-head .ne-remove { grid-area:rm; }
     .ne-bind-head select { width:100%; min-width:0; }
     .ne-wire { grid-template-columns:1fr; gap:6px; }
     .ne-wire-add { width:100%; }
@@ -1452,13 +1494,30 @@
 .ps-field { margin: 0 0 var(--sp-3); }
 .ps-label { display: block; font-weight: 600; margin-bottom: 2px; }
 @media (max-width: 560px) {
-  /* One column in slot order: a row per breaker, so the panel's own row heights no longer apply. */
-  .ps-grid { grid-template-columns: auto 1fr; gap: 6px 8px; grid-template-rows: none !important; grid-auto-rows: auto; }
-  /* The placement is inline on each cell, so the phone layout has to outrank it. */
-  .ps-cell { grid-column: 2 !important; grid-row: auto !important; }
-  .ps-nums { grid-column: 1 !important; grid-row: auto !important; flex-direction: row; gap: 3px; }
-  .ps-bus { display: none; }
-  .ps-cell.is-left .ps-half { flex-direction: row; }
+  /* Still the panel: two columns either side of the bus, as it is on the wall, so a slot here is the slot
+     in front of you. What gives way is the detail: each breaker is its name and its reading, and the wire,
+     rating and gauge are a tap away in its editor. */
+  .ps-panel { padding: 6px; }
+  .ps-grid { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto; gap: 4px 6px; --ps-row: 44px; }
+  .ps-bus { width: 6px; top: 6px; bottom: 6px; }
+  .ps-nums { font-size: 9.5px; min-width: 1.1em; }
+  .ps-cell { padding: 3px 4px; min-height: 38px; gap: 0; }
+  .ps-half { flex-direction: column !important; align-items: stretch; gap: 0; min-height: 0; }
+  .ps-open { flex-wrap: nowrap; gap: 5px; padding: 0; min-height: 0; }
+  .ps-desc { min-width: 0; font-size: 12px; line-height: 1.25; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+  .ps-cell.is-left .ps-desc { text-align: right; }
+  .ps-meta, .ps-mark, .ps-num { display: none; }
+  .ps-power { font-size: 11px; padding: 0 1px; }
+  .ps-cell.is-left .ps-power { align-self: flex-start; }
+  .ps-cell.is-right .ps-power { align-self: flex-end; }
+  .ps-pole { width: 12px; min-height: 16px; }
+  .ps-throw { width: 8px; height: 8px; margin-top: 2px; font-size: 0; }
+  .ps-tie { width: 4px; }
+  .ps-cell.is-double .ps-desc { font-size: 13px; -webkit-line-clamp: 3; line-clamp: 3; }
+  .ps-cell.is-double .ps-power { font-size: 12px; }
+  .ps-cell.is-empty .ps-breaker { display: none; }
+  .ps-cell.is-empty .ps-desc { font-size: 11px; color: var(--faint); }
 }
 
 /* A panel's feeders, as chips beside the picker that adds one. */
@@ -1715,3 +1774,31 @@
 .emon-plan-step { color:var(--muted); }
 .emon-plan-step.calc { color:var(--accent-fg); background:var(--accent); }
 .emon-plan-arrow { color:var(--faint); }
+
+/* A table too wide for a phone stacks each row into a card, every cell headed by its column on its left. */
+@media (max-width: 560px) {
+  table.ld.ld-stack, .ld-stack tbody, .ld-stack tr { display:block; width:auto; }
+  .ld-stack thead { display:none; }
+  .ld-stack tr { padding:var(--sp-2) 0; border-bottom:1px solid var(--line-soft); }
+  .ld-stack tbody tr:last-child { border-bottom:none; }
+  /* The heading sits in the cell's left margin, so whatever the cell holds keeps its own layout. */
+  table.ld.ld-stack td {
+    display:block; position:relative; width:auto; max-width:none; min-height:20px; border-bottom:none;
+    padding:3px 13px 3px calc(34% + 10px); text-align:left; white-space:normal; overflow-wrap:anywhere;
+  }
+  table.ld.ld-stack td:not([data-label]), table.ld.ld-stack td[data-label=""] { padding-left:13px; }
+  .ld-stack td[data-label]:not([data-label=""])::before {
+    content:attr(data-label); position:absolute; left:13px; top:5px; width:34%;
+    font-size:10.5px; font-weight:600; letter-spacing:.05em; text-transform:uppercase; color:var(--faint);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  table.ld.ld-stack td:empty, table.ld.ld-stack td.ld-blank { display:none; }
+  /* A control sized for a table column is narrower here, beside its heading. */
+  table.ld.ld-stack td select, table.ld.ld-stack td input:not([type=checkbox]):not([type=radio]), table.ld.ld-stack td textarea { max-width:100%; min-width:0; }
+  /* A phone keeps the tree, its topics and their values; the rest is in the row a value opens. */
+  .explorer-table .ex-trend, .explorer-table .ex-seen, .explorer-table .ex-count, .explorer-table .ex-kind { display:none; }
+  .explorer-table th, .explorer-table td { padding:7px 6px; }
+  .explorer-table td.ex-pick, .explorer-table th.ex-pick { width:28px; padding-right:0; }
+  .explorer-table td.ex-name { padding-left:calc(6px + var(--depth, 0) * 12px) !important; white-space:normal !important; overflow-wrap:break-word; }
+  .explorer-table td.ex-value { max-width:38vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+}

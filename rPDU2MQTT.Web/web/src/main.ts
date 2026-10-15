@@ -8,6 +8,8 @@ import { subscribeLive, onRealtimeState, expectedRestart, restartFinished, expec
 import { initTheme } from './theme.js';
 import { initPalette } from './palette.js';
 import { loadPluginPages } from './plugin-pages.js';
+import { initStackTables } from './stack-tables.js';
+import { initPhoneNav, openNav } from './phone-nav.js';
 
 // Back/forward and hash edits: open the matching tab if it isn't already active.
 window.addEventListener('hashchange', () => {
@@ -384,6 +386,7 @@ function discardAll() {
 // --- Wiring ----------------------------------------------------------------------------------------
 
 function initShell() {
+  initStackTables();
   const on = (id: string, fn: any) => { const e: any = document.getElementById(id); if (e) e.onclick = fn; };
   on('st-update', checkUpdatesNow);
   on('btn-save', saveConfigChanges);
@@ -396,7 +399,9 @@ function initShell() {
 
   // Narrow screens: the sidebar is a drawer; a nav click closes it.
   const closeNav = () => document.body.classList.remove('nav-open');
-  on('nav-toggle', () => document.body.classList.toggle('nav-open'));
+  const toggleNav = () => document.body.classList.contains('nav-open') ? closeNav() : openNav();
+  on('nav-toggle', toggleNav);
+  initPhoneNav(toggleNav);
   on('nav-scrim', closeNav);
   document.getElementById('nav')?.addEventListener('click', (e: any) => { if (e.target?.closest?.('a')) closeNav(); });
 

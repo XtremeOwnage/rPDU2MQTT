@@ -6,7 +6,7 @@
 // Ctrl/⌘ + wheel, which a touch device has neither half of: there was no way to zoom at all, and one-finger
 // panning fought the container's own scrolling.
 //
-// This asserts what a phone needs: the chart opens fitted to the pane it is in, a two-finger pinch zooms it,
+// This asserts what a phone needs: the chart opens at a scale its labels can be read at, a two-finger pinch zooms it,
 // and the container leaves ordinary scrolling to the browser.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
@@ -70,13 +70,12 @@ if (drawn >= base)
   fail(`the chart opened at its full ${drawn}px inside a 100px pane — on a phone that is a sliver of it, `
      + 'and nothing about the diagram is legible');
 
-// Fitted to the pane, unless that would take it below the legibility floor — past a point, shrinking
-// further trades one unreadable diagram for another, and scrolling is the better answer. The stub reports
-// every pane as 100px, which is well past that floor; a real phone (~390px on a ~1200px diagram) fits
-// outright.
-const floor = 0.15 * base;
-if (drawn > Math.max(100, floor) + 1)
-  fail(`the chart opened at ${drawn}px in a 100px pane — neither fitted nor at the ${Math.round(floor)}px floor`);
+// Fitted to the pane, unless that would shrink its 11px labels below legible: fitting a ~1000px diagram into
+// a ~390px phone drew them at about 4px, which was reported as unreadable. Below that floor it opens at a
+// readable size and the reader pans; the stub's 100px pane is well past it.
+const floor = 0.8 * base;
+if (Math.abs(drawn - Math.max(100, floor)) > 1)
+  fail(`the chart opened at ${drawn}px in a 100px pane — neither fitted nor at the ${Math.round(floor)}px legibility floor`);
 
 // The container must leave ordinary scrolling to the browser: a phone pans by swiping, and taking that over
 // with our own handler is what made panning feel like it was fighting back.
@@ -108,6 +107,11 @@ if (!footer.textContent.toLowerCase().includes('pinch'))
 if (!query(footer, 'button', true).some(b => (b.textContent || '').includes('Fit')))
   fail('no Fit control — a reader who has zoomed in has no way back to the whole diagram');
 
-console.log(`mobile: the chart opens scaled to the pane (${base}px diagram drawn at ${drawn}px in a 100px pane), `
+// Fit shows the whole diagram, below the legibility floor if that is what it takes.
+query(footer, 'button', true).find(b => (b.textContent || '').includes('Fit')).click();
+const whole = Number(svg.attrs.width);
+if (whole > Math.max(100, 0.15 * base) + 1) fail(`Fit drew the chart at ${whole}px, not the whole of it in a 100px pane`);
+
+console.log(`mobile: the chart opens at a readable scale (${base}px diagram drawn at ${drawn}px in a 100px pane; Fit draws it at ${whole}px), `
   + `a two-finger pinch zooms it ${before}px -> ${after}px -> ${back}px, native panning is left to the browser, `
   + 'and Fit is one tap away');
