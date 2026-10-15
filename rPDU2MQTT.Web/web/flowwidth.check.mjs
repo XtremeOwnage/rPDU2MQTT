@@ -49,6 +49,8 @@ async function drawIn(paneW) {
     const proto = Object.getPrototypeOf(sandbox.document.createElement('div'));
     Object.defineProperty(proto, 'clientWidth', { configurable: true, get() { return paneW; } });
   }
+  // The stub's elements are plain objects, so the width lands on Object.prototype; a later run must not inherit it.
+  else delete Object.prototype.clientWidth;
   vm.createContext(sandbox);
   vm.runInContext(code, sandbox, { filename: 'app.js' });
   await new Promise(r => setTimeout(r, 50));
@@ -66,6 +68,8 @@ async function drawIn(paneW) {
     right: Math.max(...bars.map(b => b.x + b.w)),
     barW: bars[0].w,
     cols: [...new Set(bars.map(b => Math.round(b.x)))].sort((a, b) => a - b),
+    ids: bars.map(b => b.id),
+    sec,
   };
 }
 
@@ -99,13 +103,37 @@ for (const r of [narrow, wide]) {
 // --- A narrow pane is not stretched, and an unmeasurable one falls back --------------------------------
 // A pane below the base layout is not squeezed to fit — the zoom already handles that, and squeezing the
 // columns would put the labels back on top of each other.
-const tiny = await drawIn(400);
+const tiny = await drawIn(700);
 if (tiny.viewW !== 960)
-  fail(`a 400px pane produced a ${tiny.viewW}px layout — it should hold the 960 floor and scroll`);
+  fail(`a 700px pane produced a ${tiny.viewW}px layout — it should hold the 960 floor and scroll`);
+
+// --- A phone draws one level to its own width, and a tap goes down a level ------------------------------
+// The whole hierarchy at a phone's width is either unreadable or three screens of panning.
+const phone = await drawIn(400);
+if (phone.viewW > 400) fail(`a 400px phone pane produced a ${phone.viewW}px layout — it should fit the pane`);
+const same = (a, b) => [...a].sort().join() === [...b].sort().join();
+// grid feeds only the inverter, so the level starts at the inverter rather than at one bar feeding one bar.
+if (!same(phone.ids, ['inverter', 'main_panel', 'sub_panel']))
+  fail(`a phone drew ${phone.ids.join(', ')}, not the inverter and what it feeds`);
+const texts = query(phone.sec, 'text', true);
+const mainLabel = texts.find(t => String(t.textContent).startsWith('main_panel'));
+if (!mainLabel || !String(mainLabel.textContent).endsWith('›'))
+  fail(`main_panel has more beneath it but its label does not say so: "${mainLabel?.textContent}"`);
+if (texts.some(t => String(t.textContent).startsWith('sub_panel') && String(t.textContent).endsWith('›')))
+  fail('sub_panel feeds nothing but is marked as having more beneath it');
+mainLabel.dispatch('click', { preventDefault() {} });
+await new Promise(r => setTimeout(r, 300));
+const down = query(phone.sec, 'rect', true).filter(r => r.attrs && r.attrs['data-node']).map(r => r.attrs['data-node']);
+if (!same(down, ['main_panel', 'livingroom'])) fail(`tapping main_panel drew ${down.join(', ')}`);
+const trail = query(phone.sec, '.flow-trail', true)[0];
+if (!trail) fail('a phone drilled in has no way back up');
+const steps = query(trail, '.flow-trail-step', true).map(b => b.textContent);
+if (steps.join() !== 'Everything,grid,inverter')
+  fail(`the trail back up reads ${steps.join(' › ')}`);
 const unmeasured = await drawIn(null);
 if (unmeasured.viewW !== 960)
   fail(`without a measurable pane the diagram is ${unmeasured.viewW}px, not the 960 the other checks pin`);
 
 console.log(`flowwidth: the diagram lays out to its pane (${narrow.viewW}px at 1000, ${wide.viewW}px at 1600) `
   + 'by spreading the columns rather than resizing the bars, keeps the label gutter, is not stretched in a '
-  + 'pane narrower than its base, and falls back to 960 where the width cannot be measured');
+  + 'pane narrower than its base, draws one level at a time on a phone, and falls back to 960 where the width cannot be measured');

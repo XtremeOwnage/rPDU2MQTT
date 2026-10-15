@@ -5465,7 +5465,42 @@ function addFlowSection(nav     , sections     ) {
   const drill = (id               ) => {
     drillTo = id || null;
     refit = true;
+    // A tap is also a hover on a phone; the card would describe a node that is no longer drawn.
+    hideNodeCard();
     redrawBoth();
+  };
+
+  /// A phone has room for two columns with their labels, not the whole hierarchy. Draw one level: the
+  /// nodes at the top of what is drilled into and what they feed, skipping a chain of single feeds so the
+  /// top level is never one bar feeding one bar. What is cut off below a node is reached by tapping it, and
+  /// the node tapped is always drawn, so the reader sees where they landed.
+  const PHONE_W = 560;
+  const phoneLevel = (graph     , drilledInto         ) => {
+    const links = graph.links || [];
+    const outs = (id        ) => links.filter((l     ) => l.source === id);
+    let parents           = (graph.nodes || []).filter((n     ) => !links.some((l     ) => l.target === n.id)).map((n     ) => n.id);
+    while (!drilledInto && parents.length === 1 && outs(parents[0]).length === 1 && outs(outs(parents[0])[0].target).length) parents = [outs(parents[0])[0].target];
+    const top = new Set(parents);
+    const kept = new Set        (parents);
+    links.forEach((l     ) => { if (top.has(l.source)) kept.add(l.target); });
+    const deeper = new Set        ([...kept].filter(id => !top.has(id) && outs(id).length));
+    return {
+      graph: { ...graph, nodes: (graph.nodes || []).filter((n     ) => kept.has(n.id)), links: links.filter((l     ) => top.has(l.source) && kept.has(l.target)) },
+      deeper,
+    };
+  };
+
+  /// The way back out on a phone: every node from the top of the diagram down to the one drilled into.
+  const phoneTrail = (whole     , id        ) => {
+    const byId = new Map             ((whole.nodes || []).map((n     ) => [n.id, n]));
+    const trail        = [];
+    for (let at                     = id, seen = new Set        (); at && !seen.has(at); ) {
+      seen.add(at);
+      if (byId.has(at)) trail.unshift(byId.get(at));
+      // The feed carrying the most is the path the reader came down.
+      at = (whole.links || []).filter((l     ) => l.target === at).sort((a     , b     ) => (b.value || 0) - (a.value || 0))[0]?.source;
+    }
+    return trail;
   };
 
   /// A hover card with the node's other readings, fetched on hover and filled into the card when they arrive.
@@ -5509,6 +5544,9 @@ function addFlowSection(nav     , sections     ) {
     const whole = graph;
     if (drillTo && !(graph.nodes || []).some((n     ) => n.id === drillTo)) drillTo = null;
     graph = drilled(graph, drillTo);
+    const phone = modeSel.value === 'sankey' && paneW > 0 && paneW <= PHONE_W;
+    let deeper = new Set        ();
+    if (phone) ({ graph, deeper } = phoneLevel(graph, !!drillTo));
     // Fold collapsed groups into single nodes before laying out; the toggle strip re-draws on change.
     const visible = hideHiddenNodes((graph.nodes || []).slice(), (graph.links || []).slice());
     const collapsed = collapseGraph(visible.nodes, visible.links);
@@ -5592,15 +5630,16 @@ function addFlowSection(nav     , sections     ) {
       if (!refit) zooms.forEach((z, i) => { if (keptTreeViews[i]) z.setView(keptTreeViews[i]); });
       const zoomAll = (act                  ) => () => zooms.forEach(act);
       const zb = (label        , title        , act            ) => { const b = btn(label); b.title = title; b.onclick = act; return b; };
-      stage.appendChild(el('div', { class: 'flow-zoom' },
+      if (!phone) stage.appendChild(el('div', { class: 'flow-zoom' },
         zb('+', 'Zoom in', zoomAll(z => z.zoomBy(1.2))),
         zb('−', 'Zoom out', zoomAll(z => z.zoomBy(1 / 1.2))),
         zb('⤢', 'Fit to the page', zoomAll(z => z.fit()))));
       const hints = el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } });
       hints.appendChild(el('span', { text: sunburst ? 'Hover for details · click an arc to centre on it · click the middle to go back out.'
         : 'Hover for details · click a box to open it · click the top bar to go back out.' }));
-      hints.appendChild(el('span', { class: 'on-touch', text: 'Swipe to pan · pinch to zoom.' }));
-      hints.appendChild(el('span', { class: 'on-mouse', text: 'Drag to pan · Ctrl/⌘ + scroll to zoom.' }));
+      if (phone) hints.appendChild(el('span', { text: 'Tap a name marked › to see what it feeds.' }));
+    else hints.appendChild(el('span', { class: 'on-touch', text: 'Swipe to pan · pinch to zoom.' }));
+      if (!phone) hints.appendChild(el('span', { class: 'on-mouse', text: 'Drag to pan · Ctrl/⌘ + scroll to zoom.' }));
       wrap.appendChild(hints);
       zoom = null;
       refit = false;
@@ -5658,7 +5697,8 @@ function addFlowSection(nav     , sections     ) {
     // which is not more information, only bigger. Laying out to the pane spreads the columns and leaves the
     // text where it is. Where the width cannot be measured (the DOM stub the checks run against) it falls
     // back to 960, so the geometry those checks pin is unchanged.
-    const W = Math.max(960, Math.min(paneW ? paneW - 8 : 960, 2400));
+    // A phone's level is laid out to the screen itself, so it is read without zooming or panning.
+    const W = phone ? Math.max(300, paneW - 8) : Math.max(960, Math.min(paneW ? paneW - 8 : 960, 2400));
     const shownIds = new Set        (nodes.map((n     ) => n.id));
     const outlined = (d     ) => !collapsedGroups.has(d.Id) && !foldedInto(d) && expandMode(d) === 'replace' && !shownIds.has(d.Id) && drawnMembers(d, shownIds).length > 0;
     const levels = (x     , seen             )         => Math.max(0, ...flowGroups()
@@ -5666,9 +5706,11 @@ function addFlowSection(nav     , sections     ) {
       .map((d     ) => 1 + levels(d, new Set([...seen, d.Id]))));
     const outlines = flowGroups().filter(outlined);
     const outlineTop = outlines.length ? 14 + 13 * Math.max(...outlines.map((g     ) => levels(g, new Set([g.Id])))) : 0;
-    const padTop = 22 + outlineTop, nodeW = 12, usableH = 520;
+    // A phone's level is short when there is little in it: one bar feeding one bar needs no full screen.
+    const padTop = 22 + outlineTop, nodeW = 12;
+    const usableH = phone ? Math.min(520, Math.max(160, ((graph.nodes || []).length - 1) * 110)) : 520;
     // Labels sit to the right of each node, so reserve a right gutter for them and only a small left pad.
-    const leftPad = 16, rightGutter = 232;
+    const leftPad = phone ? 8 : 16, rightGutter = phone ? Math.round(W * 0.48) : 232;
     // What the node has to be tall enough to carry: its own reading.
     const throughput = (id        ) => {
       let inSum = 0, outSum = 0;
@@ -6147,8 +6189,11 @@ function addFlowSection(nav     , sections     ) {
       };
       // An inferred figure is never dressed as a measured one.
       const inferredNode = n.derivation === 'inferred';
-      lab.textContent = unknownNode ? `${n.label} · no data`
-        : `${n.label} · ${formatMeasure(nodeValue(n.id), units)}${inferredNode ? ' · inferred' : ''}`;
+      // A phone's gutter holds about twenty characters; the full name is in the node's card.
+      const name = phone && String(n.label).length > 18 ? String(n.label).slice(0, 17).trimEnd() + '…' : n.label;
+      lab.textContent = unknownNode ? `${name} · no data`
+        : `${name} · ${formatMeasure(nodeValue(n.id), units)}${inferredNode ? ' · inferred' : ''}`;
+      if (deeper.has(n.id)) lab.textContent += ' ›';
       if (unknownNode) {
         lab.setAttribute('fill', 'var(--muted)');
         lab.setAttribute('font-style', 'italic');
@@ -6243,7 +6288,8 @@ function addFlowSection(nav     , sections     ) {
       if (!(n.group || memberGroup[n.id] || groupById[n.id])) {
         [rect, lab].forEach((elm     ) => {
           elm.style.cursor = 'pointer';
-          elm.addEventListener('click', (e     ) => nodeMenu(e, n));
+          // On a phone, a node with more beneath it opens that; long-press still brings up the menu.
+          elm.addEventListener('click', (e     ) => deeper.has(n.id) ? drill(n.id) : nodeMenu(e, n));
         });
       }
 
@@ -6295,11 +6341,26 @@ function addFlowSection(nav     , sections     ) {
     const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg);
     stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
+    // The way back up on a phone, where the drill picker is out of the way and each tap goes one level down.
+    if (phone && drillTo) {
+      const trail = el('div', { class: 'flow-trail', role: 'navigation', 'aria-label': 'Where this is in the diagram' });
+      const step = (text        , id               ) => {
+        const b = el('button', { type: 'button', class: 'flow-trail-step', text })                     ;
+        b.onclick = () => drill(id);
+        trail.appendChild(b);
+      };
+      step('Everything', null);
+      const path = phoneTrail(whole, drillTo);
+      path.slice(0, -1).forEach((n     ) => step(n.label || n.id, n.id));
+      const here = path[path.length - 1];
+      trail.appendChild(el('span', { class: 'flow-trail-here', text: here?.label || drillTo }));
+      wrap.appendChild(trail);
+    }
     wrap.appendChild(stage);
 
     // On a phone, fitting the whole Sankey shrinks its 11px labels to unreadable; open at a scale that keeps
     // them near 9px and let the reader pan. Fit still shows the whole of it.
-    zoom = attachZoom(scroll, svg, W, totalH, true, undefined, 0.8);  // container is replaced on each draw(), so no leak.
+    zoom = attachZoom(scroll, svg, W, totalH, true, undefined, phone ? 0 : 0.8);  // container is replaced on each draw(), so no leak.
     // Back to where the reader was, at the zoom they set, rather than fitted again from scratch — unless the
     // diagram itself changed, when the old view is of something that is no longer drawn.
     if (keptView && !refit) zoom.setView(keptView);
@@ -6313,7 +6374,7 @@ function addFlowSection(nav     , sections     ) {
       b.onclick = act;
       return b;
     };
-    stage.appendChild(el('div', { class: 'flow-zoom' },
+    if (!phone) stage.appendChild(el('div', { class: 'flow-zoom' },
       zoomBtn('+', 'Zoom in', () => (zoom       ).zoomBy(1.2)),
       zoomBtn('−', 'Zoom out', () => (zoom       ).zoomBy(1 / 1.2)),
       zoomBtn('⤢', 'Fit the diagram to the page', () => (zoom       ).fit())));
@@ -6325,10 +6386,12 @@ function addFlowSection(nav     , sections     ) {
     fitBtn.onclick = () => (zoom       ).fit();
     fitBtn.style.padding = '1px 8px';
     fitBtn.style.fontSize = '11px';
-    hints.appendChild(fitBtn);
+    // A phone's level is laid out to the screen already.
+    if (!phone) hints.appendChild(fitBtn);
     // One line each, and the stylesheet shows the one this device can do: a mouse cannot pinch.
-    hints.appendChild(el('span', { class: 'on-touch', text: 'Swipe to pan · pinch to zoom.' }));
-    hints.appendChild(el('span', { class: 'on-mouse', text: 'Drag to pan · Ctrl/⌘ + scroll to zoom.' }));
+    if (phone) hints.appendChild(el('span', { text: 'Tap a name marked › to see what it feeds.' }));
+    else hints.appendChild(el('span', { class: 'on-touch', text: 'Swipe to pan · pinch to zoom.' }));
+    if (!phone) hints.appendChild(el('span', { class: 'on-mouse', text: 'Drag to pan · Ctrl/⌘ + scroll to zoom.' }));
     wrap.appendChild(hints);
     // The new content carries its own height now, so stop holding the old one.
     wrap.style.minHeight = '';

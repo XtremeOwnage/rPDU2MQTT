@@ -1149,6 +1149,11 @@
 
   /* The hierarchy diagram's own zoom controls, pinned over the pane they act on. */
   .flow-stage { position: relative; }
+  /* On a phone: the way back up from the level being shown. */
+  .flow-trail { display:flex; flex-wrap:wrap; align-items:center; gap:2px 0; margin:0 2px 6px; font-size:12.5px; }
+  .flow-trail-step { background:none; border:0; padding:4px 2px; color:var(--accent, var(--fg)); font:inherit; cursor:pointer; }
+  .flow-trail-step::after { content:'›'; margin-left:6px; margin-right:4px; color:var(--muted); }
+  .flow-trail-here { font-weight:650; padding:4px 2px; }
   .flow-zoom {
     position: absolute; top: 8px; right: 8px; z-index: 2;
     display: flex; flex-direction: column; gap: 4px;
