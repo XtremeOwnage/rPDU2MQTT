@@ -50,6 +50,8 @@ docker compose up -d
 
 Browse to `http://<host>:8080` and sign in.
 
+To install the GUI as an app on a phone or desktop, serve it over HTTPS (for example behind your ingress or reverse proxy) at the root path, then use the browser's **Install app** or **Add to Home Screen**.
+
 ## 3. MQTT
 
 **Integrations › MQTT**. Set credentials and press **Test MQTT connection**. **Save**.
