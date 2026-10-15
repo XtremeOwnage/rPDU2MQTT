@@ -39,23 +39,82 @@ export function periodWindow(key: PeriodKey, now: Date = new Date()): { day: str
   return { day: iso(now), days: 1 };
 }
 
+/// The period chosen in the header or on any page, shared so it follows the reader from view to view.
+/// 'live' is the current reading. Kept for the browser session, so a new visit opens live.
+export type SharedRange = PeriodKey | 'live';
+const RANGE_KEY = 'rpdu-range';
+let sharedRange: SharedRange = (() => {
+  try { const v = sessionStorage.getItem(RANGE_KEY); return PERIODS.some(([k]) => k === v) ? v as PeriodKey : 'live'; } catch { return 'live'; }
+})();
+/// Bumped on every change, so a page that was not showing can tell it has a change to catch up on.
+let rangeVersion = sharedRange === 'live' ? 0 : 1;
+
+export const currentRange = () => sharedRange;
+
+/// Sets the shared period and tells every page. `seen` is the follower that made the change, which already shows it.
+export function setRange(r: SharedRange, seen?: { v: number }) {
+  if (r === sharedRange) return;
+  sharedRange = r;
+  rangeVersion++;
+  if (seen) seen.v = rangeVersion;
+  try { sessionStorage.setItem(RANGE_KEY, r); } catch { /* this page only */ }
+  try { window.dispatchEvent?.(new CustomEvent('rpdu:range')); } catch { /* no CustomEvent: pages keep their own */ }
+}
+
+/// Applies the shared period to a page while it is showing: at once if it is, when it is next opened if not.
+export function followRange(sec: HTMLElement, apply: (r: SharedRange) => void): { v: number } {
+  const seen = { v: 0 };
+  const sync = () => {
+    if (seen.v === rangeVersion || !sec.classList.contains('active')) return;
+    seen.v = rangeVersion;
+    apply(sharedRange);
+  };
+  window.addEventListener?.('rpdu:range', sync);
+  window.addEventListener?.('rpdu:activate', sync);
+  return seen;
+}
+
 /// A row of one-click periods, with the one being shown marked.
 /// `before`: buttons for windows shorter than a day, placed first.
-export function periodRow(onPick: (key: PeriodKey) => void, before: HTMLElement[] = []): { row: HTMLElement; mark: (key: PeriodKey | null) => void } {
+/// `follow`: the page the row is on, so a period picked anywhere is picked here too; `live` returns it to now.
+export function periodRow(onPick: (key: PeriodKey) => void, before: HTMLElement[] = [],
+  follow?: { sec: HTMLElement, live?: () => void }): { row: HTMLElement; mark: (key: PeriodKey | null) => void; share: (r: SharedRange) => void } {
   const row = el('div', { class: 'ld-toolbar period-row', style: { gap: '6px', margin: '0 0 8px' } });
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Period:' }));
   before.forEach(b => row.appendChild(b));
+  const seen = follow
+    ? followRange(follow.sec, r => { if (r !== 'live') onPick(r); else follow.live?.(); })
+    : { v: 0 };
+  const share = (r: SharedRange) => { if (follow) setRange(r, seen); };
   const buttons = PERIODS.map(([key, label]) => {
     const b = btn(label);
     b.dataset.period = key;
-    b.onclick = () => onPick(key);
+    b.onclick = () => { share(key); onPick(key); };
     row.appendChild(b);
     return b;
   });
   return {
     row,
     mark: (key) => buttons.forEach(b => b.classList[b.dataset.period === key ? 'add' : 'remove']('primary')),
+    share,
   };
+}
+
+/// The header's period picker: sets the shared period, and shows the one in use.
+export function rangePicker(): HTMLElement {
+  const sel = el('select', { class: 'range-pick', title: 'The period every page shows. It follows you from page to page.', 'aria-label': 'Period' }) as HTMLSelectElement;
+  sel.appendChild(el('option', { value: 'live', text: 'Live' }));
+  PERIODS.forEach(([key, label]) => sel.appendChild(el('option', { value: key, text: label })));
+  const sync = () => {
+    sel.value = sharedRange;
+    // Only the present exists without a history backend.
+    sel.classList[((state.data && state.data.History) || {}).Enabled ? 'remove' : 'add']('is-hidden');
+  };
+  sel.onchange = () => setRange(sel.value as SharedRange);
+  window.addEventListener?.('rpdu:range', sync);
+  window.addEventListener?.('rpdu:activate', sync);
+  sync();
+  return sel;
 }
 
 /// The `at`/`span` part of a flow query, and the sentence that says what came back.
@@ -85,7 +144,7 @@ export type HistoryPick = 'day' | 'time' | 'span' | 'live';
 /// A "show this moment instead of now" control (#372). Returns the ISO instant to request, or '' for live.
 export function historyControl(onChange: (what: HistoryPick) => void): {
   row: HTMLElement, at: () => string, day: () => string, time: () => string, span: () => number,
-  setNote: (t: string) => void
+  setNote: (t: string) => void, set: (day: string, days: number) => void, goLive: () => void
 } {
   const row = el('div', { class: 'ld-toolbar history-bar', style: { flexWrap: 'wrap', gap: '8px', margin: '0 0 8px' } });
   // Separate date and time inputs, not a datetime-local: that control reports '' until both halves are filled.
@@ -158,6 +217,8 @@ export function historyControl(onChange: (what: HistoryPick) => void): {
   window.addEventListener?.('rpdu:activate', syncEnabled);
   return {
     row,
+    /// Back to the current reading, as the Live button does.
+    goLive: () => live.onclick!({} as any),
     /// Show a period: the day it ends on, and how many days it covers. A span the fixed list does not offer
     /// (this month is however many days into the month it is) is added to it, so the control still reads as
     /// one setting rather than going blank.

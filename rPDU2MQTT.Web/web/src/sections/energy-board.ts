@@ -29,6 +29,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   let hadDay = false;
   const hist = historyControl((what: any) => {
     periods.mark(null);
+    if (what === 'live') periods.share('live');
     const leftLive = what === 'day' && !hadDay && !!hist.day();
     hadDay = !!hist.day();
     if ((leftLive && !hist.time() && showSel.value === 'realpower') || (what === 'span' && hist.span() > 1))
@@ -42,7 +43,7 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
     periods.mark(key);
     hadDay = true;
     load();
-  });
+  }, [], { sec, live: () => { if (hist.day()) hist.goLive(); } });
   const historyPanel = el('div', { class: 'energy-history' }, periods.row, hist.row);
   sec.appendChild(historyPanel);
   let historyOpen = false;

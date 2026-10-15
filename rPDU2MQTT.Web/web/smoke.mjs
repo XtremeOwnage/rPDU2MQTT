@@ -114,6 +114,11 @@ if (linkText.includes('EnergyFlow')) fail('EnergyFlow should be hidden from the 
 
 if (!query(getEl('sections'), '.section', true).length) fail('no sections were rendered');
 
+// The Overview opens with a large button for each page most visits are for.
+const jumps = query(getEl('sections'), '.ov-jump', true).map(b => b.textContent);
+for (const want of ['Energy', 'Flow', 'Trends'])
+  if (!jumps.some(t => t.includes(want))) fail(`the Overview has no button for ${want} (got: ${jumps.join(', ')})`);
+
 // Settings saved but not running are announced in the header until a restart applies them — most of the
 // configuration is read once at startup, so a save changes the file and nothing else, and a single toast
 // as the only warning leaves the GUI showing values the bridge is not using.

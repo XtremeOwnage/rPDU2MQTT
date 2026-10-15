@@ -130,6 +130,7 @@ export function addFlowSection(nav: any, sections: any) {
   let hadDay = false;
   const hist = historyControl((what: any) => {
     periods.mark(null);
+    if (what === 'live') periods.share('live');
     // Only on the way out of live.
     const leftLive = what === 'day' && !hadDay && !!hist.day();
     hadDay = !!hist.day();
@@ -150,7 +151,7 @@ export function addFlowSection(nav: any, sections: any) {
     periods.mark(key);
     hadDay = true;
     load();
-  });
+  }, [], { sec, live: () => { if (hist.day()) hist.goLive(); } });
   // Behind buttons rather than over the diagram: the past, and how the diagram is drawn.
   const historyPanel = el('div', { class: 'flow-panel' }, periods.row, hist.row);
   const viewBody = el('div', { class: 'flow-view-body' });

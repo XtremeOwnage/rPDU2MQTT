@@ -1531,23 +1531,82 @@ function periodWindow(key           , now       = new Date())                   
   return { day: iso(now), days: 1 };
 }
 
+/// The period chosen in the header or on any page, shared so it follows the reader from view to view.
+/// 'live' is the current reading. Kept for the browser session, so a new visit opens live.
+
+const RANGE_KEY = 'rpdu-range';
+let sharedRange              = (() => {
+  try { const v = sessionStorage.getItem(RANGE_KEY); return PERIODS.some(([k]) => k === v) ? v              : 'live'; } catch { return 'live'; }
+})();
+/// Bumped on every change, so a page that was not showing can tell it has a change to catch up on.
+let rangeVersion = sharedRange === 'live' ? 0 : 1;
+
+const currentRange = () => sharedRange;
+
+/// Sets the shared period and tells every page. `seen` is the follower that made the change, which already shows it.
+function setRange(r             , seen                ) {
+  if (r === sharedRange) return;
+  sharedRange = r;
+  rangeVersion++;
+  if (seen) seen.v = rangeVersion;
+  try { sessionStorage.setItem(RANGE_KEY, r); } catch { /* this page only */ }
+  try { window.dispatchEvent?.(new CustomEvent('rpdu:range')); } catch { /* no CustomEvent: pages keep their own */ }
+}
+
+/// Applies the shared period to a page while it is showing: at once if it is, when it is next opened if not.
+function followRange(sec             , apply                          )                {
+  const seen = { v: 0 };
+  const sync = () => {
+    if (seen.v === rangeVersion || !sec.classList.contains('active')) return;
+    seen.v = rangeVersion;
+    apply(sharedRange);
+  };
+  window.addEventListener?.('rpdu:range', sync);
+  window.addEventListener?.('rpdu:activate', sync);
+  return seen;
+}
+
 /// A row of one-click periods, with the one being shown marked.
 /// `before`: buttons for windows shorter than a day, placed first.
-function periodRow(onPick                          , before                = [])                                                              {
+/// `follow`: the page the row is on, so a period picked anywhere is picked here too; `live` returns it to now.
+function periodRow(onPick                          , before                = [],
+  follow                                          )                                                                                               {
   const row = el('div', { class: 'ld-toolbar period-row', style: { gap: '6px', margin: '0 0 8px' } });
   row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Period:' }));
   before.forEach(b => row.appendChild(b));
+  const seen = follow
+    ? followRange(follow.sec, r => { if (r !== 'live') onPick(r); else follow.live?.(); })
+    : { v: 0 };
+  const share = (r             ) => { if (follow) setRange(r, seen); };
   const buttons = PERIODS.map(([key, label]) => {
     const b = btn(label);
     b.dataset.period = key;
-    b.onclick = () => onPick(key);
+    b.onclick = () => { share(key); onPick(key); };
     row.appendChild(b);
     return b;
   });
   return {
     row,
     mark: (key) => buttons.forEach(b => b.classList[b.dataset.period === key ? 'add' : 'remove']('primary')),
+    share,
   };
+}
+
+/// The header's period picker: sets the shared period, and shows the one in use.
+function rangePicker()              {
+  const sel = el('select', { class: 'range-pick', title: 'The period every page shows. It follows you from page to page.', 'aria-label': 'Period' })                     ;
+  sel.appendChild(el('option', { value: 'live', text: 'Live' }));
+  PERIODS.forEach(([key, label]) => sel.appendChild(el('option', { value: key, text: label })));
+  const sync = () => {
+    sel.value = sharedRange;
+    // Only the present exists without a history backend.
+    sel.classList[((state.data && state.data.History) || {}).Enabled ? 'remove' : 'add']('is-hidden');
+  };
+  sel.onchange = () => setRange(sel.value               );
+  window.addEventListener?.('rpdu:range', sync);
+  window.addEventListener?.('rpdu:activate', sync);
+  sync();
+  return sel;
 }
 
 /// The `at`/`span` part of a flow query, and the sentence that says what came back.
@@ -1647,6 +1706,8 @@ function historyControl(onChange                             )
   window.addEventListener?.('rpdu:activate', syncEnabled);
   return {
     row,
+    /// Back to the current reading, as the Live button does.
+    goLive: () => live.onclick ({}       ),
     /// Show a period: the day it ends on, and how many days it covers. A span the fixed list does not offer
     /// (this month is however many days into the month it is) is added to it, so the control still reads as
     /// one setting rather than going blank.
@@ -5395,6 +5456,7 @@ function addFlowSection(nav     , sections     ) {
   let hadDay = false;
   const hist = historyControl((what     ) => {
     periods.mark(null);
+    if (what === 'live') periods.share('live');
     // Only on the way out of live.
     const leftLive = what === 'day' && !hadDay && !!hist.day();
     hadDay = !!hist.day();
@@ -5415,7 +5477,7 @@ function addFlowSection(nav     , sections     ) {
     periods.mark(key);
     hadDay = true;
     load();
-  });
+  }, [], { sec, live: () => { if (hist.day()) hist.goLive(); } });
   // Behind buttons rather than over the diagram: the past, and how the diagram is drawn.
   const historyPanel = el('div', { class: 'flow-panel' }, periods.row, hist.row);
   const viewBody = el('div', { class: 'flow-view-body' });
@@ -9168,6 +9230,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
   let hadDay = false;
   const hist = historyControl((what     ) => {
     periods.mark(null);
+    if (what === 'live') periods.share('live');
     const leftLive = what === 'day' && !hadDay && !!hist.day();
     hadDay = !!hist.day();
     if ((leftLive && !hist.time() && showSel.value === 'realpower') || (what === 'span' && hist.span() > 1))
@@ -9181,7 +9244,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
     periods.mark(key);
     hadDay = true;
     load();
-  });
+  }, [], { sec, live: () => { if (hist.day()) hist.goLive(); } });
   const historyPanel = el('div', { class: 'energy-history' }, periods.row, hist.row);
   sec.appendChild(historyPanel);
   let historyOpen = false;
@@ -9576,6 +9639,17 @@ function addEnergyOverviewSection(nav     , sections     ) {
 
 // ── sections/overview.ts ────────────────────────────────────────
 
+/// The pages most visits are for, offered as large buttons at the top of the Overview.
+const JUMPS                             = [
+  ['Energy', '⚡', 'Totals, and where the power came from'],
+  ['Flow', '⇄', 'Follow power from source to circuit'],
+  ['Live Data', '∿', 'Every outlet and reading, right now'],
+  ['Trends', '▦', 'Charts over hours, days or months'],
+  ['Node Trends', '▥', 'Compare circuits over time'],
+  ['Floor Plans', '⌗', 'Power and climate, room by room'],
+  ['Panel Schedule', '🗂', 'Your breaker panel'],
+];
+
 function addOverviewSection(nav     , sections     ) {
   const link = navLink(nav, 'Overview', '⌂');
   const sec = el('div', { class: 'section' }); sections.appendChild(sec);
@@ -9595,16 +9669,47 @@ function addOverviewSection(nav     , sections     ) {
   const stamp = el('span', { class: 'ld-count' });
   bar.append(showSel, refresh, stamp); sec.appendChild(bar);
 
+  // The period shown: live, or one the reader picked here or anywhere else.
+  let range              = 'live';
+  const liveBtn = btn('Live');
+  liveBtn.title = 'Back to the current reading';
+  const periods = periodRow((key           ) => { range = key; markRange(); load(); }, [liveBtn],
+    { sec, live: () => { if (range !== 'live') { range = 'live'; markRange(); load(); } } });
+  liveBtn.onclick = () => { periods.share('live'); range = 'live'; markRange(); load(); };
+  const markRange = () => {
+    periods.mark(range === 'live' ? null : range);
+    liveBtn.classList[range === 'live' ? 'add' : 'remove']('primary');
+    // A past period is a question about energy; power is only known for now.
+    showSel.disabled = range !== 'live';
+    if (range !== 'live') showSel.value = 'energy_d';
+  };
+  const historyOn = () => !!((state.data && state.data.History) || {}).Enabled;
+  sec.appendChild(periods.row);
+
   const alerts = el('div'); sec.appendChild(alerts);
+
+  const jumps = el('div', { class: 'ov-jumps' }); sec.appendChild(jumps);
+  const drawJumps = () => {
+    jumps.innerHTML = '';
+    for (const [label, icon, sub] of JUMPS) {
+      const target = ([...document.querySelectorAll('nav a')]         ).find(a => a.dataset?.label === label);
+      if (!target) continue;
+      const b = el('button', { class: 'ov-jump', type: 'button', title: `Open ${label}` },
+        el('span', { class: 'ov-jump-icon', text: icon, 'aria-hidden': 'true' }),
+        el('span', { class: 'ov-jump-text' }, el('span', { class: 'ov-jump-label', text: label }), el('span', { class: 'ov-jump-sub', text: sub })));
+      b.onclick = () => target.click();
+      jumps.appendChild(b);
+    }
+  };
 
   const now = el('div', { class: 'ov-now' }); sec.appendChild(now);
   const flowWrap = el('div', { class: 'energy-flow ov-flow' }); now.appendChild(flowWrap);
   const battWrap = el('div', { class: 'ov-batt-side' }); now.appendChild(battWrap);
 
-  sec.appendChild(el('h3', { text: 'Today so far', class: 'ov-h3' }));
+  const todayHead = el('h3', { text: 'Today so far', class: 'ov-h3' }); sec.appendChild(todayHead);
   const todayRow = el('div', { class: 'ov-tiles' }); sec.appendChild(todayRow);
 
-  sec.appendChild(el('h3', { text: 'Last 24 hours', class: 'ov-h3' }));
+  const dayHead = el('h3', { text: 'Last 24 hours', class: 'ov-h3' }); sec.appendChild(dayHead);
   const dayRow = el('div', { class: 'ov-tiles' }); sec.appendChild(dayRow);
 
   const fmtW = (w               ) => w == null ? '—'
@@ -9763,7 +9868,7 @@ function addOverviewSection(nav     , sections     ) {
     dayRow.innerHTML = '';
     const body = lastDay;
     if (!body?.ok || !(body.series || []).length) {
-      dayRow.appendChild(el('div', { class: 'desc', text: 'No history for the last 24 hours yet.' }));
+      dayRow.appendChild(el('div', { class: 'desc', text: range === 'live' ? 'No history for the last 24 hours yet.' : `No history for ${rangeLabel().toLowerCase()}.` }));
       return;
     }
     const steps = ((body.series || [])[0]?.values || []).length;
@@ -9801,7 +9906,10 @@ function addOverviewSection(nav     , sections     ) {
       const values = kind === 'home' ? homeValues() : sumSeries(ofRole(kind));
       if (!values.length || !values.some(v => v != null)) return;
       const known = values.filter((v)              => typeof v === 'number');
-      const nowV = [...values].reverse().find((v)              => typeof v === 'number') ?? null;
+      // Now for the last 24 hours; over a past period the average says more than its last reading.
+      const nowV = range === 'live'
+        ? [...values].reverse().find((v)              => typeof v === 'number') ?? null
+        : known.length ? known.reduce((a, b) => a + b, 0) / known.length : null;
       const peak = known.length ? Math.max(...known) : null;
       const box = el('div', { class: 'ov-tile ov-strip ov-' + kind });
       box.append(
@@ -9812,17 +9920,39 @@ function addOverviewSection(nav     , sections     ) {
         sparkline({
           values, color: kind === 'home' ? 'var(--accent)' : (KIND_COLOR[kind] || 'var(--accent)'), units: body.units || 'W',
           width: 300, height: 72,
-          at: (i        ) => (body.at || [])[i] ? new Date(body.at[i]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          at: (i        ) => !(body.at || [])[i] ? ''
+            : range === 'live' || range === 'today' || range === 'yesterday'
+              ? new Date(body.at[i]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : new Date(body.at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
         }),
-        el('div', { class: 'ov-sub', text: known.length ? `${known.length} of ${values.length} readings` : 'no readings' }));
+        el('div', { class: 'ov-sub', text: !known.length ? 'no readings'
+          : `${range === 'live' ? '' : 'average · '}${known.length} of ${values.length} readings` }));
       dayRow.appendChild(box);
     };
     ([['solar', 'Solar', '☀'], ['grid', 'Grid', '⚡'], ['battery', 'Battery', '🔋'], ['home', 'Home', '⌂']]                              ).forEach(strip);
   };
 
+  const rangeLabel = () => (PERIODS.find(([k]) => k === range) || [, ''])[1]          ;
+  /// The picked period as the instants it runs between, ending no later than now.
+  const rangeWindow = () => {
+    const { day, days } = periodWindow(range             );
+    const end = new Date(`${day}T23:59:59`);
+    const start = new Date(`${day}T00:00:00`);
+    start.setDate(start.getDate() - (days - 1));
+    const now = new Date();
+    return { from: start, to: end > now ? now : end, days };
+  };
+
   const loadDay = async () => {
     try {
-      const r = await api('/api/flow/series?minutes=1440&step=900&metric=realpower');
+      let q = 'minutes=1440&step=900';
+      if (range !== 'live') {
+        const w = rangeWindow();
+        // About a hundred points across whatever the period is.
+        const step = Math.max(900, Math.round((w.to.getTime() - w.from.getTime()) / 1000 / 96 / 300) * 300);
+        q = `from=${encodeURIComponent(w.from.toISOString())}&to=${encodeURIComponent(w.to.toISOString())}&step=${step}`;
+      }
+      const r = await api(`/api/flow/series?${q}&metric=realpower`);
       lastDay = r.body;
     } catch { lastDay = null; }
     drawDay();
@@ -9876,6 +10006,7 @@ function addOverviewSection(nav     , sections     ) {
       };
     });
 
+    battWrap.hidden = range !== 'live';
     const socVals = battIds.map(id => live[`${id}|soc`]).filter((v)              => typeof v === 'number');
     const voltVals = battIds.map(id => live[`${id}|voltage`]).filter((v)              => typeof v === 'number');
     drawBattery(socVals.length ? Math.round(socVals.reduce((a, b) => a + b, 0) / socVals.length) : null,
@@ -9884,13 +10015,14 @@ function addOverviewSection(nav     , sections     ) {
 
     todayRow.innerHTML = '';
     if (!eNodes.length) {
-      todayRow.appendChild(el('div', { class: 'desc', text: 'No energy totals yet — history is off, or nothing has reported today.' }));
+      todayRow.appendChild(el('div', { class: 'desc', text: range === 'live' ? 'No energy totals yet — history is off, or nothing has reported today.'
+        : `No energy totals for ${rangeLabel().toLowerCase()}.` }));
       return;
     }
 
-    const note = originNote();
+    const note = range === 'live' ? originNote() : null;
     if (note) todayRow.appendChild(note);
-    if (solarIds.length) todayRow.appendChild(tile('solar', '☀', 'Solar produced', fmtKwh(eSolar), sinceLabel(), solarIds));
+    if (solarIds.length) todayRow.appendChild(tile('solar', '☀', 'Solar produced', fmtKwh(eSolar), range === 'live' ? sinceLabel() : rangeLabel().toLowerCase(), solarIds));
     if (gridIds.length) {
       const eGridNet = eGridOut == null || eGridIn == null ? null : eGridOut - eGridIn;
       const cols = el('div', { class: 'ov-cols' },
@@ -9913,9 +10045,23 @@ function addOverviewSection(nav     , sections     ) {
   let power      = null, energy      = null;
 
   const load = async () => {
+    // Without a history backend there is only now.
+    periods.row.classList[historyOn() ? 'remove' : 'add']('is-hidden');
+    if (!historyOn()) range = 'live';
+    markRange();
+    const past = range !== 'live';
+    todayHead.textContent = past ? rangeLabel() : 'Today so far';
+    dayHead.textContent = past ? `Power through ${rangeLabel().toLowerCase()}` : 'Last 24 hours';
+    drawJumps();
     stamp.textContent = 'loading…';
     try {
-      const [p, e] = await Promise.all([api('/api/flow?metric=realpower'), api('/api/flow?metric=energy_d')]);
+      let past = '';
+      if (range !== 'live') {
+        const w = rangeWindow();
+        past = `&at=${encodeURIComponent(w.to.toISOString())}${w.days > 1 ? '&span=' + w.days : ''}`;
+      }
+      // Power is only asked for now; a past period still needs the graph's roles, so it reads the energy graph for both.
+      const [p, e] = await Promise.all([api('/api/flow?metric=' + (past ? 'energy_d' : 'realpower') + past), api('/api/flow?metric=energy_d' + past)]);
       try { origin = (await api('/api/time')).body?.period ?? null; } catch { origin = null; }
       power = p.body; energy = e.body;
       const nodes = (power?.nodes || [])         ;
@@ -9954,9 +10100,10 @@ function addOverviewSection(nav     , sections     ) {
     try { localStorage.setItem('rpdu-overview-show', showSel.value); } catch { /* not remembered */ }
     load();
   };
-  liveWhileActive(sec, () => 'flow:realpower', () => load());
-  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 15000);
+  liveWhileActive(sec, () => 'flow:realpower', () => { if (range === 'live') load(); });
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && range === 'live') load(); }, 15000);
   link.onclick = () => { activate(link, sec); load(); };
+  range = currentRange();
   return { link, load };
 }
 
@@ -11284,7 +11431,7 @@ function trendsPage(nav     , sections     , spec            ) {
     periods.mark(key);
     markRecent();
     load();
-  }, recentButtons);
+  }, recentButtons, { sec });
   const markRecent = () => recentButtons.forEach((b, i) => b.classList[RECENT[i][0] === rangeSel.value ? 'add' : 'remove']('primary'));
   rangeSel.onchange = () => {
     if (rangeSel.value === 'custom') {
@@ -15486,6 +15633,7 @@ function initShell() {
   initTheme();
   initPalette();
   initLiveIndicator();
+  document.getElementById('st-range')?.appendChild(rangePicker());
 }
 
 initShell();

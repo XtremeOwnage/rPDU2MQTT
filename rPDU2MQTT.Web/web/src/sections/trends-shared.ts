@@ -281,7 +281,7 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     periods.mark(key);
     markRecent();
     load();
-  }, recentButtons);
+  }, recentButtons, { sec });
   const markRecent = () => recentButtons.forEach((b, i) => b.classList[RECENT[i][0] === rangeSel.value ? 'add' : 'remove']('primary'));
   rangeSel.onchange = () => {
     if (rangeSel.value === 'custom') {
