@@ -63,6 +63,14 @@ const phone = /@media \(max-width: *560px\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/.exec(
 if (!phone) fail('no phone breakpoint — the app bar has three groups and room for one and a half');
 if (!/\.brand-name\s*\{[^}]*text-overflow/.test(phone[1]))
   fail('the brand can still overflow its box on a phone instead of being clipped');
+// The tab bar is a phone's way round, hidden wider. It is not a <nav>: every nav rule (the drawer's
+// slide-off on a narrow screen among them) would apply to it, and it never showed.
+if (!/(^|\})\s*\.tabbar\s*\{\s*display:\s*none/.test(css.replace(/@media[^{]*\{(?:[^{}]|\{[^{}]*\})*\}/g, '')))
+  fail('the phone tab bar is not hidden on a wide screen');
+if (!/\.tabbar\s*\{[^}]*display:\s*grid[^}]*position:\s*fixed/.test(phone[1]))
+  fail('the phone tab bar is not shown on a phone');
+if (/el\('nav',\s*\{\s*class:\s*'tabbar'/.test(await readFile(new URL('./src/phone-nav.ts', import.meta.url), 'utf8')))
+  fail('the tab bar is a <nav>, so the drawer rules slide it off the screen');
 if (!/pill-mono\s*\{[^}]*display: *none/.test(phone[1]))
   fail('the build string is still asking for its full width on a phone');
 

@@ -69,7 +69,7 @@
     --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px; --sp-7:48px;
     --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;
-    --appbar-h:56px;
+    --tabbar-h:58px; --appbar-h:56px;
     /* Save bar height, set by main.ts. */
     --savebar-h:96px;
     --nav-w:236px;
@@ -1025,10 +1025,40 @@
     .appbar-user, .brand-tag { display:none; }
   }
 
+  /* The phone's tab bar: the pages read most, and the drawer for the rest. */
+  .tabbar { display:none; }
+
   /* Phone app bar: everything but the brand gives way. */
   @media (max-width: 560px) {
     .brand { overflow:hidden; }
     .brand-name { overflow:hidden; text-overflow:ellipsis; min-width:0; }
+    .tabbar {
+      display:grid; grid-auto-flow:column; grid-auto-columns:1fr; position:fixed; left:0; right:0; bottom:0; z-index:45;
+      height:calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); padding-bottom:env(safe-area-inset-bottom, 0px);
+      background:var(--appbar-bg); backdrop-filter:blur(12px) saturate(1.4); border-top:1px solid var(--line);
+    }
+    .tab {
+      display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; min-width:0;
+      background:none; border:0; padding:0 2px; color:var(--faint); font:inherit; font-size:10.5px; font-weight:600; cursor:pointer;
+    }
+    .tab[hidden] { display:none; }
+    .tab-icon { font-size:18px; line-height:1; font-variant-emoji:text; }
+    .tab-label { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+    .tab, .tab:hover, .tab:active, .tab:focus { background:none; box-shadow:none; }
+    .tab.is-active { color:var(--accent); }
+    .tab.is-active .tab-icon { background:var(--accent-bg); border-radius:var(--r-pill); padding:3px 14px; margin:-3px 0; }
+    main { padding-bottom:calc(var(--tabbar-h) + var(--sp-6)); }
+    body:has(#savebar:not(.is-hidden)) main { padding-bottom:calc(var(--savebar-h) + var(--tabbar-h) + var(--sp-4)); }
+    .savebar { bottom:calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); }
+    .toasts { bottom:calc(var(--tabbar-h) + var(--sp-3)); }
+    /* The drawer stops at the tab bar, wider, with rows sized for a thumb. */
+    nav { width:min(320px, 88vw); height:auto; bottom:calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); padding-bottom:var(--sp-3); }
+    body.nav-open .nav-scrim { bottom:var(--tabbar-h); }
+    nav a { padding:11px 12px; font-size:15px; gap:12px; }
+    nav a.nav-child { padding-left:30px; font-size:14.5px; }
+    .nav-icon { font-size:15px; width:18px; }
+    .nav-group { padding:14px 12px 8px; font-size:11px; }
+    .nav-group::after { font-size:12px; }
     /* Hide the build string on a phone. */
     .appbar-status .pill-mono { display:none; }
     .appbar-status { gap:var(--sp-1); }
