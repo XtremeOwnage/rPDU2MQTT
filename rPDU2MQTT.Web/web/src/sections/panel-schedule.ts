@@ -836,9 +836,6 @@ export function addPanelScheduleSection(nav: any, sections: any) {
           style: { gridColumn: left ? '1' : '4', gridRow: place },
         }, ...(cell.span === 2 ? [cell.slot, cell.slot + 2] : [cell.slot]).map(n => el('span', { text: String(n) })));
         stamped.setAttribute('aria-hidden', 'true');
-        // One column on a phone, read in slot order as the directory is numbered; each number before its slot.
-        stamped.style.setProperty?.('--ps-order', String(cell.slot * 2));
-        box.style.setProperty?.('--ps-order', String(cell.slot * 2 + 1));
         grid.appendChild(stamped);
         if (!cell.halves.length) {
           const blank = el('span', { class: 'ps-breaker is-empty' }, el('span', { class: 'ps-pole is-empty' }));

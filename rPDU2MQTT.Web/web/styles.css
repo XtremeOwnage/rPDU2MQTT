@@ -1157,11 +1157,6 @@
 
   /* The hierarchy diagram's own zoom controls, pinned over the pane they act on. */
   .flow-stage { position: relative; }
-  /* On a phone: the way back up from the level being shown. */
-  .flow-trail { display:flex; flex-wrap:wrap; align-items:center; gap:2px 0; margin:0 2px 6px; font-size:12.5px; }
-  .flow-trail-step { background:none; border:0; padding:4px 2px; color:var(--accent, var(--fg)); font:inherit; cursor:pointer; }
-  .flow-trail-step::after { content:'›'; margin-left:6px; margin-right:4px; color:var(--muted); }
-  .flow-trail-here { font-weight:650; padding:4px 2px; }
   .flow-zoom {
     position: absolute; top: 8px; right: 8px; z-index: 2;
     display: flex; flex-direction: column; gap: 4px;
@@ -1468,23 +1463,31 @@
 .ps-slots { max-width: 6em; }
 .ps-field { margin: 0 0 var(--sp-3); }
 .ps-label { display: block; font-weight: 600; margin-bottom: 2px; }
-/* Set per slot by the page; the phone layout reads it. */
-.ps-cell, .ps-nums { --ps-order: 0; }
 @media (max-width: 560px) {
-  /* One column in slot order: a row per breaker, so the panel's own row heights no longer apply. */
-  .ps-grid { grid-template-columns: auto 1fr; gap: 6px 8px; grid-template-rows: none !important; grid-auto-rows: auto; }
-  /* The placement is inline on each cell, so the phone layout has to outrank it. */
-  .ps-cell { grid-column: 2 !important; grid-row: auto !important; }
-  .ps-nums { grid-column: 1 !important; grid-row: auto !important; flex-direction: row; gap: 3px; }
-  .ps-bus { display: none; }
-  /* One column has no bus bar to face: every breaker reads the same way round. */
-  .ps-cell.is-left .ps-half, .ps-cell.is-left .ps-open { flex-direction: row; }
-  .ps-cell, .ps-nums { order: var(--ps-order, 0); }
-  /* An empty slot is a line, not a card: a half-empty panel is otherwise mostly scrolling past nothing. */
-  .ps-cell.is-empty { min-height: 0; padding: 2px var(--sp-2); }
-  .ps-cell.is-empty .ps-half, .ps-cell.is-empty .ps-open.is-empty { min-height: 26px; }
+  /* Still the panel: two columns either side of the bus, as it is on the wall, so a slot here is the slot
+     in front of you. What gives way is the detail: each breaker is its name and its reading, and the wire,
+     rating and gauge are a tap away in its editor. */
+  .ps-panel { padding: 6px; }
+  .ps-grid { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto; gap: 4px 6px; --ps-row: 44px; }
+  .ps-bus { width: 6px; top: 6px; bottom: 6px; }
+  .ps-nums { font-size: 9.5px; min-width: 1.1em; }
+  .ps-cell { padding: 3px 4px; min-height: 38px; gap: 0; }
+  .ps-half { flex-direction: column !important; align-items: stretch; gap: 0; min-height: 0; }
+  .ps-open { flex-wrap: nowrap; gap: 5px; padding: 0; min-height: 0; }
+  .ps-desc { min-width: 0; font-size: 12px; line-height: 1.25; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+  .ps-cell.is-left .ps-desc { text-align: right; }
+  .ps-meta, .ps-mark, .ps-num { display: none; }
+  .ps-power { font-size: 11px; padding: 0 1px; }
+  .ps-cell.is-left .ps-power { align-self: flex-start; }
+  .ps-cell.is-right .ps-power { align-self: flex-end; }
+  .ps-pole { width: 12px; min-height: 16px; }
+  .ps-throw { width: 8px; height: 8px; margin-top: 2px; font-size: 0; }
+  .ps-tie { width: 4px; }
+  .ps-cell.is-double .ps-desc { font-size: 13px; -webkit-line-clamp: 3; line-clamp: 3; }
+  .ps-cell.is-double .ps-power { font-size: 12px; }
   .ps-cell.is-empty .ps-breaker { display: none; }
-  .ps-cell.is-empty .ps-desc { color: var(--faint); font-size: 12px; }
+  .ps-cell.is-empty .ps-desc { font-size: 11px; color: var(--faint); }
 }
 
 /* A panel's feeders, as chips beside the picker that adds one. */
