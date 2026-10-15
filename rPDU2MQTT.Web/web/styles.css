@@ -175,8 +175,11 @@
   .range-sheet { display:flex; flex-direction:column; gap:var(--sp-2); padding:var(--sp-2); }
   .range-h { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin-top:var(--sp-2); }
   .range-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:var(--sp-2); }
-  .range-form { display:flex; flex-wrap:wrap; gap:var(--sp-3); }
+  .range-form { display:flex; flex-wrap:wrap; align-items:flex-end; gap:var(--sp-3); }
   .range-form label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  /* A data page that cannot show the past, while a past time is picked. */
+  .range-banner { display:flex; align-items:center; gap:var(--sp-3); margin:0 0 var(--sp-3); padding:10px 14px; border:1px solid var(--warn); border-radius:var(--r); background:var(--warn-bg); font-size:13px; }
+  .range-banner-text { flex:1; min-width:0; }
   /* A short form: the dialog fits it rather than standing at full height. */
   .sheet:has(.range-sheet) { align-self:flex-start; }
   .cmd-open-icon { font-size:14px; }

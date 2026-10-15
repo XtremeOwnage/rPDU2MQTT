@@ -4,7 +4,7 @@ import { drawEnergyFlow, type FlowArm } from '../energy-diagram.js';
 import { sparkline, KIND_COLOR } from '../charts.js';
 import { homeEnergy, selfSufficiencyPct, netSelfProducedPct, shareBand, sumKnown } from '../energy.js';
 import { requestFocus, state } from '../state.js';
-import { followRange, currentRange, rangeSpan, rangeLabel as labelOf, LIVE, type SharedRange } from '../history-control.js';
+import { followRange, currentRange, rangeSpan, rangeLabel, LIVE, type SharedRange } from '../history-control.js';
 
 /// The pages most visits are for, offered as large buttons at the top of the Overview.
 const JUMPS: [string, string, string][] = [
@@ -294,8 +294,8 @@ export function addOverviewSection(nav: any, sections: any) {
     ([['solar', 'Solar', '☀'], ['grid', 'Grid', '⚡'], ['battery', 'Battery', '🔋'], ['home', 'Home', '⌂']] as [string, string, string][]).forEach(strip);
   };
 
-  const rangeLabel = () => labelOf(range);
-  const rangePhrase = () => range.kind === 'period' ? rangeLabel().toLowerCase() : rangeLabel();
+  const shownLabel = () => rangeLabel(range);
+  const rangePhrase = () => range.kind === 'period' ? shownLabel().toLowerCase() : shownLabel();
   /// The shown moment as the instants it runs between, ending no later than now.
   const rangeWindow = () => {
     const { day, days, time } = rangeSpan(range)!;
@@ -412,7 +412,7 @@ export function addOverviewSection(nav: any, sections: any) {
     if (!historyOn()) range = LIVE;
     markRange();
     const past = !isLive();
-    todayHead.textContent = past ? rangeLabel() : 'Today so far';
+    todayHead.textContent = past ? shownLabel() : 'Today so far';
     dayHead.textContent = past ? `Power through ${rangePhrase()}` : 'Last 24 hours';
     drawJumps();
     stamp.textContent = 'loading…';

@@ -1577,6 +1577,8 @@ function setRange(r             ) {
 
 /// Applies the shared range to a page while it is showing: at once if it is, when it is next opened if not.
 function followRange(sec             , apply                          ) {
+  // Marks the page as one that shows the header's time, so it gets no "live only" banner.
+  sec.dataset.followsRange = '1';
   let seen = 0;
   const sync = () => {
     if (seen === rangeVersion || !sec.classList.contains('active')) return;
@@ -1586,6 +1588,31 @@ function followRange(sec             , apply                          ) {
   window.addEventListener?.('rpdu:range', sync);
   window.addEventListener?.('rpdu:activate', sync);
 }
+
+/// The groups whose pages show readings. A page there that does not follow the header's time says so while a
+/// past time is picked, rather than showing live readings under a header naming another day.
+const DATA_GROUPS = ['Dashboards', 'Tools'];
+function syncLiveOnlyBanner() {
+  document.querySelectorAll('.range-banner').forEach((b     ) => b.remove());
+  if (sharedRange.kind === 'live') return;
+  const link      = ([...document.querySelectorAll('nav a')]         ).find(a => a.classList.contains('active'));
+  const sec      = ([...document.querySelectorAll('.section')]         ).find(s => s.classList.contains('active'));
+  if (!link || !sec || sec.dataset?.followsRange) return;
+  const wrap = ([...document.querySelectorAll('.nav-group-wrap')]         ).find(w => w.contains(link));
+  const group = wrap?.querySelector('.nav-group')?.textContent || '';
+  if (!DATA_GROUPS.includes(group)) return;
+  const back = btn('Back to live');
+  back.onclick = () => setRange(LIVE);
+  const banner = el('div', { class: 'range-banner' },
+    el('span', { class: 'ov-alert-icon', text: '⚠', 'aria-hidden': 'true' }),
+    el('span', { class: 'range-banner-text', text: `This page shows live readings only. The time picked above (${rangeLabel(sharedRange)}) does not apply here.` }),
+    back);
+  // Under the page's title, which may sit in a header row of its own.
+  const head = ([...sec.children]         ).find(c => c.tagName === 'H2' || c.querySelector?.('h2'));
+  sec.insertBefore(banner, head ? head.nextSibling : sec.firstChild);
+}
+window.addEventListener?.('rpdu:range', syncLiveOnlyBanner);
+window.addEventListener?.('rpdu:activate', syncLiveOnlyBanner);
 
 /// The header's time control: "Back to live" while showing the past, and a button that opens the picker.
 function rangeBar()              {
@@ -1651,34 +1678,47 @@ function openRangePicker() {
   });
   body.appendChild(grid);
 
-  body.appendChild(el('div', { class: 'range-h', text: 'A specific day' }));
   const today = new Date().toLocaleDateString('en-CA');
   const cur = sharedRange.kind === 'day' ? sharedRange : null;
-  const day = el('input', { type: 'date', max: today, value: cur?.day || today })                    ;
-  const time = el('input', { type: 'time', value: cur?.time || '' })                    ;
-  const span = el('select')                     ;
-  [['1', 'that day'], ['7', '7 days to it'], ['14', '14 days to it'], ['30', '30 days to it'], ['90', '90 days to it']]
-    .forEach(([v, t]) => span.appendChild(el('option', { value: v, text: t })));
-  span.value = String(cur?.days || 1);
-  if (span.value !== String(cur?.days || 1)) { span.appendChild(el('option', { value: String(cur .days), text: `${cur .days} days to it` })); span.value = String(cur .days); }
-  // A time within the day says nothing about a run of days.
-  const syncTime = () => { time.disabled = span.value !== '1'; if (time.disabled) time.value = ''; };
-  span.onchange = syncTime;
-  syncTime();
-  body.appendChild(el('div', { class: 'range-form' },
-    el('label', {}, el('span', { text: 'Day' }), day),
-    el('label', {}, el('span', { text: 'Time (optional)' }), time),
-    el('label', {}, el('span', { text: 'Covering' }), span)));
-  body.appendChild(el('div', { class: 'desc', text: 'Leave the time blank for the whole day\u2019s totals. Every data page shows this until you go back to live.' }));
+  const capped = (d        ) => d > today ? today : d;
 
-  const apply = btn('Show this', 'primary');
-  apply.onclick = () => {
-    if (!day.value) return;
-    pick({ kind: 'day', day: day.value > today ? today : day.value, time: time.value, days: Math.max(1, Number(span.value) || 1) });
+  // Whole days: one day's totals, or several added up. A time of day says nothing about a run of days.
+  body.appendChild(el('div', { class: 'range-h', text: 'Whole days' }));
+  const span = el('select')                     ;
+  [['1', '1 day'], ['7', '7 days'], ['14', '14 days'], ['30', '30 days'], ['90', '90 days']]
+    .forEach(([v, t]) => span.appendChild(el('option', { value: v, text: t })));
+  const curDays = cur && !cur.time ? String(cur.days) : '1';
+  if (!Array.from(span.children).some((o     ) => o.value === curDays)) span.appendChild(el('option', { value: curDays, text: `${curDays} days` }));
+  span.value = curDays;
+  const endDay = el('input', { type: 'date', max: today, value: cur && !cur.time ? cur.day : today })                    ;
+  const showDays = btn('Show these days', 'primary');
+  showDays.onclick = () => {
+    if (!endDay.value) return;
+    pick({ kind: 'day', day: capped(endDay.value), time: '', days: Math.max(1, Number(span.value) || 1) });
   };
+  body.appendChild(el('div', { class: 'range-form range-days' },
+    el('label', {}, el('span', { text: 'How many' }), span),
+    el('label', {}, el('span', { text: 'Ending on' }), endDay),
+    showDays));
+
+  // One moment: the readings as they stood at that time.
+  body.appendChild(el('div', { class: 'range-h', text: 'One moment' }));
+  const atDay = el('input', { type: 'date', max: today, value: cur?.time ? cur.day : today })                    ;
+  const atTime = el('input', { type: 'time', value: cur?.time || '' })                    ;
+  const showMoment = btn('Show this moment', 'primary');
+  showMoment.onclick = () => {
+    if (!atDay.value || !atTime.value) { atTime.focus?.(); return; }
+    pick({ kind: 'day', day: capped(atDay.value), time: atTime.value, days: 1 });
+  };
+  body.appendChild(el('div', { class: 'range-form range-moment' },
+    el('label', {}, el('span', { text: 'Day' }), atDay),
+    el('label', {}, el('span', { text: 'Time' }), atTime),
+    showMoment));
+  body.appendChild(el('div', { class: 'desc', text: 'Every data page shows this until you go back to live.' }));
+
   const live = btn('Back to live');
   live.onclick = () => pick(LIVE);
-  openSheet({ title: 'Show a time in the past', body, footer: [live, apply] });
+  openSheet({ title: 'Show a time in the past', body, footer: [live] });
 }
 
 /// The `at`/`span` part of a flow query, and the sentence that says what came back.
@@ -9965,8 +10005,8 @@ function addOverviewSection(nav     , sections     ) {
     ([['solar', 'Solar', '☀'], ['grid', 'Grid', '⚡'], ['battery', 'Battery', '🔋'], ['home', 'Home', '⌂']]                              ).forEach(strip);
   };
 
-  const rangeLabel = () => labelOf(range);
-  const rangePhrase = () => range.kind === 'period' ? rangeLabel().toLowerCase() : rangeLabel();
+  const shownLabel = () => rangeLabel(range);
+  const rangePhrase = () => range.kind === 'period' ? shownLabel().toLowerCase() : shownLabel();
   /// The shown moment as the instants it runs between, ending no later than now.
   const rangeWindow = () => {
     const { day, days, time } = rangeSpan(range) ;
@@ -10083,7 +10123,7 @@ function addOverviewSection(nav     , sections     ) {
     if (!historyOn()) range = LIVE;
     markRange();
     const past = !isLive();
-    todayHead.textContent = past ? rangeLabel() : 'Today so far';
+    todayHead.textContent = past ? shownLabel() : 'Today so far';
     dayHead.textContent = past ? `Power through ${rangePhrase()}` : 'Last 24 hours';
     drawJumps();
     stamp.textContent = 'loading…';

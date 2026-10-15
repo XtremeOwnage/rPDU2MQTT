@@ -150,13 +150,13 @@ export function makeDom({ bodies }) {
       removeEventListener(type, fn) { this._on[type] = (this._on[type] || []).filter(f => f !== fn); },
       dispatch(type, ev) { (this._on[type] || []).slice().forEach(f => f(ev)); },
     },
-    // Window listeners are recorded; dispatchEvent delivers only the shared time's change, which pages follow.
+    // Window listeners are recorded, and dispatchEvent delivers to them as a browser does.
     window: {
       _on: {},
       addEventListener(type, fn) { (this._on[type] ||= []).push(fn); },
       removeEventListener(type, fn) { this._on[type] = (this._on[type] || []).filter(f => f !== fn); },
       dispatch(type, ev) { (this._on[type] || []).slice().forEach(f => f(ev)); },
-      dispatchEvent(ev) { if (ev?.type === 'rpdu:range') this.dispatch(ev.type, ev); return true; },
+      dispatchEvent(ev) { if (ev?.type) this.dispatch(ev.type, ev); return true; },
       prompt: () => null,
     },
     location: { hash: '', protocol: 'http:', hostname: 'localhost' },
@@ -181,7 +181,8 @@ export function makeDom({ bodies }) {
 }
 
 /// Picks the time every data page shows, the way a viewer does: the header's button, then the picker's
-/// period button, or its day, span and "Show this". `live` takes the header's "Back to live" instead.
+/// period button, its whole days (a count ending on a day), or one moment (a day and a time). `live` takes the
+/// header's "Back to live" instead.
 export async function pickRange(getEl, { period, day, days = '1', time = '', live } = {}) {
   const cls = (e) => String((e && (e.className || (e.attrs && e.attrs.class))) || '');
   const bar = getEl('st-range');
@@ -199,13 +200,13 @@ export async function pickRange(getEl, { period, day, days = '1', time = '', liv
       if (!b) throw new Error(`the picker has no ${period} button`);
       b.onclick();
     } else {
-      const dateIn = query(sheet, 'input', true).find(i => (i.attrs?.type || i.type) === 'date');
-      const timeIn = query(sheet, 'input', true).find(i => (i.attrs?.type || i.type) === 'time');
-      const span = query(sheet, 'select', true)[0];
-      dateIn.value = day;
-      span.value = String(days); span.onchange?.({});
-      timeIn.value = time;
-      query(sheet, 'button', true).find(b => b.textContent === 'Show this').onclick();
+      const cls2 = time ? 'range-moment' : 'range-days';
+      const form = query(sheet, 'div', true).find(d => cls(d).includes(cls2));
+      if (!form) throw new Error(`the picker has no ${cls2} section`);
+      query(form, 'input', true).find(i => (i.attrs?.type || i.type) === 'date').value = day;
+      if (time) query(form, 'input', true).find(i => (i.attrs?.type || i.type) === 'time').value = time;
+      else query(form, 'select', true)[0].value = String(days);
+      query(form, 'button', true)[0].onclick();
     }
   }
   await new Promise(r => setTimeout(r, 300));

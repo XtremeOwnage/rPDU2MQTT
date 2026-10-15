@@ -174,5 +174,19 @@ const pastTiles = tiles().map(t => t.textContent).join(' | ');
 if (!/2 kWh/.test(pastTiles)) fail(`the past view's grid net is wrong: ${pastTiles}`);
 if (/%/.test(pastTiles.split('GRID')[0] || '')) fail(`a state of charge was shown for a day history has none for: ${pastTiles}`);
 
+// Every data page follows the header's time: the Overview names the day it shows instead of "Today so far"…
+query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Overview').click();
+await new Promise(r => setTimeout(r, 300));
+const ovHeads = query(getEl('sections'), 'h3', true).filter(h => query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'))?.contains(h)).map(h => h.textContent);
+if (!ovHeads.some(h => /Aug 3, 2026/.test(h)) || ovHeads.includes('Today so far'))
+  fail(`the Overview does not follow the header's time: ${ovHeads.join(' | ')}`);
+// …and a data page that cannot show the past says so, rather than live readings under a header naming another day.
+query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Node Data').click();
+await new Promise(r => setTimeout(r, 100));
+const activeSec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
+if (!query(activeSec, 'div', true).some(d => cn(d).includes('range-banner'))) fail('a live-only data page carries no banner while a past time is picked');
+await pickRange(getEl, { live: true });
+if (query(getEl('sections'), 'div', true).some(d => cn(d).includes('range-banner'))) fail('the live-only banner stayed after going back to live');
+
 console.log('energy-show: the board switches between power and energy today; no dial against a power '
   + 'ceiling on kWh; the grid shows the signed net for the day; self-sufficiency covers that same day');
