@@ -10,7 +10,7 @@ import { initPalette } from './palette.js';
 import { loadPluginPages } from './plugin-pages.js';
 import { initStackTables } from './stack-tables.js';
 import { initPhoneNav, openNav } from './phone-nav.js';
-import { rangePicker } from './history-control.js';
+import { rangeBar, refreshRangeBar } from './history-control.js';
 
 // Back/forward and hash edits: open the matching tab if it isn't already active.
 window.addEventListener('hashchange', () => {
@@ -28,6 +28,7 @@ export async function load() {
   catch { state.derivations = []; }
   await loadPluginPages();
   build();
+  refreshRangeBar();
   setBaseline();
   refreshStatus();
 }
@@ -428,7 +429,7 @@ function initShell() {
   initTheme();
   initPalette();
   initLiveIndicator();
-  document.getElementById('st-range')?.appendChild(rangePicker());
+  document.getElementById('st-range')?.appendChild(rangeBar());
 }
 
 initShell();

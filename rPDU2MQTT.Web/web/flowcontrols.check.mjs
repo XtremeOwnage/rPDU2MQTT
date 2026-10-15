@@ -2,8 +2,8 @@
 //
 // A paragraph, a metric row, the period buttons, the date picker, the view switches, the group chips and the
 // tag chips stacked above the diagram and put it half way down the screen. Now one header line carries the
-// title, what is drawn and two buttons; the past and the view options open from those buttons, and are
-// closed by default.
+// title, what is drawn and the View button; the view options open from it and are closed by default. The past
+// is picked in the app bar, for every page, so the page carries no date controls of its own.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
@@ -48,13 +48,15 @@ if (query(sec, 'div', true).some(d => cn(d) === 'desc' && /Outlet.PDU is auto-de
 const head = query(sec, 'div', true).find(d => cn(d).includes('flow-head'));
 if (!head) fail('no header line');
 const buttons = query(head, 'button', true).map(b => b.textContent || '');
-for (const want of [/^History/, /^View/, /^Refresh$/])
+for (const want of [/^View/, /^Refresh$/])
   if (!buttons.some(b => want.test(b))) fail(`the header has no ${want} button: ${buttons.join(', ')}`);
 if (!query(head, 'select', true).length) fail('what is drawn is not chosen in the header');
+if (buttons.some(b => /^History/.test(b))) fail('the page has its own History button beside the app bar\'s time picker');
+if (query(sec, 'input', true).some(i => (i.attrs?.type || i.type) === 'date')) fail('the page has its own date picker');
 
-// Everything else behind the two buttons, closed until asked for.
+// The line naming a past moment, and the view options, both closed while live.
 const panels = query(sec, 'div', true).filter(d => cn(d).includes('flow-panel'));
-if (panels.length !== 2) fail(`expected the History and View panels, found ${panels.length}`);
+if (panels.length !== 2) fail(`expected the past-moment and View panels, found ${panels.length}`);
 if (panels.some(p => !p.hidden)) fail('a panel is open over the diagram before anyone asked for it');
 const view = panels[1];
 const titles = query(view, 'div', true).filter(d => cn(d).includes('flow-view-title')).map(d => d.textContent);
@@ -66,4 +68,4 @@ const viewBtn = query(head, 'button', true).find(b => /^View/.test(b.textContent
 viewBtn.onclick();
 if (view.hidden) fail('View did not open its panel');
 
-console.log('flowcontrols: the Flow page has one header line (title, metric, drill, History, View, Refresh); the past and the view options (display, groups, tags) sit in panels behind two buttons, closed by default');
+console.log('flowcontrols: the Flow page has one header line (title, metric, drill, View, Refresh) and no date controls of its own; the view options (display, groups, tags) sit behind View, closed by default');

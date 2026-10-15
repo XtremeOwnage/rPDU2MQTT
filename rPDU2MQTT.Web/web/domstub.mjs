@@ -150,13 +150,13 @@ export function makeDom({ bodies }) {
       removeEventListener(type, fn) { this._on[type] = (this._on[type] || []).filter(f => f !== fn); },
       dispatch(type, ev) { (this._on[type] || []).slice().forEach(f => f(ev)); },
     },
-    // Window listeners are recorded; dispatchEvent stays inert.
+    // Window listeners are recorded; dispatchEvent delivers only the shared time's change, which pages follow.
     window: {
       _on: {},
       addEventListener(type, fn) { (this._on[type] ||= []).push(fn); },
       removeEventListener(type, fn) { this._on[type] = (this._on[type] || []).filter(f => f !== fn); },
       dispatch(type, ev) { (this._on[type] || []).slice().forEach(f => f(ev)); },
-      dispatchEvent() { return true; },
+      dispatchEvent(ev) { if (ev?.type === 'rpdu:range') this.dispatch(ev.type, ev); return true; },
       prompt: () => null,
     },
     location: { hash: '', protocol: 'http:', hostname: 'localhost' },
@@ -178,4 +178,35 @@ export function makeDom({ bodies }) {
   sandbox.globalThis = sandbox;
 
   return { sandbox, root, byId, getEl, query, makeEl, storage };
+}
+
+/// Picks the time every data page shows, the way a viewer does: the header's button, then the picker's
+/// period button, or its day, span and "Show this". `live` takes the header's "Back to live" instead.
+export async function pickRange(getEl, { period, day, days = '1', time = '', live } = {}) {
+  const cls = (e) => String((e && (e.className || (e.attrs && e.attrs.class))) || '');
+  const bar = getEl('st-range');
+  if (live) {
+    const back = query(bar, 'button', true).find(b => cls(b).includes('range-live'));
+    if (!back) throw new Error('the header has no Back to live button');
+    back.onclick();
+  } else {
+    const open = query(bar, 'button', true).find(b => cls(b).includes('range-open'));
+    if (!open) throw new Error('the header has no time picker button');
+    open.onclick();
+    const sheet = getEl('overlay');
+    if (period) {
+      const b = query(sheet, 'button', true).find(x => x.textContent === period);
+      if (!b) throw new Error(`the picker has no ${period} button`);
+      b.onclick();
+    } else {
+      const dateIn = query(sheet, 'input', true).find(i => (i.attrs?.type || i.type) === 'date');
+      const timeIn = query(sheet, 'input', true).find(i => (i.attrs?.type || i.type) === 'time');
+      const span = query(sheet, 'select', true)[0];
+      dateIn.value = day;
+      span.value = String(days); span.onchange?.({});
+      timeIn.value = time;
+      query(sheet, 'button', true).find(b => b.textContent === 'Show this').onclick();
+    }
+  }
+  await new Promise(r => setTimeout(r, 300));
 }

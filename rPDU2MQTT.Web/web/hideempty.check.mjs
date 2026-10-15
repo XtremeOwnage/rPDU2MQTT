@@ -75,11 +75,15 @@ if (!/Sub Panel/.test(labels)) fail(`a node with no data was hidden as though it
 if (!/MPPT_1/.test(labels) || !/Solar/.test(labels))
   fail(`a zero chain feeding a live node was cut off: ${labels}`);
 
-// The one-click periods belong on every page with a time control, this one included.
+// The one-click periods are in the app bar's time picker, which every page follows.
 const periodNames = ['Today', 'Yesterday', 'This week', 'This month', 'This year'];
-const buttons = query(sec, 'button', true).map(b => b.textContent);
+const opener = query(getEl('st-range'), 'button', true).find(b => String(b.className || b.attrs?.class || '').includes('range-open'));
+if (!opener) fail('the app bar has no time picker');
+opener.onclick();
+const buttons = query(getEl('overlay'), 'button', true).map(b => b.textContent);
 const missing = periodNames.filter(n => !buttons.includes(n));
-if (missing.length) fail(`the Flow page has no ${missing.join(', ')} button — the date box is not a period`);
+if (missing.length) fail(`the time picker has no ${missing.join(', ')} button — a date box is not a period`);
+query(getEl('overlay'), 'button', true).find(b => b.title === 'Close')?.onclick();
 
 // Turning it off brings everything back.
 cb.checked = false;

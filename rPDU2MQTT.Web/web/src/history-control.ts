@@ -1,5 +1,5 @@
 // The "show a past moment" control, its query (`at`, `span`) and the sentence describing what came back.
-import { el, btn } from '../helpers.js';
+import { el, btn, openSheet, closeSheet } from '../helpers.js';
 import { state } from '../state.js';
 
 /// The periods people actually ask for. One click each, rather than a date, a time and a span to assemble.
@@ -39,82 +39,154 @@ export function periodWindow(key: PeriodKey, now: Date = new Date()): { day: str
   return { day: iso(now), days: 1 };
 }
 
-/// The period chosen in the header or on any page, shared so it follows the reader from view to view.
-/// 'live' is the current reading. Kept for the browser session, so a new visit opens live.
-export type SharedRange = PeriodKey | 'live';
+/// The time every data page shows, set from the header and followed by each page.
+/// A preset period, or a day (optionally a time on it) and how many days to it.
+export type SharedRange = { kind: 'live' } | { kind: 'period'; key: PeriodKey } | { kind: 'day'; day: string; time: string; days: number };
+export const LIVE: SharedRange = { kind: 'live' };
 const RANGE_KEY = 'rpdu-range';
+const sameRange = (a: SharedRange, b: SharedRange) => JSON.stringify(a) === JSON.stringify(b);
+// Kept for the browser session, so a new visit opens live.
 let sharedRange: SharedRange = (() => {
-  try { const v = sessionStorage.getItem(RANGE_KEY); return PERIODS.some(([k]) => k === v) ? v as PeriodKey : 'live'; } catch { return 'live'; }
+  try {
+    const r = JSON.parse(sessionStorage.getItem(RANGE_KEY) || 'null');
+    if (r?.kind === 'period' && PERIODS.some(([k]) => k === r.key)) return { kind: 'period', key: r.key };
+    if (r?.kind === 'day' && /^\d{4}-\d{2}-\d{2}$/.test(r.day)) return { kind: 'day', day: r.day, time: String(r.time || ''), days: Math.max(1, Number(r.days) || 1) };
+  } catch { /* none kept */ }
+  return LIVE;
 })();
 /// Bumped on every change, so a page that was not showing can tell it has a change to catch up on.
-let rangeVersion = sharedRange === 'live' ? 0 : 1;
+let rangeVersion = sharedRange.kind === 'live' ? 0 : 1;
 
 export const currentRange = () => sharedRange;
 
-/// Sets the shared period and tells every page. `seen` is the follower that made the change, which already shows it.
-export function setRange(r: SharedRange, seen?: { v: number }) {
-  if (r === sharedRange) return;
+/// The day a range ends on, the time on it ('' for the whole day) and the days it covers; null for live.
+export function rangeSpan(r: SharedRange): { day: string; time: string; days: number } | null {
+  if (r.kind === 'period') return { ...periodWindow(r.key), time: '' };
+  if (r.kind === 'day') return { day: r.day, time: r.time, days: r.days };
+  return null;
+}
+
+/// How the range reads on the header button.
+export function rangeLabel(r: SharedRange): string {
+  if (r.kind === 'live') return 'Live';
+  if (r.kind === 'period') return (PERIODS.find(([k]) => k === r.key) || [, ''])[1] as string;
+  const day = new Date(`${r.day}T12:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+  if (r.days > 1) return `${r.days} days to ${day}`;
+  return r.time ? `${day}, ${r.time.slice(0, 5)}` : day;
+}
+
+export function setRange(r: SharedRange) {
+  if (sameRange(r, sharedRange)) return;
   sharedRange = r;
   rangeVersion++;
-  if (seen) seen.v = rangeVersion;
-  try { sessionStorage.setItem(RANGE_KEY, r); } catch { /* this page only */ }
+  try { sessionStorage.setItem(RANGE_KEY, JSON.stringify(r)); } catch { /* this page only */ }
   try { window.dispatchEvent?.(new CustomEvent('rpdu:range')); } catch { /* no CustomEvent: pages keep their own */ }
 }
 
-/// Applies the shared period to a page while it is showing: at once if it is, when it is next opened if not.
-export function followRange(sec: HTMLElement, apply: (r: SharedRange) => void): { v: number } {
-  const seen = { v: 0 };
+/// Applies the shared range to a page while it is showing: at once if it is, when it is next opened if not.
+export function followRange(sec: HTMLElement, apply: (r: SharedRange) => void) {
+  let seen = 0;
   const sync = () => {
-    if (seen.v === rangeVersion || !sec.classList.contains('active')) return;
-    seen.v = rangeVersion;
+    if (seen === rangeVersion || !sec.classList.contains('active')) return;
+    seen = rangeVersion;
     apply(sharedRange);
   };
   window.addEventListener?.('rpdu:range', sync);
   window.addEventListener?.('rpdu:activate', sync);
-  return seen;
 }
 
-/// A row of one-click periods, with the one being shown marked.
-/// `before`: buttons for windows shorter than a day, placed first.
-/// `follow`: the page the row is on, so a period picked anywhere is picked here too; `live` returns it to now.
-export function periodRow(onPick: (key: PeriodKey) => void, before: HTMLElement[] = [],
-  follow?: { sec: HTMLElement, live?: () => void }): { row: HTMLElement; mark: (key: PeriodKey | null) => void; share: (r: SharedRange) => void } {
-  const row = el('div', { class: 'ld-toolbar period-row', style: { gap: '6px', margin: '0 0 8px' } });
-  row.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Period:' }));
-  before.forEach(b => row.appendChild(b));
-  const seen = follow
-    ? followRange(follow.sec, r => { if (r !== 'live') onPick(r); else follow.live?.(); })
-    : { v: 0 };
-  const share = (r: SharedRange) => { if (follow) setRange(r, seen); };
-  const buttons = PERIODS.map(([key, label]) => {
-    const b = btn(label);
-    b.dataset.period = key;
-    b.onclick = () => { share(key); onPick(key); };
-    row.appendChild(b);
-    return b;
-  });
-  return {
-    row,
-    mark: (key) => buttons.forEach(b => b.classList[b.dataset.period === key ? 'add' : 'remove']('primary')),
-    share,
-  };
-}
-
-/// The header's period picker: sets the shared period, and shows the one in use.
-export function rangePicker(): HTMLElement {
-  const sel = el('select', { class: 'range-pick', title: 'The period every page shows. It follows you from page to page.', 'aria-label': 'Period' }) as HTMLSelectElement;
-  sel.appendChild(el('option', { value: 'live', text: 'Live' }));
-  PERIODS.forEach(([key, label]) => sel.appendChild(el('option', { value: key, text: label })));
+/// The header's time control: "Back to live" while showing the past, and a button that opens the picker.
+export function rangeBar(): HTMLElement {
+  const wrap = el('span', { class: 'range-bar' });
+  const live = el('button', { class: 'range-live', type: 'button', title: 'Back to the current reading' },
+    el('span', { class: 'dot good' }), el('span', { text: 'Back to live' })) as HTMLButtonElement;
+  const open = el('button', { class: 'range-open', type: 'button', title: 'Show a time in the past on every page' }) as HTMLButtonElement;
+  // The arrows move by what is shown: a day at a time on a day, a week at a time on a week.
+  const prev = el('button', { class: 'range-step', type: 'button', text: '◀' }) as HTMLButtonElement;
+  const next = el('button', { class: 'range-step', type: 'button', text: '▶' }) as HTMLButtonElement;
+  prev.onclick = () => stepRange(-1);
+  next.onclick = () => stepRange(1);
+  live.onclick = () => setRange(LIVE);
+  open.onclick = () => openRangePicker();
+  wrap.append(live, prev, open, next);
   const sync = () => {
-    sel.value = sharedRange;
-    // Only the present exists without a history backend.
-    sel.classList[((state.data && state.data.History) || {}).Enabled ? 'remove' : 'add']('is-hidden');
+    const past = sharedRange.kind !== 'live';
+    live.hidden = prev.hidden = next.hidden = !past;
+    const span = rangeSpan(sharedRange);
+    const step = !span ? '' : span.days === 1 ? 'day' : span.days === 7 ? 'week' : `${span.days} days`;
+    prev.title = `Previous ${step}`;
+    next.title = `Next ${step}`;
+    next.disabled = !!span && span.day >= new Date().toLocaleDateString('en-CA');
+    open.textContent = '';
+    open.append(el('span', { class: 'range-icon', text: '🕘', 'aria-hidden': 'true' }), el('span', { text: past ? rangeLabel(sharedRange) : 'Historical' }));
+    open.classList[past ? 'add' : 'remove']('is-past');
+    // The past exists only with a history backend.
+    wrap.classList[((state.data && state.data.History) || {}).Enabled ? 'remove' : 'add']('is-hidden');
   };
-  sel.onchange = () => setRange(sel.value as SharedRange);
   window.addEventListener?.('rpdu:range', sync);
   window.addEventListener?.('rpdu:activate', sync);
+  syncRangeBar = sync;
   sync();
-  return sel;
+  return wrap;
+}
+let syncRangeBar = () => { };
+
+/// Moves the shown range back or forward by its own length, never past today: nothing is recorded there.
+function stepRange(dir: number) {
+  const span = rangeSpan(sharedRange);
+  if (!span) return;
+  const d = new Date(span.day + 'T12:00:00');   // midday, so a DST shift cannot land on the previous day
+  d.setDate(d.getDate() + dir * span.days);
+  const today = new Date().toLocaleDateString('en-CA');
+  const day = d.toLocaleDateString('en-CA');
+  setRange({ kind: 'day', day: day > today ? today : day, time: span.time, days: span.days });
+}
+/// Re-reads whether History is on, once the configuration has loaded.
+export const refreshRangeBar = () => syncRangeBar();
+
+/// The picker: one-click periods, or a day, a time on it and how many days to it.
+export function openRangePicker() {
+  const body = el('div', { class: 'range-sheet' });
+  const pick = (r: SharedRange) => { setRange(r); closeSheet(); };
+
+  body.appendChild(el('div', { class: 'range-h', text: 'Periods' }));
+  const grid = el('div', { class: 'range-grid' });
+  PERIODS.forEach(([key, label]) => {
+    const b = btn(label);
+    if (sharedRange.kind === 'period' && sharedRange.key === key) b.classList.add('primary');
+    b.onclick = () => pick({ kind: 'period', key });
+    grid.appendChild(b);
+  });
+  body.appendChild(grid);
+
+  body.appendChild(el('div', { class: 'range-h', text: 'A specific day' }));
+  const today = new Date().toLocaleDateString('en-CA');
+  const cur = sharedRange.kind === 'day' ? sharedRange : null;
+  const day = el('input', { type: 'date', max: today, value: cur?.day || today }) as HTMLInputElement;
+  const time = el('input', { type: 'time', value: cur?.time || '' }) as HTMLInputElement;
+  const span = el('select') as HTMLSelectElement;
+  [['1', 'that day'], ['7', '7 days to it'], ['14', '14 days to it'], ['30', '30 days to it'], ['90', '90 days to it']]
+    .forEach(([v, t]) => span.appendChild(el('option', { value: v, text: t })));
+  span.value = String(cur?.days || 1);
+  if (span.value !== String(cur?.days || 1)) { span.appendChild(el('option', { value: String(cur!.days), text: `${cur!.days} days to it` })); span.value = String(cur!.days); }
+  // A time within the day says nothing about a run of days.
+  const syncTime = () => { time.disabled = span.value !== '1'; if (time.disabled) time.value = ''; };
+  span.onchange = syncTime;
+  syncTime();
+  body.appendChild(el('div', { class: 'range-form' },
+    el('label', {}, el('span', { text: 'Day' }), day),
+    el('label', {}, el('span', { text: 'Time (optional)' }), time),
+    el('label', {}, el('span', { text: 'Covering' }), span)));
+  body.appendChild(el('div', { class: 'desc', text: 'Leave the time blank for the whole day\u2019s totals. Every data page shows this until you go back to live.' }));
+
+  const apply = btn('Show this', 'primary');
+  apply.onclick = () => {
+    if (!day.value) return;
+    pick({ kind: 'day', day: day.value > today ? today : day.value, time: time.value, days: Math.max(1, Number(span.value) || 1) });
+  };
+  const live = btn('Back to live');
+  live.onclick = () => pick(LIVE);
+  openSheet({ title: 'Show a time in the past', body, footer: [live, apply] });
 }
 
 /// The `at`/`span` part of a flow query, and the sentence that says what came back.
@@ -142,9 +214,11 @@ export function historyNote(body: any): string {
 export type HistoryPick = 'day' | 'time' | 'span' | 'live';
 
 /// A "show this moment instead of now" control (#372). Returns the ISO instant to request, or '' for live.
-export function historyControl(onChange: (what: HistoryPick) => void): {
+/// `headless` keeps the controls out of the page: only the LIVE/HISTORICAL badge and the note are shown, and the
+/// header's picker sets the moment through `set`.
+export function historyControl(onChange: (what: HistoryPick) => void, headless = false): {
   row: HTMLElement, at: () => string, day: () => string, time: () => string, span: () => number,
-  setNote: (t: string) => void, set: (day: string, days: number) => void, goLive: () => void
+  setNote: (t: string) => void, set: (day: string, days: number, time?: string) => void, goLive: () => void
 } {
   const row = el('div', { class: 'ld-toolbar history-bar', style: { flexWrap: 'wrap', gap: '8px', margin: '0 0 8px' } });
   // Separate date and time inputs, not a datetime-local: that control reports '' until both halves are filled.
@@ -210,7 +284,8 @@ export function historyControl(onChange: (what: HistoryPick) => void): {
       : 'Optional. Leave blank for the end of the day — the day’s complete totals.';
   };
 
-  row.append(badge, el('span', { class: 'desc', style: { margin: '0' }, text: 'At:' }), group,
+  if (headless) row.append(badge, note);
+  else row.append(badge, el('span', { class: 'desc', style: { margin: '0' }, text: 'At:' }), group,
     el('span', { class: 'desc', style: { margin: '0' }, text: 'covering' }), spanSel, live, note);
   syncSpan();
   syncEnabled();
@@ -222,9 +297,9 @@ export function historyControl(onChange: (what: HistoryPick) => void): {
     /// Show a period: the day it ends on, and how many days it covers. A span the fixed list does not offer
     /// (this month is however many days into the month it is) is added to it, so the control still reads as
     /// one setting rather than going blank.
-    set: (day: string, days: number) => {
+    set: (day: string, days: number, time = '') => {
       input.value = day;
-      timeIn.value = '';
+      timeIn.value = days > 1 ? '' : time;
       const want = String(Math.max(1, days));
       if (!Array.from(spanSel.children).some((o: any) => o.value === want))
         spanSel.appendChild(el('option', { value: want, text: `${want} days to it` }));

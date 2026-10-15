@@ -2,7 +2,7 @@
 // periods, and the dropdown offers hour windows short of 6 hours.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { makeDom, query } from './domstub.mjs';
+import { makeDom, query, pickRange } from './domstub.mjs';
 
 const code = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
 const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import.meta.url), 'utf8'))
@@ -54,49 +54,35 @@ for (const link of pages) {
   for (const want of ['last hour', 'last 3 hours', 'last 6 hours', 'last 12 hours', 'last 24 hours'])
     if (!offered.includes(want)) fail(`${name}: the Show dropdown has no "${want}": ${offered.join(', ')}`);
 
-  // One click each, beside the calendar periods.
-  for (const want of ['Last hour', 'Last 6 hours', 'Last 24 hours'])
-    if (!button(want)) fail(`${name}: no "${want}" button`);
-
-  // Last hour asks for the hour up to now, and says so in the dropdown and on the button.
-  asked.length = 0;
-  button('Last hour').onclick();
-  await wait(100);
-  if (!asked.length || !/minutes=60(&|$)/.test(asked.at(-1))) fail(`${name}: Last hour did not ask for the last 60 minutes: ${asked.at(-1)}`);
-  if (rangeSel.value !== 'minutes=60') fail(`${name}: the dropdown does not read "last hour" after the button: ${rangeSel.value}`);
-  if (!button('Last hour').classList.contains('primary')) fail(`${name}: the Last hour button is not marked as the one shown`);
-  if (button('Last 6 hours').classList.contains('primary')) fail(`${name}: Last 6 hours is marked while the last hour is shown`);
-
-  // Picking the same window from the dropdown marks its button too.
-  rangeSel.value = 'minutes=360';
-  rangeSel.onchange({});
-  await wait(100);
-  if (!button('Last 6 hours').classList.contains('primary') || button('Last hour').classList.contains('primary'))
-    fail(`${name}: picking last 6 hours in the dropdown did not move the mark to its button`);
-
-  // Periods, shortest first.
-  const order = query(query(sec, '.period-row'), 'button', true).map(b => b.textContent);
-  const want = ['Last hour', 'Last 6 hours', 'Last 24 hours', 'Today', 'Yesterday', 'This week', 'Last week', 'This month', 'Last month', 'This year'];
-  if (order.join() !== want.join()) fail(`${name}: periods are not shortest first: ${order.join(', ')}`);
+  // The calendar periods are the app bar's, followed here: no period buttons of the page's own.
+  for (const gone of ['Today', 'Yesterday', 'This week', 'Last hour'])
+    if (button(gone)) fail(`${name}: the page has its own "${gone}" button beside the app bar's time picker`);
 
   // Last week and last month end on their last day.
   for (const [label, days] of [['Last week', '7'], ['Last month', '(28|29|30|31)']]) {
     asked.length = 0;
-    button(label).onclick();
-    await wait(100);
+    await pickRange(getEl, { period: label });
+    // A counter's first day is read from the day before it, so one more day may be asked for.
     if (!new RegExp(`days=${days}&at=`).test(decodeURIComponent(asked.at(-1) || '').replace(/days=(\d+)/, (_, n) => `days=${Number(n) - 1}`))
         && !new RegExp(`days=${days}&at=`).test(decodeURIComponent(asked.at(-1) || '')))
       fail(`${name}: ${label} did not ask for the days ending on its last day: ${asked.at(-1)}`);
   }
+  // Back to live returns the chart to its own window.
+  asked.length = 0;
+  await pickRange(getEl, { live: true });
+  if (!/days=3[01](&|$)/.test(asked.at(-1) || '')) fail(`${name}: Back to live did not return to the page's own window: ${asked.at(-1)}`);
 
-  // A calendar period takes the mark away.
-  button('This week').onclick();
+  // The dropdown still looks closer while live: the last hour asks for the hour up to now.
+  asked.length = 0;
+  rangeSel.value = 'minutes=60';
+  rangeSel.onchange({});
   await wait(100);
-  if (button('Last 6 hours').classList.contains('primary')) fail(`${name}: This week left Last 6 hours marked`);
+  if (!asked.length || !/minutes=60(&|$)/.test(asked.at(-1))) fail(`${name}: last hour did not ask for the last 60 minutes: ${asked.at(-1)}`);
 
   // Zooming out past the whole timeline loads the next longer range, and the dropdown reads it back. Node Trends has the timeline.
   if (name !== 'Node Trends') continue;
-  button('Last hour').onclick();
+  rangeSel.value = 'minutes=60';
+  rangeSel.onchange({});
   await wait(100);
   const minus = () => query(sec, 'button', true).find(b => b.textContent === '−');
   if (!minus() || minus().disabled) fail(`${name}: − is disabled at the whole range, so the timeframe cannot zoom out`);
@@ -144,6 +130,6 @@ for (const link of pages) {
   if (!minus().disabled) fail(`${name}: − is offered at the longest range, where there is nothing longer to load`);
 }
 
-console.log('trends recent: both Trends pages offer hour windows from the last hour up in the dropdown, and Last hour, 6 hours and 24 hours '
-  + 'as one click that asks for that window, reads back in the dropdown and marks the button; a calendar period clears the mark; on Node Trends, zooming out past the whole timeline by − or the wheel loads the next longer range, Zoom to selection makes a window the range, and − doubles that range about its middle');
+console.log('trends recent: both Trends pages offer hour windows from the last hour up in the dropdown and follow the app bar\'s periods, '
+  + 'last week and last month ending on their last day, and Back to live returning to the page\'s own window; on Node Trends, zooming out past the whole timeline by − or the wheel loads the next longer range, Zoom to selection makes a window the range, and − doubles that range about its middle');
 process.exit(0);

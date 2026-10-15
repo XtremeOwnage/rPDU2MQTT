@@ -158,8 +158,27 @@
     border-radius:var(--r-sm); cursor:pointer; transition:border-color .12s, color .12s;
   }
   .cmd-open:hover { border-color:var(--faint); color:var(--muted); }
-  /* The shared period, beside the page finder. */
-  .range-pick { width:auto; font-size:12.5px; }
+  /* The time every data page shows: back to live while in the past, and the picker. */
+  .range-bar { display:inline-flex; align-items:center; gap:var(--sp-2); }
+  .range-live, .range-open {
+    display:inline-flex; align-items:center; gap:6px; padding:5px 10px; font:inherit; font-size:12.5px; white-space:nowrap;
+    color:var(--fg); background:var(--panel2); border:1px solid var(--line); border-radius:var(--r-sm); cursor:pointer;
+  }
+  .range-live:hover, .range-open:hover { border-color:var(--faint); }
+  .range-live[hidden], .range-step[hidden] { display:none; }
+  .range-step { padding:5px 8px; font-size:11px; line-height:1; color:var(--muted); background:var(--panel2); border:1px solid var(--line); border-radius:var(--r-sm); cursor:pointer; }
+  .range-step:disabled { opacity:.4; cursor:default; }
+  .range-bar .range-step + .range-open { margin-left:-6px; }
+  .range-bar .range-open + .range-step { margin-left:-6px; }
+  .range-open.is-past { color:var(--warn); border-color:var(--warn); background:var(--warn-bg); }
+  .range-icon { font-size:13px; line-height:1; }
+  .range-sheet { display:flex; flex-direction:column; gap:var(--sp-2); padding:var(--sp-2); }
+  .range-h { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin-top:var(--sp-2); }
+  .range-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:var(--sp-2); }
+  .range-form { display:flex; flex-wrap:wrap; gap:var(--sp-3); }
+  .range-form label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  /* A short form: the dialog fits it rather than standing at full height. */
+  .sheet:has(.range-sheet) { align-self:flex-start; }
   .cmd-open-icon { font-size:14px; }
   .cmd-open-text { margin-right:auto; }
 
@@ -1303,8 +1322,9 @@
     .ov-jump { gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
     .ov-jump-icon { width: 32px; height: 32px; font-size: 17px; }
     .ov-jump-sub { display: none; }
-    /* The app bar has no room on a phone; each page's own period row sets the shared period there. */
-    .appbar-range { display: none; }
+    /* The app bar has no room for words on a phone: the icon opens the picker, the dot goes back to live. */
+    .range-open span:last-child, .range-live span:last-child, .range-bar .range-step { display: none; }
+    .range-live, .range-open { padding: 5px 7px; }
   }
   .ov-sub { font-size: 11.5px; color: var(--faint); }
   .ov-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }

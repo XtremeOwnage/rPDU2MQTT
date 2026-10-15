@@ -1,7 +1,7 @@
 // Shared by the two Trends pages: the window, interval and metric controls, the fetch, and how the answer is read.
 import { api, btn, el, activate, navLink, instanceSelector, withInstance } from '../helpers.js';
 import { hideCard, type Line } from '../charts.js';
-import { periodRow, periodWindow, type PeriodKey } from '../history-control.js';
+import { followRange, periodWindow, rangeSpan } from '../history-control.js';
 import { timelineStrip, type Span } from './timeline.js';
 import { energyPrice, currency, toCost } from '../cost.js';
 
@@ -255,34 +255,46 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   chartSel.onchange = () => { syncStack(); draw(); };
   stackBox.onchange = () => draw();
 
-  // A recent window is a range the dropdown already lists, so picking one reads back there too.
-  const recentButtons = RECENT.map(([value, label]) => {
-    const b = btn(label);
-    b.title = `Chart the ${label.toLowerCase()} up to now.`;
-    b.onclick = () => { rangeSel.value = value; rangeSel.onchange!({} as any); };
-    return b;
-  });
-  const PERIOD_TEXT: Record<string, string> = { week: 'this week', lastweek: 'last week', month: 'this month', lastmonth: 'last month', year: 'this year' };
-  const periods = periodRow((key: PeriodKey) => {
-    const { day, days } = periodWindow(key);
-    const ended = key === 'lastweek' || key === 'lastmonth';
-    const range = key === 'yesterday' ? 'today=1&back=1' : days < 2 ? 'today=1'
-      : ended ? `days=${days}&at=${encodeURIComponent(new Date(`${day}T23:59:59`).toISOString())}` : `days=${days}`;
-    if (days >= 2 && !RANGES.some(r => r.value === range) && !added.has(range)) {
-      const text = ended ? `${PERIOD_TEXT[key]} (to ${day})` : `${PERIOD_TEXT[key]} (${days} days)`;
+  // The header's time decides the window; the dropdown is for looking closer while live.
+  let fromHeader = false;
+  followRange(sec, r => {
+    const span = rangeSpan(r);
+    if (!span) {
+      if (!fromHeader) return;
+      fromHeader = false;
+      rangeSel.value = 'days=30';
+      rangeSel.onchange!({} as any);
+      return;
+    }
+    fromHeader = true;
+    const { day, days } = span;
+    const today = new Date().toLocaleDateString('en-CA');
+    const yesterday = periodWindow('yesterday').day;
+    const end = encodeURIComponent(new Date(`${day}T23:59:59`).toISOString());
+    let range: string;
+    let text: string;
+    if (days < 2) {
+      range = day === today ? 'today=1' : day === yesterday ? 'today=1&back=1' : '';
+      if (!range) {
+        useRange(customRange({ from: new Date(`${day}T00:00:00`).getTime(), to: new Date(`${day}T23:59:59`).getTime() }));
+        return;
+      }
+      text = '';
+    } else {
+      range = day === today ? `days=${days}` : `days=${days}&at=${end}`;
+      text = day === today ? `last ${days} days` : `${days} days to ${day}`;
+    }
+    if (text && !RANGES.some(x => x.value === range) && !added.has(range)) {
       added.set(range, { value: range, text, wants: 'energy', seconds: days * 86_400 });
       rangeSel.appendChild(el('option', { value: range, text }));
     }
     rangeSel.value = range;
     unpick();
     syncIntervals();
-    const energy = energyFor(range);
-    if (energy) { metricSel.value = energy.metric; metricChosen = true; }
-    periods.mark(key);
-    markRecent();
+    if (days >= 2) { const energy = energyFor(range); if (energy) { metricSel.value = energy.metric; metricChosen = true; } }
+    else if (!metricChosen) metricSel.value = impliedMetric();
     load();
-  }, recentButtons, { sec });
-  const markRecent = () => recentButtons.forEach((b, i) => b.classList[RECENT[i][0] === rangeSel.value ? 'add' : 'remove']('primary'));
+  });
   rangeSel.onchange = () => {
     if (rangeSel.value === 'custom') {
       const day = (t: number) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -293,7 +305,7 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
       return;
     }
     customBox.hidden = true;
-    periods.mark(null); unpick(); syncIntervals(); markRecent(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
+    unpick(); syncIntervals(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
 
   // A counter's readings are not a per-bar quantity; the differences between them are.
   //
@@ -488,7 +500,6 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     kind: () => chartSel.value as 'bar' | 'line' | 'area', fitTo, leadHeight, section, statusLine, showRange,
   };
 
-  sec.appendChild(periods.row);
   // Phones fold the options behind one button that says what is charted.
   const opts = btn('');
   opts.classList.add('trend-opts');
