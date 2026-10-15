@@ -297,6 +297,12 @@ export default function mount(sec: any, host: any) {
   const zoomOut = el('button', { class: 'fp-zbtn', text: '−', title: 'Zoom out (−)', type: 'button' });
   const zoomFit = el('button', { class: 'fp-zbtn', text: '⤢', title: 'Fit the floor (0)', type: 'button' });
   const hint = el('div', { class: 'fp-hint' });
+  // The view-mode hint sits over the plan, so it goes once the reader has touched the plan and stays gone.
+  let viewHintSeen = remembered('view-hint', '0') === '1';
+  svg.addEventListener('pointerdown', () => {
+    if (viewHintSeen || mode !== 'view') return;
+    viewHintSeen = true; remember('view-hint', '1'); hint.hidden = true;
+  });
   const scaleBar = el('div', { class: 'fp-scalebar' }, el('span', { class: 'fp-scalebar-bar' }), el('span', { class: 'fp-scalebar-text' }));
   const empty = el('div', { class: 'fp-empty' });
   const fpMenu = makeMenu(() => stage, 'fp-menu');
@@ -612,10 +618,35 @@ export default function mount(sec: any, host: any) {
     const gfci = selection?.type === 'item' && !extra.length ? itemOf(selection.id) : null;
     const downstream = gfci?.Gfci ? planDownstream(runsIn(), gfci.Id) : null;
     const isGfci = (id: string) => !!itemOf(id)?.Gfci;
-    const label = (poly: Pt[], lines: string[], cls: string) => {
-      const c = planCentroid(poly);
-      const t = svgEl('text', { x: c.X, y: c.Y - (lines.length - 1) * font * 0.6, class: cls, 'font-size': font });
-      lines.forEach((ln, i) => { const sp = svgEl('tspan', { x: c.X, dy: i ? font * 1.2 : 0 }); sp.textContent = ln; t.appendChild(sp); });
+    // Labels stay the same size on screen, so at a phone's fitted zoom a small room's label spills over its
+    // neighbours'. Fit it to its room: break a long name over two lines, drop the trailing lines, then shrink a
+    // little, and leave a room too small even for that unlabelled until zoomed in (tapping it still gives its detail).
+    const fitsIn = (b: { w: number; h: number }, lines: string[], f: number) =>
+      Math.max(...lines.map(ln => ln.length)) * f * 0.58 <= b.w * 0.95 && lines.length * f * 1.2 <= b.h * 0.95;
+    const broken = (name: string) => {
+      const words = name.split(' ');
+      if (words.length < 2) return null;
+      let at = 1;
+      while (at < words.length - 1 && words.slice(0, at + 1).join(' ').length <= name.length / 2) at++;
+      return [words.slice(0, at).join(' '), words.slice(at).join(' ')];
+    };
+    const label = (poly: Pt[], given: string[], cls: string) => {
+      const c = planCentroid(poly), b = planBounds(poly);
+      const [name, ...rest] = given, split = broken(name);
+      const tries = [given, split && [...split, ...rest], [name], split].filter(Boolean) as string[][];
+      let lines: string[] | null = null, f = font;
+      for (const size of [font, font * 0.75]) {
+        lines = tries.find(t => fitsIn(b, t, size)) || null;
+        if (lines) { f = size; break; }
+      }
+      if (!lines) return null;
+      // The name may take two lines; what follows it is the reading, then any sizes.
+      const named = lines[0] === name ? 1 : 2;
+      const t = svgEl('text', { x: c.X, y: c.Y - (lines.length - 1) * f * 0.6, class: cls, 'font-size': f });
+      lines.forEach((ln, i) => {
+        const sp = svgEl('tspan', { x: c.X, dy: i ? f * 1.2 : 0, class: i < named ? null : 'fp-label-sub' + (i === named ? ' is-reading' : '') });
+        sp.textContent = ln; t.appendChild(sp);
+      });
       return t;
     };
 
@@ -783,7 +814,7 @@ export default function mount(sec: any, host: any) {
       svg.appendChild(g);
     });
 
-    labels.forEach(t => svg.appendChild(t));
+    labels.forEach(t => { if (t) svg.appendChild(t); });
 
     // Wall lengths along the selected room's edges, or every room's when sizes are on.
     const dimsFor = rooms.filter(rm => showSizes || (mode === 'edit' && selection?.type === 'room' && selection.id === rm.Id));
@@ -1594,7 +1625,7 @@ export default function mount(sec: any, host: any) {
     const how = mode === 'view' ? 'Tap a room or item for its detail. Drag to pan, pinch or Ctrl+wheel to zoom.'
       : FP_TOOLS.find(t => t[0] === tool)?.[3] || '';
     hint.textContent = how;
-    hint.hidden = !how || (mode === 'view' && !!selection);
+    hint.hidden = !how || (mode === 'view' && (!!selection || viewHintSeen));
   };
 
   const drawOpts = () => {

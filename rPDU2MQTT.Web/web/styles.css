@@ -168,7 +168,7 @@
 
   .appbar-status { margin-left:auto; display:flex; gap:var(--sp-2); align-items:center; font-size:12px; }
   .appbar-user { color:var(--faint); max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .appbar-logout { color:var(--accent); text-decoration:none; }
+  .appbar-logout { color:var(--accent); text-decoration:none; white-space:nowrap; }
   .appbar-logout:hover { text-decoration:underline; }
 
   /* Pills: the compact status readouts in the app bar. */
@@ -246,7 +246,7 @@
   }
   nav a.nav-child { padding-left:26px; font-size:13px; }
   /* A leading glyph per page, set from script. */
-  .nav-icon { width:16px; flex:none; text-align:center; font-size:13px; opacity:.85; }
+  .nav-icon { width:16px; flex:none; text-align:center; font-size:13px; line-height:1; opacity:.85; font-variant-emoji:text; }
   .nav-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   /* Count of unsaved edits inside that page. */
   .nav-badge {
@@ -1030,6 +1030,8 @@
     /* Connection pills keep their dot and drop the word. */
     .appbar-status #st-live, .appbar-status #st-mqtt { font-size:0; padding:4px 6px; gap:0; }
     .appbar-status #st-live .dot, .appbar-status #st-mqtt .dot { margin:0; }
+    /* "Up to date" can wait for a wider screen; an available update still shows. */
+    .appbar-status #st-update.good { display:none; }
 
     /* Dialogs sit at the top and take the full width. */
     .overlay, .sheet-backdrop { padding:var(--sp-2); align-items:flex-start; }

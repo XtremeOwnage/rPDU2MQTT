@@ -246,10 +246,15 @@ function activate(link     , sec     ) {
 // left a diagram taller than the viewport with no way to scroll it — it felt frozen. With `pan`, dragging the
 // background moves the view like a map (kept off where the SVG has its own drag interactions, e.g. the editor).
 /// `onScale` replaces the default sizing (width/height attributes) for content that is not an SVG.
-function attachZoom(scroll     , svg     , baseW        , baseH        , pan = false, onScale                      ) {
+/// `readable` is the smallest zoom the diagram opens or re-fits at by itself, so its text stays legible on a
+/// narrow screen; the reader pans from there. Fit still shows the whole diagram, however small.
+function attachZoom(scroll     , svg     , baseW        , baseH        , pan = false, onScale                      , readable = 0) {
   let z = 1; const min = 0.15, max = 6;
   // True once the reader has zoomed themselves: after that we never re-fit under them on a resize.
   let chosen = false;
+  // True once the reader pressed Fit: from then on the automatic fit shows the whole diagram, below `readable`.
+  let whole = false;
+  const autoFit = () => whole ? fitZoom() : Math.max(readable, fitZoom());
   const apply = () => { if (onScale) onScale(z); else { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); } };
   apply();
 
@@ -264,8 +269,8 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
 
   /// Scale the diagram down until it fits the pane's width, and go back to its top-left corner — what the
   /// Fit button asks for.
-  const fit = () => {
-    const next = fitZoom();
+  const fit = (floor = 0) => {
+    const next = Math.max(floor, fitZoom());
     if (Math.abs(next - z) < 0.005) return;
     z = next; apply(); movedAt = Date.now(); scroll.scrollLeft = 0; scroll.scrollTop = 0;
   };
@@ -383,7 +388,7 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
 
   // Open fitted when the pane cannot show the diagram at its own size — which on a phone is always. Wide
   // panes are left alone: shrinking a diagram that already fits only makes it harder to read.
-  if (width() && width() < baseW) fit();
+  if (width() && width() < baseW) fit(readable);
 
   // Follow a rotation or a pane resize, unless the reader has since set their own zoom. Only a change of
   // width counts: an observer reports once as soon as it is attached, and re-fitting on that report sent the
@@ -395,14 +400,14 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
       const w = width();
       if (!w || Math.abs(w - seenW) < 1) return;
       seenW = w;
-      if (!chosen) keepPlace(fitZoom());
+      if (!chosen) keepPlace(autoFit());
     });
     ro.observe(scroll);
     cleanups.push(() => ro.disconnect());
   } catch { /* no ResizeObserver: the fit on open is what matters */ }
 
   const detach = () => cleanups.forEach(f => f());
-  (detach       ).fit = () => { chosen = false; fit(); };
+  (detach       ).fit = () => { chosen = false; whole = true; fit(); };
   /// The view as it stands, for a redraw to pick up again: the zoom, and where the pane is scrolled to as
   /// fractions of it, so a diagram that came back a little taller lands in the same place rather than at the
   /// same pixel. `chosen` carries whether the reader set this zoom themselves.
@@ -412,7 +417,7 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
   });
   (detach       ).view = () => {
     const { x, y } = span();
-    return { z, chosen, left: x ? scroll.scrollLeft / x : 0, top: y ? scroll.scrollTop / y : 0 };
+    return { z, chosen, whole, left: x ? scroll.scrollLeft / x : 0, top: y ? scroll.scrollTop / y : 0 };
   };
   /// Change the zoom and stay over the same part of the diagram, by where the pane is as a share of it.
   const keepPlace = (next        , at                                ) => {
@@ -432,7 +437,8 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
   (detach       ).setView = (v     ) => {
     if (!v || !(v.z > 0)) return;
     chosen = !!v.chosen;
-    keepPlace(chosen ? v.z : fitZoom(), { left: v.left || 0, top: v.top || 0 });
+    whole = !!v.whole;
+    keepPlace(chosen ? v.z : autoFit(), { left: v.left || 0, top: v.top || 0 });
   };
   /// Is the reader in the middle of moving the pane — a finger or button down, or a swipe still coasting?
   (detach       ).busy = (quietMs = 800) => pts.size > 0 || Date.now() - touchedAt < quietMs;
@@ -4303,7 +4309,7 @@ function buildK8sTools(container     ) {
 // Direct outlet control (on/off/reboot) + group actions + label editing.
 
 function addControlSection(nav     , sections     ) {
-  const link = navLink(nav, "PDU Control", "⏻");
+  const link = navLink(nav, "PDU Control", "⊙");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Outlet Control'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -6291,7 +6297,9 @@ function addFlowSection(nav     , sections     ) {
     stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
     wrap.appendChild(stage);
 
-    zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
+    // On a phone, fitting the whole Sankey shrinks its 11px labels to unreadable; open at a scale that keeps
+    // them near 9px and let the reader pan. Fit still shows the whole of it.
+    zoom = attachZoom(scroll, svg, W, totalH, true, undefined, 0.8);  // container is replaced on each draw(), so no leak.
     // Back to where the reader was, at the zoom they set, rather than fitted again from scratch — unless the
     // diagram itself changed, when the old view is of something that is no longer drawn.
     if (keptView && !refit) zoom.setView(keptView);

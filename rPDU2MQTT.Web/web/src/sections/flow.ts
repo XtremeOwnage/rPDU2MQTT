@@ -1146,7 +1146,9 @@ export function addFlowSection(nav: any, sections: any) {
     stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
     wrap.appendChild(stage);
 
-    zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
+    // On a phone, fitting the whole Sankey shrinks its 11px labels to unreadable; open at a scale that keeps
+    // them near 9px and let the reader pan. Fit still shows the whole of it.
+    zoom = attachZoom(scroll, svg, W, totalH, true, undefined, 0.8);  // container is replaced on each draw(), so no leak.
     // Back to where the reader was, at the zoom they set, rather than fitted again from scratch — unless the
     // diagram itself changed, when the old view is of something that is no longer drawn.
     if (keptView && !refit) zoom.setView(keptView);
