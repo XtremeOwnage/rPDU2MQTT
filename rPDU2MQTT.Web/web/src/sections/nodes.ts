@@ -226,8 +226,8 @@ export function wouldLoop(links: any[], from: string, to: string) {
 // Virtual-node manager.
 export function renderNodeManager(flow: any, customNodes: any[], links: any[], cand: Map<string, any>, editing: { id: string | null }, rerender: (close?: boolean) => void, query = '', hideManaged = false) {
   const box = el('div', { style: { margin: '18px 0' } });
-  box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
+  box.appendChild(el('h3', { class: 'nd-h', text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', { class: 'desc nd-blurb', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
 
   // The node being edited always stays.
   const q = query.trim().toLowerCase();
@@ -345,7 +345,7 @@ export function addNodesSection(nav: any, sections: any) {
   link.dataset.section = 'EnergyFlow.Nodes,EnergyFlow.Links,EnergyFlow.AutoTags';
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
-  const d = document.createElement('div'); d.className = 'desc';
+  const d = document.createElement('div'); d.className = 'desc nd-intro';
   d.textContent = 'Configure the virtual nodes in your energy hierarchy — panels, breakers, batteries, producers, a “Total”. Set each node’s kind, how it’s valued, its live-value bindings (MQTT / Modbus), and its feeders & children. The wiring also shows visually on the Flow tab.';
   sec.appendChild(d);
 
@@ -366,6 +366,8 @@ export function addNodesSection(nav: any, sections: any) {
   const ed: any = document.createElement('div'); ed.style.marginTop = '8px'; sec.appendChild(ed);
   let lastGraph: any = null;
   const editing: { id: string | null } = { id: null };
+  // On a phone the add form folds away so the nodes come first; it stays open on a wider screen.
+  let addOpen = (() => { try { return !window.matchMedia?.('(max-width: 560px)').matches; } catch { return true; } })();
 
   const render = () => {
     const flow = ensure(state.data, 'EnergyFlow', {});
@@ -392,10 +394,14 @@ export function addNodesSection(nav: any, sections: any) {
       customNodes.push(node); editing.id = id; render();
     };
     save.onclick = () => saveConfig(load);
-    addBar.append(idIn, labIn, kindSel, addBtn, importBtn, save); ed.appendChild(addBar);
+    addBar.append(idIn, labIn, kindSel, addBtn, importBtn, save);
+    const addBox: any = el('details', { class: 'nd-add' }, el('summary', { class: 'nd-add-summary', text: 'Add or import a node' }), addBar);
+    addBox.open = addOpen;
+    addBox.addEventListener?.('toggle', () => { addOpen = addBox.open; });
+    ed.appendChild(addBox);
 
     const existingIds = new Set<string>([...customNodes.map((n: any) => n.Id), ...((lastGraph?.nodes || []).map((n: any) => n.id))]);
-    const impWrap = el('div'); ed.appendChild(impWrap);
+    const impWrap = el('div'); addBox.appendChild(impWrap);
     importBtn.onclick = () => {
       if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }
       impWrap.appendChild(renderImportPanel(flow, existingIds, render));
@@ -403,7 +409,7 @@ export function addNodesSection(nav: any, sections: any) {
 
     const cand = flowCandidates(lastGraph, customNodes);
     const goTo = (label: string) => (document.querySelector(`nav a[data-label="${label}"]`) as any)?.click();
-    ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 0 0' } },
+    ed.appendChild(el('div', { class: 'desc nd-note', style: { margin: '4px 0 0' } },
       el('span', { text: 'Groups are managed on the ' }),
       el('a', { text: 'Groups page', onclick: () => goTo('Groups') }),
       el('span', { text: ', and tags — including the rules that tag PDUs and outlets — on the ' }),

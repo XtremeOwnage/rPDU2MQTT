@@ -1127,8 +1127,16 @@
   @media (max-width: 440px) {
     .appbar:has(#st-update:not(.is-hidden):not(.good)) .brand-name { display:none; }
   }
+  /* The Nodes page's add form folds into one line. */
+  .nd-add > .nd-add-summary { display:inline-flex; align-items:center; gap:6px; cursor:pointer; list-style:none;
+    font-size:13px; font-weight:600; color:var(--accent); padding:6px 0; }
+  .nd-add > .nd-add-summary::-webkit-details-marker { display:none; }
+  .nd-add > .nd-add-summary::before { content:'+'; font-size:16px; line-height:1; }
+  .nd-add[open] > .nd-add-summary::before { content:'−'; }
   /* On a phone each node is a compact card: name on top, fields in two columns, buttons on screen. */
   @media (max-width: 560px) {
+    /* The nodes come first: the explanations are for a wider screen. */
+    .nd-intro, .nd-note, .nd-blurb, .nd-h { display:none; }
     .nodes-scroll table.ld, .nodes-scroll tbody { display:block; }
     .nodes-scroll table.ld { border:0; background:none; box-shadow:none; }
     .nodes-scroll thead { display:none; }
