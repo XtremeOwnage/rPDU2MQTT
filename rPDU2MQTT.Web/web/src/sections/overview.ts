@@ -125,6 +125,9 @@ export function addOverviewSection(nav: any, sections: any) {
   };
 
   let withheld: any[] = [];
+  /// Which alerts the reader has opened onto their withheld bindings. The alerts are rebuilt on every refresh,
+  /// so without this the list folded shut each time, usually mid-read.
+  const opened = new Set<string>();
 
   const alertCard = (level: string, title: string, state: string, detail: string, id?: string, onDismiss?: () => void) => {
     const mine = withheld.filter((w: any) => !id || !w.integration || w.integration === id);
@@ -141,8 +144,9 @@ export function addOverviewSection(nav: any, sections: any) {
     card.appendChild(body);
     if (!mine.length) return card;
 
+    const openKey = id || title;
     const list = el('div', { class: 'ov-alert-detail' });
-    list.hidden = true;
+    list.hidden = !opened.has(openKey);
     mine.forEach((w: any) => {
       const row = el('div', { class: 'ov-withheld' });
       row.appendChild(el('strong', { text: `${w.node}${w.metric ? ' · ' + w.metric : ''}` }));
@@ -154,7 +158,11 @@ export function addOverviewSection(nav: any, sections: any) {
     const toggle = el('button', { class: 'ov-alert-more', type: 'button' }) as HTMLButtonElement;
     const label = () => `${list.hidden ? 'Show' : 'Hide'} ${mine.length} withheld binding${mine.length === 1 ? '' : 's'}`;
     toggle.textContent = label();
-    toggle.onclick = () => { list.hidden = !list.hidden; toggle.textContent = label(); };
+    toggle.onclick = () => {
+      list.hidden = !list.hidden;
+      if (list.hidden) opened.delete(openKey); else opened.add(openKey);
+      toggle.textContent = label();
+    };
     body.append(toggle, list);
     return card;
   };

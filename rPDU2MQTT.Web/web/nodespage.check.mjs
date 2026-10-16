@@ -54,6 +54,9 @@ const shown = () => (query(sec, '.nd-shown') || {}).textContent || '';
 
 if (!hunt()) fail('the Nodes page cannot be searched');
 if (rowsOf().length !== 4) fail(`the table does not list every node: ${rowsOf().join(', ')}`);
+const firstRow = query(query(sec, 'tbody'), 'tr');
+const labels = query(firstRow, 'td', true).map(td => td.dataset.label || '');
+if (labels[0] !== 'Id' || labels[8] !== 'Bindings' || labels[9]) fail(`the phone layout's cell labels are wrong: ${labels.join(', ')}`);
 if (shown()) fail(`nothing is filtered, yet the page says "${shown()}"`);
 
 // By id or name…

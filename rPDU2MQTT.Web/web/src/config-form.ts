@@ -715,6 +715,8 @@ export function build() {
   if (noPdu) PDU_BLOCK.forEach(k => HIDDEN.add(k));
   // The EmonCMS page needs the EmonCMS plugin.
   if (!integrationIds.has('emoncms')) HIDDEN.add('EmonCMS');
+  // A plugin whose own pages edit its settings has no separate settings form.
+  pluginPages.forEach(p => { if ((p.configSection || '').split(',').includes(`Plugins.${p.integration}`)) HIDDEN.add(p.integration); });
   // Schema sections are placed by their declared group (System if none); tools follow them.
   const navGroups = NAV_GROUPS.map(g => ({ title: g.title, items: [] as NavItem[] }));
   const groupFor = (title: string) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System')!;

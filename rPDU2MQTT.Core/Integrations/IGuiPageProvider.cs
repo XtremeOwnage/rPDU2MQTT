@@ -19,7 +19,7 @@ public interface IGuiPageProvider
     /// <summary>A page's script or stylesheet ("{id}.js" or "{id}.css"), or null when there is none.</summary>
     string? PageAsset(string file);
 
-    /// <summary>Keys under <c>Plugins.{id}</c> that only the pages read; saving them needs no restart.</summary>
+    /// <summary>Keys under <c>Plugins.{id}</c> copied into the running config on save; saving them needs no restart.</summary>
     IReadOnlyList<string> PageSettings => [];
 }
 
