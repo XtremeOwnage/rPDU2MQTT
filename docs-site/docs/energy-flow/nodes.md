@@ -13,7 +13,7 @@ title: Nodes
 - **Add node**: id, label, kind.
 - **Hide managed** (on by default): hides nodes an integration maintains, such as Tigo panels and strings.
 - **Import device template**: adds pre-wired nodes and the Modbus connection for a known device (EG4 FlexBoss 21). Check register addresses and scales against your device.
-- **Fed by** sets the feeder from the table.
+- **Fed by** shows what feeds each node. Change it in the node editor.
 - **Edit** opens the node editor. **Rename** changes the id and keeps its links. **Copy** duplicates it.
 - The bindings column shows a warning when a measured node has no energy (kWh) source.
 - **Save** applies. Bindings apply without a restart.

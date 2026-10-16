@@ -56,7 +56,7 @@ public class ExportContributionTests
 
     private static readonly Fixed Readings = new(new()
     {
-        ["fridge|realpower"] = 120, ["thermo|temperature"] = 21.5, ["thermo2|temperature"] = 22.5, ["thermo|percent"] = 40,
+        ["fridge|realpower"] = 120, ["thermo|temperature"] = 21.5, ["thermo2|temperature"] = 22.5, ["thermo|percent"] = 40, ["sensor:porch|temperature"] = 12.5,
     });
 
     private static async Task<Captured> Publish(Config cfg, ExportContributions? contributions)
@@ -164,6 +164,25 @@ public class ExportContributionTests
         var id = FlowExport.DeviceId(LocationExport.NodeId("den"));
         Assert.Equal("temperature", components.GetProperty($"{id}_temperature").GetProperty("device_class").GetString());
         Assert.Equal("humidity", components.GetProperty($"{id}_humidity").GetProperty("device_class").GetString());
+    }
+
+    [Fact]
+    public async Task ASensorFromTheSensorsList_FeedsClimate_AndIsBoundOutsideEnergyFlow()
+    {
+        var cfg = Configured();
+        cfg.Plugins["locations"] = PluginConfigBinder.ToNode(new LocationSettings
+        {
+            Sensors = [new SensorConfig { Id = "porch", Name = "Porch", Sources = [new() { Type = "mqtt", Metric = "temperature", Topic = "rtl_433/Acurite-Tower/326", JsonField = "temperature_C" }] }],
+            Sites = [new SiteConfig { Id = "home", Floors = [new FloorConfig { Id = "ground", Rooms = [new RoomConfig { Id = "back", Name = "Back", Climate = new() { Temperature = ["porch"] } }] }] }],
+        });
+        _ = new LocationsPlugin();
+
+        var pub = await Publish(cfg, new ExportContributions([new LocationContributor(() => Readings)]));
+
+        Assert.Equal(12.5, State(pub, LocationExport.NodeId("back")).GetProperty("temperature").GetDouble());
+        Assert.DoesNotContain(cfg.EnergyFlow.Nodes, n => n.Id.Contains("porch"));
+        var bound = Assert.Single(SourceBindings.For(cfg, "mqtt"), b => b.NodeId == "sensor:porch");
+        Assert.Equal("rtl_433/Acurite-Tower/326", bound.Source.Topic);
     }
 
     [Theory]

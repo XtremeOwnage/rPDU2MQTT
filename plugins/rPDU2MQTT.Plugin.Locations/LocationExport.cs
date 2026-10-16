@@ -37,8 +37,9 @@ public sealed class LocationContributor(Func<IFlowValueSource?>? live = null) : 
         Func<string, double?>? temperature = null, humidity = null;
         if (locations.All.Any(p => LocationClimate.Configured(locations, p)))
         {
-            temperature = LocationExport.ValuesOf(FlowGraphBuilder.Build(pass.Snapshot, cfg.EnergyFlow, LocationClimate.TemperatureMetric, live?.Invoke()));
-            humidity = LocationExport.ValuesOf(FlowGraphBuilder.Build(pass.Snapshot, cfg.EnergyFlow, LocationClimate.HumidityMetric, live?.Invoke()));
+            var values = live?.Invoke();
+            temperature = LocationSensors.Reader(cfg, values, LocationClimate.TemperatureMetric, LocationExport.ValuesOf(FlowGraphBuilder.Build(pass.Snapshot, cfg.EnergyFlow, LocationClimate.TemperatureMetric, values)));
+            humidity = LocationSensors.Reader(cfg, values, LocationClimate.HumidityMetric, LocationExport.ValuesOf(FlowGraphBuilder.Build(pass.Snapshot, cfg.EnergyFlow, LocationClimate.HumidityMetric, values)));
         }
 
         var tiers = new List<ContributedTier>();

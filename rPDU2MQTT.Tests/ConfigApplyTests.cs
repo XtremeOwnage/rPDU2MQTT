@@ -111,4 +111,20 @@ public class ConfigApplyTests
 
         Assert.Equal(["Plugins.tigo.Enabled"], ConfigApply.NeedingRestart(running, saved, ["Plugins.tigo.Strings"]));
     }
+
+    [Fact]
+    public void PluginPageKeysAreCopiedLive()
+    {
+        var running = Fresh();
+        running.Plugins["locations"] = new Dictionary<string, object?> { ["Sites"] = new List<object?>(), ["Other"] = "keep" };
+        var saved = Fresh();
+        saved.Plugins["locations"] = System.Text.Json.Nodes.JsonNode.Parse("""{"Other":"new","HomeAssistant":{"Schedule":"interval"}}""");
+
+        ConfigApply.CopyPluginKeys(running, saved, "locations", ["Sites", "HomeAssistant"]);
+
+        var now = (System.Text.Json.Nodes.JsonObject)running.Plugins["locations"]!;
+        Assert.Equal("interval", (string?)now["HomeAssistant"]!["Schedule"]);
+        Assert.False(now.ContainsKey("Sites"));
+        Assert.Equal("keep", (string?)now["Other"]);
+    }
 }
