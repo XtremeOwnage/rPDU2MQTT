@@ -23,7 +23,7 @@ public class CredentialFieldsAreMaskedTests
     }
 
     [Theory]
-    [InlineData("HomeAssistant", "EnergyDashboard", "Token")]
+    [InlineData("HomeAssistant", "Token")]
     [InlineData("Api", "ApiKey")]
     [InlineData("EmonCMS", "ApiKey")]
     [InlineData("Gui", "Password")]

@@ -46,14 +46,15 @@ public sealed class HomeAssistantIntegration : IIntegration, IConfigurationPubli
     public string? Misconfigured(Config c)
     {
         var ed = c.HASS.EnergyDashboard;
+        var ha = c.HASS;
         // Discovery needs nothing but the broker this bridge already has, so only the dashboard can be
         // misconfigured — and only when it is the part that is switched on.
         if (!ed.Enabled) return null;
         // Both messages name the page that has the field. These settings are not on the Home Assistant page
         // — they have their own — and a fault that names neither sends the operator to the wrong one.
-        if (string.IsNullOrWhiteSpace(ed.Url))
+        if (string.IsNullOrWhiteSpace(ha.Url))
             return "The Energy Dashboard sync is enabled but no Home Assistant URL is set. Set it on the HA Energy Mapping page.";
-        if (string.IsNullOrWhiteSpace(ed.Token))
+        if (string.IsNullOrWhiteSpace(ha.Token))
             return "The Energy Dashboard sync is enabled but no long-lived access token is set. Set it on the HA Energy Mapping page.";
         return null;
     }
@@ -85,16 +86,17 @@ public sealed class HomeAssistantIntegration : IIntegration, IConfigurationPubli
 
         var parts = new List<string>();
         if (c.HASS.DiscoveryEnabled) parts.Add($"discovery → {c.HASS.DiscoveryTopic}");
-        if (c.HASS.EnergyDashboard.Enabled) parts.Add($"energy dashboard → {c.HASS.EnergyDashboard.Url}");
+        if (c.HASS.EnergyDashboard.Enabled) parts.Add($"energy dashboard → {c.HASS.Url}");
         return new(HealthLevel.Good, "On", string.Join(" · ", parts));
     }
 
     public async Task<string> PublishAsync(ExportPass pass, CancellationToken ct)
     {
         var ed = cfg.HASS.EnergyDashboard;
+        var ha = cfg.HASS;
         // Checked here too: a caller that reaches this without asking must not write to someone's dashboard.
         if (!ed.Enabled) return "The Home Assistant Energy Dashboard sync is off.";
-        var n = await sync.SyncAsync(ed.Url!, ed.Token!, ct);
+        var n = await sync.SyncAsync(ha.Url!, ha.Token!, ct);
         return $"Synced {n} energy source(s) into the Home Assistant Energy Dashboard.";
     }
 
@@ -102,9 +104,10 @@ public sealed class HomeAssistantIntegration : IIntegration, IConfigurationPubli
     public async Task<string> SweepAsync(ExportPass pass, CancellationToken ct)
     {
         var ed = cfg.HASS.EnergyDashboard;
+        var ha = cfg.HASS;
         if (!ed.Enabled) return "The Home Assistant Energy Dashboard sync is off.";
         if (Misconfigured(cfg) is { } why) return why;
-        var n = await sync.ClearAsync(ed.Url!, ed.Token!, ct);
+        var n = await sync.ClearAsync(ha.Url!, ha.Token!, ct);
         return $"Removed {n} energy source(s) from the Home Assistant Energy Dashboard.";
     }
 
@@ -113,7 +116,7 @@ public sealed class HomeAssistantIntegration : IIntegration, IConfigurationPubli
         if (Misconfigured(c) is { } why) return (false, why);
         try
         {
-            var n = await sync.SyncAsync(c.HASS.EnergyDashboard.Url!, c.HASS.EnergyDashboard.Token!, ct);
+            var n = await sync.SyncAsync(c.HASS.Url!, c.HASS.Token!, ct);
             return (true, $"reachable — {n} energy source(s) mapped");
         }
         catch (Exception ex) { return (false, ex.Message); }

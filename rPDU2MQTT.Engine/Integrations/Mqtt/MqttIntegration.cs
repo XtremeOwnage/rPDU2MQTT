@@ -28,6 +28,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
     private readonly Config cfg;
     private readonly IMessagePublisher publisher;
     private readonly IFlowValueSource? live;
+    private readonly ExportContributions contributions;
 
     // Discovery config topics already retired, once per process: duplicates of a native sensor, and tiers
     // the tag filter now excludes.
@@ -43,8 +44,9 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
     /// re-baselines them, which is read downstream as a meter reset — see <see cref="Core.Flow.CumulativeExport"/>.
     /// </param>
     public MqttIntegration(Config cfg, IMessagePublisher publisher, IFlowValueSource? live = null,
-                           Core.Flow.IEnergyStore? store = null)
+                           Core.Flow.IEnergyStore? store = null, ExportContributions? contributions = null)
     {
+        this.contributions = contributions ?? ExportContributions.None;
         this.cfg = cfg;
         this.publisher = publisher;
         this.live = live;
@@ -111,9 +113,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
         var published = 0;
 
         // Where each tier is, so its device lands in its room's Home Assistant area (#467).
-        var locations = LocationIndex.For(flow);
-        var topology = FlowTopology.For(pass.Snapshot, flow);
-        var rooms = LocationExport.RoomNames(locations, topology);
+        var rooms = contributions.Areas(cfg, FlowTopology.For(pass.Snapshot, flow));
 
         // Synthetic nodes are for the diagram only — see FlowNode.Synthetic.
         foreach (var node in graph.Nodes.Where(n => !n.Synthetic))
@@ -142,8 +142,11 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             // entire lifetime counter lands on one day's bar.
             // …and never a figure below one already published: a roll-up dips whenever a contributor goes
             // stale, because the sum only covers the links that are known.
-            double? energy = cumulative.Publish($"{node.Id}|energy",
-                FlowExport.TryNodeValue(energyGraph, node.Id, out var e) ? e : null);
+            // The bridge's own running total where it keeps one; the roll-up only for tiers it does not.
+            double? energy = !periodsReady ? null
+                : live is not null && live.TryGetValue(node.Id, FlowMetricKey.OwnEnergyTotal, out var own)
+                    ? cumulative.Continue($"{node.Id}|energy", own)
+                    : cumulative.Publish($"{node.Id}|energy", FlowExport.TryNodeValue(energyGraph, node.Id, out var e) ? e : null);
             // Only feeders that are themselves being exported.
             var parents = FlowExport.Parents(graph, node.Id)
                 .Where(pid => graph.Nodes.FirstOrDefault(n => string.Equals(n.Id, pid, StringComparison.OrdinalIgnoreCase)) is not { } pn
@@ -151,9 +154,11 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
                 .ToList();
 
             // The in-direction (charge/export) energy, when this node declares one and a fresh value exists.
-            double? energyIn = cumulative.Publish($"{node.Id}|energy_in",
-                energyInNodes.Contains(node.Id) && live is not null
-                && live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null);
+            double? energyIn = !periodsReady || !energyInNodes.Contains(node.Id) || live is null ? null
+                : live.TryGetValue(node.Id, FlowMetricKey.For(FlowMetricKey.OwnEnergyTotal, "in"), out var ownIn)
+                    ? cumulative.Continue($"{node.Id}|energy_in", ownIn)
+                    : cumulative.Publish($"{node.Id}|energy_in",
+                        live.TryGetValue(node.Id, FlowMetricKey.For(energyMetric, "in"), out var ein) ? ein : null);
 
             // On a bidirectional node the roll-up above is one direction of two, so it is published under its
             // own name and `energy` becomes what passed through the node either way. Both are monotonic, so
@@ -205,7 +210,7 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             {
                 var doc = FlowExport.DiscoveryDocument(node, parents.FirstOrDefault(), topic, energyGraph.Units, graph.Units, availability,
                     includeEnergyIn: energyInNodes.Contains(node.Id), includeSoc: socNodes.Contains(node.Id),
-                    includeEnergyDaily: energyDaily is not null, area: rooms.GetValueOrDefault(node.Id));
+                    area: rooms.GetValueOrDefault(node.Id));
                 await publisher.PublishAsync(configTopic, doc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
             }
         }
@@ -250,44 +255,29 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             await publisher.PublishAsync(gconfig, gdoc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
         }
 
-        // Each place's total, as a tier of its own (#467). Unknown is not published, exactly as for a node.
-        if (locations.All.Count > 0)
+        // Plugin tiers.
+        foreach (var tier in contributions.Tiers(pass, cfg))
         {
-            var power = LocationRollup.Compute(locations, topology, LocationExport.ValuesOf(graph));
-            var energyTotals = LocationRollup.Compute(locations, topology, LocationExport.ValuesOf(energyGraph));
-            var todayTotals = periodsReady ? LocationRollup.Compute(locations, topology, LocationExport.ValuesOf(todayGraph)) : null;
-            foreach (var place in locations.All)
-            {
-                if (power[place.Id].Value is not { } watts) continue;
-                var nodeId = LocationExport.NodeId(place.Id);
-                var placeNode = new FlowNode(nodeId, place.Label, place.Kind, watts);
-                var ptopic = FlowExport.Topic(placeNode, graph, cfg.MQTT.ParentTopic, flow);
-                double? penergy = cumulative.Publish($"{nodeId}|energy", energyTotals[place.Id].Value);
-                double? pdaily = todayTotals?[place.Id].Value;
+            var tierNode = new FlowNode(tier.Id, tier.Label, tier.Kind, tier.Power);
+            var ttopic = FlowExport.Topic(tierNode, graph, cfg.MQTT.ParentTopic, flow);
+            var payload = new Dictionary<string, object?> { ["id"] = tier.Id };
+            foreach (var (k, v) in tier.Fields ?? new Dictionary<string, object?>()) payload[k] = v;
+            payload["value"] = tier.Power;
+            payload["power"] = tier.Power;
+            payload["energy"] = cumulative.Publish($"{tier.Id}|energy", tier.Energy);
+            payload["energy_d"] = periodsReady ? tier.EnergyToday : null;
+            payload["units"] = graph.Units;
+            payload["energyUnits"] = energyGraph.Units;
+            payload["label"] = tier.Label;
+            payload["kind"] = tier.Kind;
+            payload["timestamp"] = Core.MessageTimestamps.Format(pass.AtUtc);
+            await publisher.PublishAsync(ttopic, JsonSerializer.Serialize(payload), retain: true, ct, pass.AtUtc);
+            published++;
 
-                var ppayload = JsonSerializer.Serialize(new
-                {
-                    id = nodeId,
-                    location = place.Id,
-                    value = watts,
-                    power = watts,
-                    energy = penergy,
-                    energy_d = pdaily,
-                    units = graph.Units,
-                    energyUnits = energyGraph.Units,
-                    label = place.Label,
-                    kind = place.Kind,
-                    timestamp = Core.MessageTimestamps.Format(pass.AtUtc),
-                });
-                await publisher.PublishAsync(ptopic, ppayload, retain: true, ct, pass.AtUtc);
-                published++;
-
-                if (!publishDiscovery) continue;
-                var pconfig = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(nodeId)}/config";
-                var pdoc = FlowExport.DiscoveryDocument(placeNode, null, ptopic, energyGraph.Units, graph.Units, availability,
-                    includeEnergyDaily: pdaily is not null, area: place.Kind == LocationKind.Room ? place.Label : null);
-                await publisher.PublishAsync(pconfig, pdoc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
-            }
+            if (!publishDiscovery) continue;
+            var tconfig = $"{cfg.HASS.DiscoveryTopic}/device/{FlowExport.DeviceId(tier.Id)}/config";
+            var tdoc = FlowExport.DiscoveryDocument(tierNode, null, ttopic, energyGraph.Units, graph.Units, availability, area: tier.Area, extra: tier.Sensors);
+            await publisher.PublishAsync(tconfig, tdoc.ToJsonString(), retain: cfg.HASS.DiscoveryRetain, ct, pass.AtUtc);
         }
 
         // A counter held back is said once, when it starts, and once when it recovers. Silence is what let a

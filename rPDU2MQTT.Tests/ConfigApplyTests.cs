@@ -46,7 +46,7 @@ public class ConfigApplyTests
     {
         // HomeAssistant is half and half: the Energy Dashboard settings are re-read, discovery is not.
         var saved = Fresh();
-        saved.HASS.EnergyDashboard.Url = "http://ha:8123";
+        saved.HASS.Url = "http://ha:8123";
         saved.HASS.DiscoveryEnabled = !Fresh().HASS.DiscoveryEnabled;
 
         var stranded = ConfigApply.NeedingRestart(Fresh(), saved);
@@ -99,5 +99,16 @@ public class ConfigApplyTests
         saved.Gui.Port = 9999;
 
         Assert.Equal(["Gui.Port"], ConfigApply.NeedingRestart(Fresh(), saved));
+    }
+
+    [Fact]
+    public void PluginPageSettingsNeedNoRestart()
+    {
+        var running = Fresh();
+        running.Plugins["tigo"] = System.Text.Json.JsonSerializer.SerializeToElement(new { Enabled = true, Strings = new { pv_a1 = new { Hidden = false } } });
+        var saved = Fresh();
+        saved.Plugins["tigo"] = System.Text.Json.JsonSerializer.SerializeToElement(new { Enabled = false, Strings = new { pv_a1 = new { Hidden = true } } });
+
+        Assert.Equal(["Plugins.tigo.Enabled"], ConfigApply.NeedingRestart(running, saved, ["Plugins.tigo.Strings"]));
     }
 }

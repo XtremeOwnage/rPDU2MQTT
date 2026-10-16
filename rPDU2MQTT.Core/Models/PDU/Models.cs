@@ -1029,7 +1029,7 @@ public partial class State
     public Alarm Alarm { get; set; }
 }
 
-internal static class Converter
+public static class Converter
 {
     public static readonly JsonSerializerOptions Settings = new(JsonSerializerDefaults.General)
     {

@@ -179,6 +179,42 @@ public class FlowGraphTests
         Assert.Equal(100, graph.Links.Single(l => l.Source == "gridboss").Value); // demand-driven downstream
     }
 
+    private sealed class Readings(Dictionary<string, double> v) : IFlowValueSource
+    {
+        public bool TryGetValue(string node, string metric, out double value) => v.TryGetValue(node, out value);
+    }
+
+    [Theory]
+    [InlineData(0, 2600)]
+    [InlineData(1000, 1600)]
+    public void Build_GridBesideMeteredSolar_SuppliesWhatTheSolarDoesNot(double solar, double expected)
+    {
+        // The grid feeds the inverter and a circuit of its own; the solar meters everything it feeds the inverter.
+        var flow = new EnergyFlowConfig
+        {
+            Nodes =
+            {
+                new EnergyFlowNode { Id = "grid", Kind = "grid" },
+                new EnergyFlowNode { Id = "solar", Kind = "solar" },
+                new EnergyFlowNode { Id = "inverter", Kind = "inverter" },
+                new EnergyFlowNode { Id = "garage", Kind = "load" },
+            },
+            Links =
+            {
+                new EnergyFlowLink { From = "grid", To = "inverter" },
+                new EnergyFlowLink { From = "solar", To = "inverter" },
+                new EnergyFlowLink { From = "grid", To = "garage" },
+            },
+        };
+        var readings = new Readings(new() { ["grid"] = 2610, ["solar"] = solar, ["inverter"] = 2600, ["garage"] = 10 });
+
+        var graph = FlowGraphBuilder.Build(new PduData(), flow, "realpower", readings);
+
+        var link = graph.Links.Single(l => l.Source == "grid" && l.Target == "inverter");
+        Assert.True(link.Known);
+        Assert.Equal(expected, link.Value, 3);
+    }
+
     [Fact]
     public void Build_ProducerLink_CarriesGenerationIntoWhatItFeeds()
     {

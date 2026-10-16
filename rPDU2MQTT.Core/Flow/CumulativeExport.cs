@@ -14,7 +14,42 @@ public sealed class CumulativeExport
     public CumulativeExport(IEnergyStore store)
     {
         this.store = store;
-        foreach (var (key, high) in store.LoadPeaks()) peak[key] = high;
+        foreach (var (key, high) in store.LoadPeaks())
+            if (key.EndsWith(OffsetSuffix, StringComparison.Ordinal)) offset[key[..^OffsetSuffix.Length]] = high;
+            else peak[key] = high;
+    }
+
+    private const string OffsetSuffix = "@offset";
+    private readonly ConcurrentDictionary<string, double> offset = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// A running total that must never go backwards, carried on from the mark: a drop moves the offset, not the published value.
+    /// </summary>
+    public double? Continue(string key, double? total)
+    {
+        if (total is not { } t) return null;
+
+        var first = !offset.TryGetValue(key, out var off);
+        var v = t + off;
+        // First use picks up exactly where the mark stands, so the switch is neither a reset nor a jump.
+        if (peak.TryGetValue(key, out var high) && (first || v < high))
+        {
+            off += high - v;
+            v = high;
+        }
+        if (first || off != offset[key])
+        {
+            offset[key] = off;
+            store?.SavePeak(key + OffsetSuffix, off);
+        }
+
+        withheld.TryRemove(key, out _);
+        if (!peak.TryGetValue(key, out var known) || v > known)
+        {
+            peak[key] = v;
+            store?.SavePeak(key, v);
+        }
+        return v;
     }
 
     /// <summary>What was withheld and why, newest reason per key, for the diagnostics the GUI reads.</summary>
@@ -47,5 +82,5 @@ public sealed class CumulativeExport
         => withheld.Select(kv => (kv.Key, kv.Value)).ToList();
 
     /// <summary>Forget what has been seen — for tests, and for a deliberate re-baseline.</summary>
-    public void Reset() { peak.Clear(); withheld.Clear(); }
+    public void Reset() { peak.Clear(); withheld.Clear(); offset.Clear(); }
 }

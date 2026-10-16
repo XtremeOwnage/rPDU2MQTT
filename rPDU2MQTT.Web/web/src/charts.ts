@@ -1,11 +1,15 @@
 // Day-by-day bar charts: axis, empty days, signed values, hover card.
 import { el, formatNum } from './helpers.js';
 
+// Fixed source colours, the same in every view. Grid is import; export has its own.
+export const SOURCE_HUE = { solar: 46, grid: 2, gridExport: 140, battery: 212 };
+export const SOURCE_COLOR = { solar: '#f2c230', grid: '#e5534b', gridExport: '#3fb950', battery: '#4f8cff' };
+
 // The kinds worth a colour of their own; anything else shares the neutral run.
 export const KIND_COLOR: Record<string, string> = {
-  solar: 'var(--warn, #d08700)',
-  battery: 'var(--good, #46c46a)',
-  grid: 'var(--accent, #4f8cff)',
+  solar: SOURCE_COLOR.solar,
+  battery: SOURCE_COLOR.battery,
+  grid: SOURCE_COLOR.grid,
   load: '#b06fd0',
   outlet: '#7f8ea3',
   pdu: '#5c7fa3',
@@ -13,6 +17,13 @@ export const KIND_COLOR: Record<string, string> = {
   breaker: '#d9a55c',
   inverter: '#3fb0a8',
 };
+/// The fixed colour for a solar, grid or battery node; a grid node that feeds nothing is export.
+export const sourceColor = (kind: string | undefined, sink = false): string | null =>
+  kind === 'solar' ? SOURCE_COLOR.solar : kind === 'battery' ? SOURCE_COLOR.battery
+  : kind === 'grid' ? (sink ? SOURCE_COLOR.gridExport : SOURCE_COLOR.grid) : null;
+export const sourceHue = (kind: string | undefined, sink = false): number | null =>
+  kind === 'solar' ? SOURCE_HUE.solar : kind === 'battery' ? SOURCE_HUE.battery
+  : kind === 'grid' ? (sink ? SOURCE_HUE.gridExport : SOURCE_HUE.grid) : null;
 export const colorFor = (kind: string, i: number) =>
   KIND_COLOR[kind] || ['#4f8cff', '#46c46a', '#d08700', '#b06fd0', '#3fb0a8', '#c05c5c'][i % 6];
 
@@ -54,6 +65,8 @@ export function barChart(opts: {
   overlay?: Line;
   /// Bars, lines or filled areas. Lines are never stacked.
   kind?: 'bar' | 'line' | 'area';
+  /// A dashed reference line at this value.
+  ref?: number;
 }): { svg: any; gaps: number } {
   const { days, lines, units } = opts;
   const kind = opts.kind || 'bar';
@@ -78,7 +91,7 @@ export function barChart(opts: {
 
   // Fitted charts take the whole pane: at a fixed 26px a bar, thirty days was a 780px chart marooned in a
   // 2,200px page. Bars stretch to fill it, but only so far — a seven-bar week at full width would be slabs.
-  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(360, opts.fitTo) : Math.max(720, days.length * 26);
+  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(280, opts.fitTo) : Math.max(720, days.length * 26);
   const H = opts.height && opts.height > 0 ? opts.height : 240;
   const padL = 56, padB = 40, padT = 12, padR = 8;
   const plotW = W - padL - padR, plotH = H - padT - padB;
@@ -87,6 +100,11 @@ export function barChart(opts: {
   const barW = Math.min(Math.max(3, slot * 0.72), 48);
   const y = (v: number) => padT + plotH - ((v - trough) / span) * plotH;
   const zeroY = y(0);
+  // A day key is charted without its year; a clock label (an intra-day moment) is already what to show.
+  const tickText = (day: string) => /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(5) : day;
+  // As many axis labels as fit the width, at most 12.
+  const labelPx = Math.max(1, ...days.map(dd => tickText(dd).length)) * 6.5 + 12;
+  const every = Math.ceil(days.length / Math.max(2, Math.min(12, Math.floor(plotW / labelPx))));
 
   const svg = svgTag('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'trend-chart' });
 
@@ -150,11 +168,9 @@ export function barChart(opts: {
       }
     }
 
-    const every = Math.ceil(days.length / 12);
     if (d % every === 0) {
       const t = svgTag('text', { x: x(d) + slot / 2, y: H - padB + 16, 'text-anchor': 'middle', fill: 'var(--muted)', 'font-size': 11 });
-      // A day key is charted without its year; a clock label (an intra-day moment) is already what to show.
-      t.textContent = /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(5) : day;
+      t.textContent = tickText(day);
       svg.appendChild(t);
     }
   });
@@ -214,6 +230,8 @@ export function barChart(opts: {
 
   // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
   svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
+  if (opts.ref != null && opts.ref >= trough && opts.ref <= peak)
+    svg.appendChild(svgTag('line', { x1: padL, y1: y(opts.ref), x2: W - padR, y2: y(opts.ref), stroke: 'var(--muted)', 'stroke-width': 1, 'stroke-dasharray': '4 4', class: 'trend-ref' }));
 
   // A full-height hit area per day, over the bars.
   days.forEach((day, d) => {
@@ -283,6 +301,8 @@ export function sparkline(opts: {
   /// Draw a light grid behind the line, with the scale down the side and the time along the bottom. Off by
   /// default: a strip a few centimetres wide has no room for it, and the shape is the whole message there.
   grid?: boolean;
+  /// Scale from zero (the default), or to the readings' own range, where a 250 V line would otherwise be flat.
+  fromZero?: boolean;
 }): any {
   const { values, color, units } = opts;
   const w = opts.width ?? 132, h = opts.height ?? 40;
@@ -298,7 +318,7 @@ export function sparkline(opts: {
     return empty;
   }
 
-  const lo = Math.min(...known, 0), hi = Math.max(...known);
+  const lo = opts.fromZero === false ? Math.min(...known) : Math.min(...known, 0), hi = Math.max(...known);
   const span = hi - lo || 1;
   const x = (i: number) => padL + (values.length === 1 ? 0 : (i * (w - padL - pad)) / (values.length - 1));
   const y = (v: number) => h - padB - ((v - lo) / span) * (h - padB - pad);
@@ -442,10 +462,13 @@ export function rankChart(opts: {
 }): { svg: any; gaps: number } {
   const items = opts.items.filter(i => i.value > 0).sort((a, b) => b.value - a.value);
   const total = items.reduce((s, i) => s + i.value, 0);
-  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(420, opts.fitTo) : 720;
+  const W = opts.fitTo && opts.fitTo > 0 ? Math.max(280, opts.fitTo) : 720;
   const rowH = 22, padT = 8;
   const ring = opts.share && total > 0 ? 180 : 0;
-  const H = Math.max(ring, padT * 2 + items.length * rowH);
+  // Too narrow for the ring beside the bars: it goes above them.
+  const narrow = W < 560;
+  const rowsTop = narrow ? ring : 0;
+  const H = narrow ? ring + padT * 2 + items.length * rowH : Math.max(ring, padT * 2 + items.length * rowH);
   const svg = svgTag('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'trend-chart trend-rank' });
   const pct = (v: number) => `${(v / total * 100).toFixed(1)}%`;
   const titled = (node: any, text: string) => {
@@ -458,7 +481,7 @@ export function rankChart(opts: {
     `${it.label}: ${formatNum(Number(it.value.toFixed(2)))} ${opts.units}${opts.share ? ` · ${pct(it.value)}` : ''}${it.note ? ` · ${it.note}` : ''}`;
 
   if (ring) {
-    const cx = ring / 2, cy = H / 2, r = 70, inner = 42;
+    const cx = narrow ? W / 2 : ring / 2, cy = narrow ? ring / 2 : H / 2, r = 70, inner = 42;
     const at = (rad: number, a: number) => `${(cx + rad * Math.cos(a)).toFixed(2)},${(cy + rad * Math.sin(a)).toFixed(2)}`;
     let angle = -Math.PI / 2;
     items.forEach(it => {
@@ -476,18 +499,23 @@ export function rankChart(opts: {
     });
   }
 
-  const x0 = ring + 160, valueW = 190;
-  const barMax = Math.max(40, W - x0 - valueW - 8);
+  const valueText = (it: typeof items[number]) =>
+    `${formatNum(Number(it.value.toFixed(2)))} ${opts.units}${opts.share ? ` · ${pct(it.value)}` : ''}${it.note ? ` · ${it.note}` : ''}`;
+  const nameW = narrow ? Math.round(W * 0.3) : 160;
+  const maxChars = narrow ? Math.max(6, Math.floor((nameW - 8) / 6.5)) : 24;
+  const x0 = (narrow ? 0 : ring) + nameW;
+  const valueW = Math.min(190, Math.max(0, ...items.map(it => valueText(it).length)) * 6 + 8);
+  const barMax = Math.max(24, W - x0 - valueW - 8);
   const top = items.length ? items[0].value : 1;
   items.forEach((it, i) => {
-    const yy = padT + i * rowH;
+    const yy = rowsTop + padT + i * rowH;
     const name = svgTag('text', { x: x0 - 8, y: yy + 15, 'text-anchor': 'end', fill: 'var(--fg)', 'font-size': 12 });
-    name.textContent = it.label.length > 24 ? it.label.slice(0, 23) + '…' : it.label;
+    name.textContent = it.label.length > maxChars ? it.label.slice(0, maxChars - 1) + '…' : it.label;
     svg.appendChild(name);
     const w = Math.max(1, (it.value / top) * barMax);
     svg.appendChild(titled(svgTag('rect', { x: x0, y: yy + 4, width: w, height: rowH - 8, fill: it.color, class: 'trend-rank-bar' }), describe(it)));
     const value = svgTag('text', { x: x0 + w + 6, y: yy + 15, fill: 'var(--muted)', 'font-size': 11 });
-    value.textContent = `${formatNum(Number(it.value.toFixed(2)))} ${opts.units}${opts.share ? ` · ${pct(it.value)}` : ''}${it.note ? ` · ${it.note}` : ''}`;
+    value.textContent = valueText(it);
     svg.appendChild(value);
   });
   return { svg, gaps: 0 };

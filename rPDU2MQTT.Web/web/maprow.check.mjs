@@ -23,6 +23,7 @@ const { sandbox, getEl } = makeDom({
   bodies: (url) =>
     url.includes('/api/schema') ? schema
     : url.includes('/api/instances') ? { ok: true, instances: [] }
+    : url.includes('/api/integrations') ? { ok: true, integrations: [{ id: 'vertiv' }] }
     : url.includes('/api/config') ? config
     : { ok: true },
 });

@@ -23,23 +23,41 @@ export function addNodeTrendsSection(nav: any, sections: any) {
   // Which selected nodes are drawn in their own colour, and that colour, for the current draw.
   let colours = new Map<string, string>();
 
-  // Kinds and tags flow in one row: two rows of chips before the chart was half the page on a real install.
-  const tagRow = el('div', { style: { display: 'contents' } });
+  // What to chart sits behind one button above the chart: a real install has over a hundred nodes and dozens
+  // of kinds and tags, and laid out as chips they pushed the chart off the first screen.
+  const tagRow = el('div', { class: 'nt-chips' });
   const search = el('input', { class: 'trend-search' }) as HTMLInputElement;
   search.type = 'search';
   search.placeholder = 'Filter nodes';
   search.title = 'Show only the nodes whose name, id or tags contain this text.';
-  const searchRow = el('div', { class: 'ld-toolbar' }, search);
-  const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
-  // The node list is dozens of chips on a real install, so it folds into one line saying what is charted.
-  const nodesBar = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
-  const nodesPanel = el('div', {}, searchRow, picker);
-  const NODES_OPEN_KEY = 'rpdu-node-trends-nodes-open';
-  let nodesOpen = (() => { try { return localStorage.getItem(NODES_OPEN_KEY) === '1'; } catch { return false; } })();
-  const setNodesOpen = (on: boolean) => {
-    nodesOpen = on;
-    try { localStorage.setItem(NODES_OPEN_KEY, on ? '1' : '0'); } catch { /* private mode: this session only */ }
+  const listTools = el('div', { class: 'nt-tools' });
+  const searchRow = el('div', { class: 'nt-search' }, search, listTools);
+  const picker = el('div', { class: 'nt-list' });
+  const nodesPanel = el('div', { class: 'nt-nodes' }, searchRow, picker);
+  const face = el('span', { class: 'ss-face' });
+  const faceBtn = el('button', { class: 'ss-btn nt-btn', type: 'button', title: 'Choose what is charted: by kind, by tag, or node by node.' },
+    face, el('span', { class: 'ss-caret', text: '▾' }));
+  faceBtn.setAttribute('aria-haspopup', 'dialog');
+  faceBtn.setAttribute('aria-expanded', 'false');
+  const resetHolder = el('span');
+  const kindRow = el('div', { class: 'nt-chips' });
+  const kindBlock = el('div', { class: 'nt-block' }, el('div', { class: 'nt-head', text: 'Kinds' }), kindRow);
+  const tagBlock = el('div', { class: 'nt-block' }, el('div', { class: 'nt-head', text: 'Tags' }), tagRow);
+  const nodeBlock = el('div', { class: 'nt-block' }, el('div', { class: 'nt-head', text: 'Nodes' }), nodesPanel);
+  const pop = el('div', { class: 'nt-pop', role: 'dialog' }, kindBlock, tagBlock, nodeBlock);
+  pop.hidden = true;
+  const nodesBar = el('div', { class: 'nt-bar' }, el('span', { class: 'desc', style: { margin: '0' }, text: 'Charting' }),
+    el('div', { class: 'nt-anchor' }, faceBtn, pop), resetHolder);
+  const outside = (e: any) => { if (!nodesBar.contains(e.target)) setOpen(false); };
+  const setOpen = (on: boolean) => {
+    if (on === !pop.hidden) return;
+    pop.hidden = !on;
+    faceBtn.setAttribute('aria-expanded', String(on));
+    if (on) document.addEventListener('pointerdown', outside, true);
+    else document.removeEventListener('pointerdown', outside, true);
   };
+  faceBtn.onclick = () => setOpen(pop.hidden);
+  pop.onkeydown = (e: any) => { if (e.key === 'Escape') { e.preventDefault(); setOpen(false); faceBtn.focus?.(); } };
   const table = el('div');
   const overlaySel = el('select', { title: 'Draw one more series as a line over the chart, on the same axis.' }) as HTMLSelectElement;
 
@@ -81,15 +99,15 @@ export function addNodeTrendsSection(nav: any, sections: any) {
   const kindName = (k: string) => k === 'pdu' ? 'PDU' : k === 'outlet' ? 'Outlet' : k === 'unmeasured' ? 'Unmeasured'
     : kindMeta(k)[0] === k ? kindMeta(k)[1] : k;
 
+  const kindsOnPage = () => [...new Set(all().map(kindOf))]
+    .sort((a, b) => ((KIND_ORDER.indexOf(a) + 1 || 99) - (KIND_ORDER.indexOf(b) + 1 || 99)) || a.localeCompare(b));
+
   /// One chip per kind on the page: what a node is decides what it is sensible to chart beside it.
-  const kindRow = el('div', { style: { display: 'contents' } });
-  const filterRow = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } }, kindRow, tagRow);
   const drawKinds = () => {
     kindRow.innerHTML = '';
-    const kinds = [...new Set(all().map(kindOf))]
-      .sort((a, b) => ((KIND_ORDER.indexOf(a) + 1 || 99) - (KIND_ORDER.indexOf(b) + 1 || 99)) || a.localeCompare(b));
+    const kinds = kindsOnPage();
+    kindBlock.hidden = kinds.length < 2;
     if (kinds.length < 2) return;
-    kindRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Kinds:' }));
     kinds.forEach(kind => {
       const members = all().filter((s: any) => kindOf(s) === kind);
       const allOn = members.every((s: any) => !off.has(s.node));
@@ -129,8 +147,8 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     tagRow.innerHTML = '';
     const tags = new Set<string>();
     all().forEach((s: any) => (s.tags || []).forEach((t: string) => tags.add(t)));
+    tagBlock.hidden = !tags.size;
     if (!tags.size) return;
-    tagRow.appendChild(el('span', { class: 'desc', style: { margin: '0 0 0 10px' }, text: 'Tags:' }));
     [...tags].sort().forEach(tag => {
       const members = all().filter((s: any) => (s.tags || []).includes(tag));
       const allOn = members.every((s: any) => !off.has(s.node));
@@ -152,7 +170,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     all().forEach((s: any, i: number) => {
       if (!matches(s)) return;
       const on = !off.has(s.node);
-      const chip = btn((on ? '● ' : '○ ') + (s.label || s.node));
+      const chip = btn((on ? '● ' : '○ ') + (s.label || s.node), 'nt-node');
       chip.title = (on ? 'On the chart — click to take it off' : 'Off the chart — click to add it')
         + ((s.tags || []).length ? `\ntags: ${(s.tags || []).join(', ')}` : '');
       // Selected reads the same whether or not the node has its own colour; the colour is only its border.
@@ -171,21 +189,30 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     const none = btn('None');
     none.title = filter ? 'Take every node matching the filter off the chart.' : 'Take every node off the chart.';
     none.onclick = () => { visible.forEach((s: any) => off.add(s.node)); page.draw(); };
-    const reset = btn('Reset', 'primary');
+    const reset = btn('Reset');
     reset.title = 'Back to the default: one kind that splits the total without counting it twice — circuits where there are any.';
     reset.onclick = () => {
       try { localStorage.removeItem(KINDS_KEY); } catch { /* private mode */ }
       resetSelection(false);
       page.draw();
     };
-    nodesBar.innerHTML = '';
-    const charted = all().filter((s: any) => !off.has(s.node)).length;
-    const toggle = btn(nodesOpen ? 'Hide node list ▴' : 'Choose nodes ▾');
-    toggle.title = nodesOpen ? 'Fold the node list away.' : 'Pick individual nodes, or filter them by name.';
-    toggle.onclick = () => { setNodesOpen(!nodesOpen); drawPicker(); };
-    nodesBar.append(el('span', { class: 'desc', style: { margin: '0' }, text: `Nodes: ${charted} of ${all().length} charted` }),
-      toggle, allBtn, none, reset);
-    nodesPanel.hidden = !nodesOpen;
+    listTools.innerHTML = '';
+    listTools.append(allBtn, none);
+    resetHolder.innerHTML = '';
+    resetHolder.append(reset);
+    face.textContent = describe();
+  };
+
+  /// What the button says is charted: the kinds when whole kinds are, then how many of the nodes.
+  const describe = () => {
+    const charted = shown();
+    const count = `${charted.length} of ${all().length} nodes`;
+    if (!charted.length) return 'No nodes';
+    if (charted.length === all().length) return `All ${all().length} nodes`;
+    const kinds = kindsOnPage().filter(k => charted.some((s: any) => kindOf(s) === k));
+    const whole = kinds.every(k => all().filter((s: any) => kindOf(s) === k).every((s: any) => !off.has(s.node)));
+    if (whole && kinds.length <= 2) return `${kinds.map(kindName).join(' + ')} · ${count}`;
+    return count;
   };
   search.oninput = () => { filter = search.value.trim().toLowerCase(); drawPicker(); };
 
@@ -224,7 +251,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     });
 
     const perDay = p.perDay();
-    const cols: { head: string; num: boolean; text: (r: any) => string; sort: (r: any) => any; title?: string }[] = [
+    const cols: { head: string; num: boolean; text: (r: any) => string; sort: (r: any) => any; title?: string; cls?: string }[] = [
       { head: 'Node', num: false, text: r => r.label, sort: r => r.label.toLowerCase() },
       { head: p.summable() ? `Total (${units})` : `Peak (${units})`, num: true,
         text: r => r.headline == null ? '—' : formatNum(Number(r.headline.toFixed(2))),
@@ -240,7 +267,9 @@ export function addNodeTrendsSection(nav: any, sections: any) {
         title: !perDay || !partial ? undefined
           : `Over the days that reported. ${partial} is one of them and is only part-way through, so the mean reads low until it ends.` },
       { head: `${perDay ? 'Days' : 'Samples'} with data`, num: true,
-        text: r => `${r.covered} of ${days.length}`, sort: r => r.covered },
+        text: r => `${r.covered} of ${days.length}`, sort: r => r.covered,
+        // Nothing to say when every row is complete; phones drop it then.
+        cls: rows.every((r: any) => r.covered === days.length) ? 'col-full' : '' },
       { head: perDay ? 'Peak day' : 'Peak at', num: false,
         text: r => r.peakAt ? `${r.peakAt} · ${formatNum(r.peakValue)}${r.peakAt === partial ? ' · so far' : ''}` : '—',
         sort: r => r.peakAt },
@@ -257,7 +286,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     const t = el('table', { class: 'ld' });
     const head = el('tr');
     cols.forEach((c, i) => {
-      const th = el('th', { class: c.num ? 'num sortable' : 'sortable' });
+      const th = el('th', { class: (c.num ? 'num sortable ' : 'sortable ') + (c.cls || '') });
       th.append(c.head + (sort.col === i ? (sort.desc ? ' ▾' : ' ▴') : ''));
       th.title = (c.title ? c.title + '\n' : '') + 'Click to sort by this column.';
       th.onclick = () => { if (sort.col === i) sort.desc = !sort.desc; else { sort.col = i; sort.desc = c.num; } p.draw(); };
@@ -267,7 +296,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     const tb = el('tbody');
     rows.forEach((r: any) => {
       const tr = el('tr');
-      cols.forEach(c => tr.appendChild(el('td', { class: c.num ? 'num' : '', text: c.text(r) })));
+      cols.forEach(c => tr.appendChild(el('td', { class: (c.num ? 'num ' : '') + (c.cls || ''), text: c.text(r) })));
       tb.appendChild(tr);
     });
     t.appendChild(tb);
@@ -368,12 +397,13 @@ export function addNodeTrendsSection(nav: any, sections: any) {
       }
       return lines;
     },
-    above: () => [filterRow, nodesBar, nodesPanel],
+    above: () => [nodesBar],
     below: () => [table],
     loaded: () => {
       if (pending) {
         off.clear();
-        const wanted = new Set(pending.nodes);
+        // A node's return lane comes with it: export is part of the grid's day.
+        const wanted = new Set(pending.nodes.flatMap(id => [id, id + '#in']));
         all().forEach((s: any) => { if (!wanted.has(s.node)) off.add(s.node); });
         // None of what was asked for is in this window: fall back rather than chart nothing.
         if (off.size === all().length) resetSelection();

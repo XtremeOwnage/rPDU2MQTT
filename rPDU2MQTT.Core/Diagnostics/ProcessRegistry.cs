@@ -1,9 +1,9 @@
 namespace rPDU2MQTT.Core.Diagnostics;
 
-/// <summary>The EmonCMS outcome a process carries with its registration.</summary>
-public sealed record EmonCmsReport
+public sealed record IntegrationReport
 {
     public bool? Ok { get; init; }
+    public DateTime? LastAttemptUtc { get; init; }
     public DateTime? LastSuccessUtc { get; init; }
     public string? LastError { get; init; }
     public int Count { get; init; }
@@ -18,7 +18,7 @@ public sealed record ProcessInfo
     public DateTime StartedUtc { get; init; }
     public string? Version { get; init; }
     public DateTime TimestampUtc { get; init; }
-    public EmonCmsReport? EmonCms { get; init; }
+    public IReadOnlyDictionary<string, IntegrationReport> Integrations { get; init; } = new Dictionary<string, IntegrationReport>();
 }
 
 /// <summary>
@@ -58,4 +58,22 @@ public sealed class ProcessRegistry
             return processes.Values.ToList();
         }
     }
+}
+
+public static class IntegrationReports
+{
+    public static IReadOnlyDictionary<string, IntegrationReport> Local(Integrations.IntegrationStatus? status)
+        => (status?.All() ?? new Dictionary<string, Integrations.IntegrationStatus.Entry>())
+               .Where(kv => kv.Value.LastAttemptUtc is not null)
+               .ToDictionary(kv => kv.Key, kv => new IntegrationReport
+               {
+                   Ok = kv.Value.LastOk, LastAttemptUtc = kv.Value.LastAttemptUtc, LastSuccessUtc = kv.Value.LastSuccessUtc,
+                   LastError = kv.Value.LastError, Count = kv.Value.Count,
+               }, StringComparer.OrdinalIgnoreCase);
+
+    public static IntegrationReport? Freshest(IEnumerable<ProcessInfo> processes, string id)
+        => processes.Where(p => (DateTime.UtcNow - p.TimestampUtc).TotalSeconds <= ProcessRegistry.StaleAfterSeconds)
+                    .OrderByDescending(p => p.TimestampUtc)
+                    .Select(p => p.Integrations.TryGetValue(id, out var r) ? r : null)
+                    .FirstOrDefault(r => r is not null);
 }

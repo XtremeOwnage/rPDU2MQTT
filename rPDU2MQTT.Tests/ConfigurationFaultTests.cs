@@ -77,9 +77,9 @@ public class ConfigurationFaultTests
         cfg.EmonCMS.Transport = rPDU2MQTT.Models.Config.EmonCmsTransport.Http;
         cfg.EmonCMS.Url = null;
 
-        var emon = new rPDU2MQTT.Integrations.EmonCms.EmonCmsIntegration(
-            cfg, new rPDU2MQTT.Services.EmonCmsStatus(new rPDU2MQTT.Core.Integrations.IntegrationStatus()),
-            new rPDU2MQTT.Services.EmonCmsFeedSync(cfg, new StubSnapshots()));
+        var emon = new rPDU2MQTT.Plugin.EmonCms.EmonCmsIntegration(
+            cfg, new rPDU2MQTT.Core.Integrations.IntegrationStatus(),
+            new rPDU2MQTT.Plugin.EmonCms.EmonCmsFeedSync(cfg, new StubSnapshots()));
 
         Assert.NotNull(emon.Misconfigured(cfg));
 

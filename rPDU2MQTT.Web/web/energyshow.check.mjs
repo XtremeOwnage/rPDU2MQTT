@@ -120,7 +120,7 @@ if (!/today/.test(ssLive.textContent)) fail(`self-sufficiency does not say it co
 // Power: dials are drawn against the stated Max.
 if (!query(getEl('sections'), 'svg', true).some(g => cn(g).includes('gauge'))) fail('no gauge on the power view');
 
-const show = query(getEl('sections'), 'select', true)
+const show = query(energySec, 'select', true)
   .find(s => (s.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === 'energy_d'));
 if (!show) fail('no Show selector offering energy today');
 show.value = 'energy_d';

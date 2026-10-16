@@ -84,6 +84,16 @@ for (const s of sparks(drawn)) {
     if (p.attrs['stroke-width'] !== '2') fail(`a trend line is ${p.attrs['stroke-width']}px — the spec is 2`);
 }
 
+// --- No Home node: Home trend is the balance of its sources.
+const homeTile = (root) => query(root, '.energy-tile', true).find(t => t.classList.has('home'));
+if (!homeTile(drawn)) fail('no Home tile');
+if (!sparks(homeTile(drawn)).length) fail('Home had no trend, though every source it balances reported at every step');
+
+// --- An export lane (grid#in) still gives Home a line.
+const exporting = await render({ ...withData, series: [...withData.series,
+  { node: 'grid#in', label: 'Grid', kind: 'grid', balance: 'grid', values: [0, 0, 100, 200, 300] }] });
+if (!sparks(homeTile(exporting)).length) fail('Home lost its trend when the grid reported an export lane');
+
 // --- No readings at all: no line, and nothing pretending to be one.
 const none = await render({ ok: true, metric: 'realpower', units: 'W', series: [] });
 if (sparks(none).length)
@@ -123,9 +133,11 @@ if (!solarTile) fail(`no solar tile; tiles present: ${JSON.stringify(tiles.map(t
 if (sparks(solarTile).length)
   fail("the solar trend was drawn while one of its two arrays reported nothing — that line is the half "
      + 'that answered, presented as the whole array');
+if (sparks(homeTile(half)).length)
+  fail('Home drew a balance from half of the solar array; a step missing a source is a gap');
 const gridTile = tiles.find(t => t.classList.has('grid'));
 if (gridTile && !sparks(gridTile).length)
   fail('the grid trend vanished, though the grid reported at every step');
 
 console.log(`sparkline: a trend per tile from real readings (${sparks(drawn).length} drawn, 2px), `
-  + 'nothing at all when the backend has none, a gap left as a gap, and a partial sum refused');
+  + 'Home as the balance of its sources, nothing at all when the backend has none, a gap left as a gap, and a partial sum refused');

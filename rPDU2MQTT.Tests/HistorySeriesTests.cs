@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Net;
 using rPDU2MQTT.Classes;
-using rPDU2MQTT.Integrations.EmonCms;
+using rPDU2MQTT.Plugin.EmonCms;
 using rPDU2MQTT.Integrations.HomeAssistant;
 
 namespace rPDU2MQTT.Tests;
@@ -200,8 +200,8 @@ public class HistorySeriesTests
     private static Config HassConfigured()
     {
         var cfg = new Config();
-        cfg.HASS.EnergyDashboard.Url = "http://hass.local";
-        cfg.HASS.EnergyDashboard.Token = "t";
+        cfg.HASS.Url = "http://hass.local";
+        cfg.HASS.Token = "t";
         cfg.History.Provider = "homeassistant";
         return cfg;
     }

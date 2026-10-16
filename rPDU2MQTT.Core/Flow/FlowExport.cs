@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.PDU;
+using rPDU2MQTT.Core.Integrations;
 
 namespace rPDU2MQTT.Core.Flow;
 
@@ -197,7 +198,7 @@ public static class FlowExport
     /// </summary>
     public static JsonObject DiscoveryDocument(FlowNode node, string? primaryParentId, string stateTopic,
         string energyUnits, string powerUnits, string? availabilityTopic, bool includeEnergyIn = false, bool includeSoc = false,
-        bool includeEnergyDaily = false, string? area = null)
+        string? area = null, IEnumerable<TierSensor>? extra = null)
     {
         var id = DeviceId(node.Id);
         var device = new JsonObject
@@ -244,19 +245,28 @@ public static class FlowExport
         if (includeEnergyIn)
         {
             var units = string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits;
+            // Out is toward the home (import, discharge); named from the home's side where that is the usual word.
+            var (outName, inName) = node.Kind?.ToLowerInvariant() switch
+            {
+                "grid" => ("Energy Import", "Energy Export"),
+                "battery" => ("Energy Discharged", "Energy Charged"),
+                _ => ("Energy Out", "Energy In"),
+            };
             doc["components"]!.AsObject()[$"{id}_energy_in"] =
-                Sensor($"{id}_energy_in", "Energy In", "energy", "total_increasing", units, "{{ value_json.energy_in }}");
+                Sensor($"{id}_energy_in", inName, "energy", "total_increasing", units, "{{ value_json.energy_in }}");
             doc["components"]!.AsObject()[$"{id}_energy_out"] =
-                Sensor($"{id}_energy_out", "Energy Out", "energy", "total_increasing", units, "{{ value_json.energy_out }}");
+                Sensor($"{id}_energy_out", outName, "energy", "total_increasing", units, "{{ value_json.energy_out }}");
         }
-        // Energy since local midnight.
-        if (includeEnergyDaily)
-            doc["components"]!.AsObject()[$"{id}_energy_d"] =
-                Sensor($"{id}_energy_d", "Energy Daily", "energy", "total_increasing", string.IsNullOrWhiteSpace(energyUnits) ? "kWh" : energyUnits, "{{ value_json.energy_d }}");
+        // Daily sensors this used to publish: platform only removes them from Home Assistant.
+        foreach (var retired in new[] { $"{id}_energy_d", $"{id}_energy_today" })
+            doc["components"]!.AsObject()[retired] = new JsonObject { ["platform"] = "sensor" };
         // A battery tier with a state-of-charge source publishes it too, so HA's battery source can show %.
         if (includeSoc)
             doc["components"]!.AsObject()[$"{id}_soc"] =
                 Sensor($"{id}_soc", "State of charge", "battery", "measurement", "%", "{{ value_json.soc }}");
+        foreach (var x in extra ?? [])
+            doc["components"]!.AsObject()[$"{id}_{x.Key}"] =
+                Sensor($"{id}_{x.Key}", x.Name, x.DeviceClass, "measurement", x.Units, $"{{{{ value_json.{x.Key} }}}}");
         if (!string.IsNullOrEmpty(availabilityTopic))
             doc["availability_topic"] = availabilityTopic;
         return doc;

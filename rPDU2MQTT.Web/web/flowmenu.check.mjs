@@ -50,8 +50,21 @@ const series = (url) => {
   };
 };
 
+// Every reading each node has. Kitchen lights has no power factor or frequency.
+const READINGS = {
+  ok: true,
+  nodes: [
+    { node: 'n30_1_5', readings: [
+      { metric: 'realpower', value: 240, units: 'W' },
+      { metric: 'current', value: 2, units: 'A' },
+      { metric: 'voltage', value: 120.5, units: 'V' },
+      { metric: 'energy_d', value: 1.25, units: 'kWh' },
+    ] },
+  ],
+};
 const { sandbox, getEl } = makeDom({
   bodies: (url) =>
+    url.includes('/api/flow/readings') ? READINGS :
     url.includes('/api/flow/series') ? series(url) :
     url.includes('/api/schema') ? schema :
     url.includes('/api/instances') ? { ok: true, instances: [] } :
@@ -87,7 +100,7 @@ rightClick('n30_1_5');
 if (!menu() || menu().hidden) fail('a right-click on a node opened no menu');
 if (!query(menu(), '.ctx-menu-head') || !/Kitchen lights/.test(query(menu(), '.ctx-menu-head').textContent || ''))
   fail('the menu does not say which node it is for');
-for (const entry of ['History…', 'Trace its supply', 'Edit this node'])
+for (const entry of ['Trace its supply', 'Last 7 days…', 'History…', 'Edit this node'])
   if (!itemSaying(entry)) fail(`the menu does not offer "${entry}": ${items().map(b => b.textContent).join(', ')}`);
 if (itemSaying('Edit this node').disabled) fail('a node of the config cannot be edited from the diagram');
 
@@ -250,8 +263,10 @@ canvas._on.contextmenu[0]({ clientX: 40, clientY: 40, preventDefault() { } });
 for (const entry of ['Clear the trace', 'Fit to the page', 'Refresh'])
   if (!itemSaying(entry)) fail(`the canvas menu does not offer "${entry}": ${items().map(b => b.textContent).join(', ')}`);
 if (!itemSaying('Clear the trace').disabled) fail('the trace can be cleared when nothing is traced');
-// Tracing a node's supply gives it something to clear.
-barFor('n30_1_5')._on.click[0]({ stopPropagation() { } });
+// Tracing a node's supply gives it something to clear. A left click opens the same menu.
+barFor('n30_1_5')._on.click[0]({ clientX: 120, clientY: 80, preventDefault() { }, stopPropagation() { } });
+if (!menu() || menu().hidden) fail('a click on a node opened no menu');
+itemSaying('Trace its supply').onclick();
 canvas._on.contextmenu[0]({ clientX: 40, clientY: 40, preventDefault() { } });
 if (itemSaying('Clear the trace').disabled) fail('a traced diagram cannot be untraced from the menu');
 itemSaying('Clear the trace').onclick();
@@ -297,6 +312,27 @@ if (!asked.every(u => /minutes=60&step=30/.test(u))) fail(`the window picked las
 const marked = query(sheet(), 'button', true).filter(b => b.classList.contains('primary')).map(b => b.textContent);
 if (marked.join() !== 'Last hour') fail(`the sheet does not show which window it is on: ${marked.join(', ')}`);
 shut();
+
+// Last 7 days opens the history on that window.
+asked.length = 0;
+rightClick('n30_1_5');
+itemSaying('Last 7 days…').onclick();
+await wait(120);
+if (!asked.length || !asked.every(u => /days=7&step=3600/.test(u))) fail(`Last 7 days did not ask for the week: ${asked.join(' | ')}`);
+shut();
+
+// The hover card lists the node's other readings: not the one drawn, and nothing it lacks.
+const lights = barFor('n30_1_5');
+lights.dispatch('mouseenter', { clientX: 100, clientY: 100 });
+await wait(60);
+const card = query(sandbox.document.body, '.node-card');
+const cardText = card.textContent || '';
+const names = query(card, '.nh-name', true).map(x => x.textContent);
+for (const want of ['Readings', 'Current', '2 A', 'Voltage', '120.5 V', 'Energy today', '1.25 kWh'])
+  if (!cardText.includes(want)) fail(`the hover card is missing "${want}": ${cardText}`);
+for (const never of ['Power factor', 'Frequency', 'Power'])
+  if (names.includes(never)) fail(`the hover card shows "${never}", which it has no reading for or already shows: ${cardText}`);
+lights.dispatch('mouseleave', {});
 
 // Escape closes the menu, as it closes everything else.
 rightClick('n30_1_5');

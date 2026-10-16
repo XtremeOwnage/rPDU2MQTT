@@ -168,9 +168,11 @@ public sealed class HaEnergyDashboardSync
         // must NOT apply here: a grid tier that's momentarily energy-unknown would otherwise fall through the
         // gap — not in `managed` so never removed, not in `devices` so never re-added — and linger forever.
         var managed = ManagedStats(entityByUniqueId);
+        var uniqueByEntity = Reverse(entityByUniqueId);
         var keep = new JsonArray();
         foreach (var existingDevice in prefs["device_consumption"]?.AsArray() ?? new JsonArray())
-            if (existingDevice is JsonObject o && !managed.Contains((string?)o["stat_consumption"] ?? ""))
+            if (existingDevice is JsonObject o
+                && !EnergyDashboardSync.IsOurDevice((string?)o["stat_consumption"] ?? "", uniqueByEntity, managed))
                 keep.Add(o.DeepClone());
         foreach (var d in devices)
             keep.Add(JsonSerializer.SerializeToNode(d, Json)!);
@@ -181,7 +183,6 @@ public sealed class HaEnergyDashboardSync
         // not by type), so a hand-added second grid/solar survives.
         var sources = BuildEnergySources(entityByUniqueId);
         var ourStats = sources.SelectMany(EnergyDashboardSync.StatsOf).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var uniqueByEntity = Reverse(entityByUniqueId);
         var keepSources = new JsonArray();
         foreach (var existing in prefs["energy_sources"]?.AsArray() ?? new JsonArray())
             if (existing is JsonObject o && !EnergyDashboardSync.IsOurs(o, uniqueByEntity, ourStats))
@@ -240,17 +241,29 @@ public sealed class HaEnergyDashboardSync
     /// </summary>
     public async Task<IReadOnlyList<Core.HomeAssistant.HaDevice>> StaleDevicesAsync(CancellationToken ct = default)
     {
-        var ha = config.HASS.EnergyDashboard;
+        var ha = config.HASS;
         using var ws = await ConnectAuth(ha.Url ?? "", ha.Token ?? "", ct);
         var call = Caller(ws, ct);
 
         var devices = (await call("config/device_registry/list", null))?["result"]?.AsArray() ?? new JsonArray();
         var entities = (await call("config/entity_registry/list", null))?["result"]?.AsArray() ?? new JsonArray();
 
+        // HA marks an entity no integration provides any more with restored: true.
+        var states = (await call("get_states", null))?["result"]?.AsArray() ?? new JsonArray();
+        var restored = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var st in states)
+            if ((bool?)st?["attributes"]?["restored"] == true && (string?)st?["entity_id"] is { Length: > 0 } eid)
+                restored.Add(eid);
+
         var perDevice = new Dictionary<string, int>(StringComparer.Ordinal);
+        var orphaned = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var e in entities)
             if ((string?)e?["device_id"] is { Length: > 0 } id)
+            {
                 perDevice[id] = perDevice.TryGetValue(id, out var n) ? n + 1 : 1;
+                if ((string?)e?["entity_id"] is { } eid && restored.Contains(eid))
+                    orphaned[id] = orphaned.TryGetValue(id, out var r) ? r + 1 : 1;
+            }
 
         var all = new List<Core.HomeAssistant.HaDevice>();
         foreach (var d in devices)
@@ -270,7 +283,8 @@ public sealed class HaEnergyDashboardSync
 
             all.Add(new Core.HomeAssistant.HaDevice(
                 id, (string?)d?["name_by_user"] ?? (string?)d?["name"], idents,
-                perDevice.TryGetValue(id, out var c) ? c : 0, entries));
+                perDevice.TryGetValue(id, out var c) ? c : 0, entries,
+                orphaned.TryGetValue(id, out var o) ? o : 0));
         }
         return Core.HomeAssistant.HaStaleDevices.Stale(all);
     }
@@ -285,7 +299,7 @@ public sealed class HaEnergyDashboardSync
     /// </summary>
     public async Task<int> DeleteDevicesAsync(IEnumerable<Core.HomeAssistant.HaDevice> devices, CancellationToken ct = default)
     {
-        var ha = config.HASS.EnergyDashboard;
+        var ha = config.HASS;
         using var ws = await ConnectAuth(ha.Url ?? "", ha.Token ?? "", ct);
         var call = Caller(ws, ct);
 
@@ -302,93 +316,6 @@ public sealed class HaEnergyDashboardSync
                 else Log.Warning($"Home Assistant refused to remove device '{d.Name ?? d.Id}': {r?["error"]?["message"]}");
             }
         return removed;
-    }
-
-    /// <summary>This bridge's device identifiers and the room each is in: tiers, places, and native PDUs and outlets (#467).</summary>
-    public IReadOnlyDictionary<string, string> DeviceRooms(Models.Config.EnergyFlowConfig flow)
-    {
-        var merged = new PduData();
-        foreach (var s in snapshots.All) merged.Devices.AddRange(s.Data.Devices);
-        var index = LocationIndex.For(flow);
-        var placed = LocationRollup.Placed(index, FlowTopology.For(merged, flow))
-            .Where(kv => index[kv.Value] is { Kind: Models.Config.LocationKind.Room })
-            .ToDictionary(kv => kv.Key, kv => index[kv.Value]!.Id, StringComparer.OrdinalIgnoreCase);
-
-        var rooms = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (node, room) in placed) rooms[FlowExport.DeviceId(node)] = room;
-        foreach (var d in merged.Devices)
-        {
-            if (placed.TryGetValue(FlowNodeId.ForPdu(d.Entity_Name), out var pr) && !string.IsNullOrEmpty(d.Entity_Identifier)) rooms[d.Entity_Identifier] = pr;
-            foreach (var o in d.Outlets)
-                if (placed.TryGetValue(FlowNodeId.ForOutlet(d.Entity_Name, o.Key), out var or) && !string.IsNullOrEmpty(o.Entity_Identifier)) rooms[o.Entity_Identifier] = or;
-        }
-        foreach (var room in index.All.Where(e => e.Kind == Models.Config.LocationKind.Room))
-            rooms[FlowExport.DeviceId(LocationExport.NodeId(room.Id))] = room.Id;
-        return rooms;
-    }
-
-    private static async Task<(IReadOnlyList<Core.HomeAssistant.HaArea> Areas, IReadOnlyList<Core.HomeAssistant.HaRegistryDevice> Devices)> ReadRegistry(
-        Func<string, JsonObject?, Task<JsonNode?>> call)
-    {
-        var areas = new List<Core.HomeAssistant.HaArea>();
-        foreach (var a in (await call("config/area_registry/list", null))?["result"]?.AsArray() ?? new JsonArray())
-            if ((string?)a?["area_id"] is { Length: > 0 } id) areas.Add(new(id, (string?)a?["name"] ?? id));
-
-        var devices = new List<Core.HomeAssistant.HaRegistryDevice>();
-        foreach (var d in (await call("config/device_registry/list", null))?["result"]?.AsArray() ?? new JsonArray())
-        {
-            if ((string?)d?["id"] is not { Length: > 0 } id) continue;
-            var idents = new List<string>();
-            foreach (var pair in d?["identifiers"]?.AsArray() ?? new JsonArray())
-                if (pair is JsonArray a && a.Count > 1 && (string?)a[1] is { } value) idents.Add(value);
-            devices.Add(new(id, (string?)d?["name_by_user"] ?? (string?)d?["name"] ?? id, idents, (string?)d?["area_id"]));
-        }
-        return (areas, devices);
-    }
-
-    private static List<Core.HomeAssistant.HaRoom> Rooms(Models.Config.EnergyFlowConfig flow) =>
-        [.. LocationIndex.For(flow).All.Where(e => e.Kind == Models.Config.LocationKind.Room)
-            .Select(e => new Core.HomeAssistant.HaRoom(e.Id, e.Label, e.Room!.HaArea))];
-
-    /// <summary>What publishing rooms as areas would do, read from Home Assistant but writing nothing (#467).</summary>
-    public async Task<Core.HomeAssistant.HaAreaPlan> PlanAreasAsync(Models.Config.EnergyFlowConfig flow, string url, string token, CancellationToken ct)
-    {
-        using var ws = await ConnectAuth(url, token, ct);
-        var (areas, devices) = await ReadRegistry(Caller(ws, ct));
-        return Core.HomeAssistant.HaAreaPlan.Build(Rooms(flow), areas, devices, DeviceRooms(flow));
-    }
-
-    /// <summary>Create, rename and link the areas, and put unplaced devices in them. Returns each room's area id.</summary>
-    public async Task<(Core.HomeAssistant.HaAreaPlan Plan, Dictionary<string, string> Linked, List<string> Failed)> ApplyAreasAsync(
-        Models.Config.EnergyFlowConfig flow, string url, string token, CancellationToken ct)
-    {
-        using var ws = await ConnectAuth(url, token, ct);
-        var call = Caller(ws, ct);
-        var (areas, devices) = await ReadRegistry(call);
-        var plan = Core.HomeAssistant.HaAreaPlan.Build(Rooms(flow), areas, devices, DeviceRooms(flow));
-
-        var linked = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var failed = new List<string>();
-        foreach (var r in plan.Rooms)
-        {
-            JsonNode? reply = r.Action switch
-            {
-                Core.HomeAssistant.HaAreaPlan.Create => await call("config/area_registry/create", new JsonObject { ["name"] = r.Name }),
-                Core.HomeAssistant.HaAreaPlan.Rename => await call("config/area_registry/update", new JsonObject { ["area_id"] = r.AreaId, ["name"] = r.Name }),
-                _ => null,
-            };
-            if (reply is not null && (bool?)reply["success"] != true) { failed.Add($"{r.Name}: {reply["error"]?["message"]}"); continue; }
-            var areaId = r.Action == Core.HomeAssistant.HaAreaPlan.Create ? (string?)reply?["result"]?["area_id"] : r.AreaId;
-            if (!string.IsNullOrEmpty(areaId)) linked[r.Room] = areaId;
-        }
-
-        foreach (var d in plan.Devices.Where(d => d.Action == Core.HomeAssistant.HaAreaPlan.Set))
-        {
-            if (!linked.TryGetValue(d.RoomId, out var areaId)) continue;
-            var reply = await call("config/device_registry/update", new JsonObject { ["device_id"] = d.DeviceId, ["area_id"] = areaId });
-            if ((bool?)reply?["success"] != true) failed.Add($"{d.DeviceName}: {reply?["error"]?["message"]}");
-        }
-        return (plan, linked, failed);
     }
 
     private static async Task<ClientWebSocket> ConnectAuth(string url, string token, CancellationToken ct)

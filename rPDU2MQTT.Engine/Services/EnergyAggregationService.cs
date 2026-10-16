@@ -54,6 +54,8 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
 
     private static readonly string EnergyInMetric = FlowMetricKey.For(EnergyMetric, "in");
     private static readonly string PeriodInMetric = FlowMetricKey.For(EnergyPeriod.Metric, "in");
+    private static readonly string PowerInMetric = FlowMetricKey.For(PowerMetric, "in");
+    private static readonly string OwnTotalInMetric = FlowMetricKey.For(FlowMetricKey.OwnEnergyTotal, "in");
 
     /// <summary>The measurement a PDU reports its own cumulative energy under.</summary>
     private string OutletEnergyMetric
@@ -71,6 +73,14 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
 
         // The return lane (battery charge / grid export) is a counter in its own right, daily and lifetime alike.
         var key = nodeId;
+        if (metric.StartsWith(FlowMetricKey.OwnEnergyTotal, StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.Equals(metric, OwnTotalInMetric, StringComparison.OrdinalIgnoreCase)) key += FlowMetricKey.InSuffix;
+            else if (!string.Equals(metric, FlowMetricKey.OwnEnergyTotal, StringComparison.OrdinalIgnoreCase)) return false;
+            if (!loaded || !states.TryGetValue(key, out var own) || own.LastSampleUtc == default) return false;
+            value = own.KWh;
+            return true;
+        }
         if (string.Equals(metric, PeriodInMetric, StringComparison.OrdinalIgnoreCase))
         {
             key = nodeId + FlowMetricKey.InSuffix;
@@ -217,19 +227,19 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
             // A node bound to a real cumulative energy source is re-based exactly as an outlet is.
             if (Periods && upstream.TryGetValue(id, EnergyMetric, out var counter))
             {
-                next[id] = ObserveLifetime(id, "energy", Prev(next, id), counter, now, periodKey);
+                next[id] = ObserveLifetime(id, "energy", Resume(Prev(next, id)), counter, now, periodKey);
                 sampled++;
             }
             // A daily counter's rises are just as real, so they add up to the cumulative total nothing else gives this node.
             else if (Periods && upstream.TryGetValue(id, EnergyPeriod.Metric, out var daily))
             {
-                next[id] = EnergyIntegrator.Observe(Prev(next, id), daily, now, periodKey);
+                next[id] = EnergyIntegrator.Observe(Resume(Prev(next, id)), daily, now, periodKey);
                 sampled++;
             }
             // Nothing meters this node's energy, so derive it from power — but only when asked to.
             else if (Integrating && upstream.TryGetValue(id, PowerMetric, out var watts))
             {
-                next[id] = EnergyIntegrator.Accumulate(Prev(next, id), watts, now, maxGap, periodKey);
+                next[id] = Bridge(Prev(next, id), watts, now, maxGap, periodKey);
                 sampled++;
             }
 
@@ -237,7 +247,7 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
             var inId = id + FlowMetricKey.InSuffix;
             if (Periods && upstream.TryGetValue(id, EnergyInMetric, out var inCounter))
             {
-                next[inId] = ObserveLifetime(id, "energy (in)", Prev(next, inId), inCounter, now, periodKey);
+                next[inId] = ObserveLifetime(id, "energy (in)", Resume(Prev(next, inId)), inCounter, now, periodKey);
                 sampled++;
 
                 // Now that both energy directions are known for this node.
@@ -245,9 +255,14 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
             }
             else if (Periods && upstream.TryGetValue(id, PeriodInMetric, out var dailyIn))
             {
-                next[inId] = EnergyIntegrator.Observe(Prev(next, inId), dailyIn, now, periodKey);
+                next[inId] = EnergyIntegrator.Observe(Resume(Prev(next, inId)), dailyIn, now, periodKey);
                 sampled++;
                 AuditDirection(id, next, now);
+            }
+            else if (Integrating && upstream.TryGetValue(id, PowerInMetric, out var wattsIn))
+            {
+                next[inId] = Bridge(Prev(next, inId), wattsIn, now, maxGap, periodKey);
+                sampled++;
             }
         }
 
@@ -256,6 +271,13 @@ public sealed class EnergyAggregationService : BackgroundService, IFlowValueSour
         states = next;
         if (sampled > 0) store.Save(next);
     }
+
+    // Integrate power; a known counter is marked so its next reading does not count the same span again.
+    private static EnergyState Bridge(EnergyState prev, double watts, DateTime now, TimeSpan maxGap, string? periodKey)
+        => EnergyIntegrator.Accumulate(prev, watts, now, maxGap, periodKey) with { Bridged = prev.LastCounterKWh is not null };
+
+    private static EnergyState Resume(EnergyState prev)
+        => prev.Bridged ? prev with { LastCounterKWh = null, PendingResetKWh = null, Bridged = false } : prev;
 
     /// <summary>Fold in a reading of a counter declared <c>lifetime</c>, warning once if it restarts — the mirror of <see cref="PeriodCounterAudit"/>.</summary>
     private EnergyState ObserveLifetime(string id, string lane, EnergyState prev, double counter, DateTime now, string? periodKey)

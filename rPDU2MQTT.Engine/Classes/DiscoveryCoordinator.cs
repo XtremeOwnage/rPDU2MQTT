@@ -2,32 +2,21 @@ using rPDU2MQTT.Startup.ConfigSources;
 
 namespace rPDU2MQTT.Classes;
 
-/// <summary>
-/// Lets components request an on-demand discovery republish (e.g. from the "Rediscover" button)
-/// without taking a direct dependency on the discovery service.
-/// </summary>
+/// <summary>Requests an on-demand discovery republish or clear.</summary>
 public sealed class DiscoveryCoordinator
 {
     private readonly Config config;
     private readonly IConfigSource configSource;
-    private readonly PDU pdu;
+    private readonly Core.Integrations.IPduInstances pdus;
 
-    public DiscoveryCoordinator(Config config, IConfigSource configSource, PDU pdu)
+    public DiscoveryCoordinator(Config config, IConfigSource configSource, Core.Integrations.IPduInstances pdus)
     {
         this.config = config;
         this.configSource = configSource;
-        this.pdu = pdu;
+        this.pdus = pdus;
     }
 
-    /// <summary>
-    /// What native discovery published on its last pass, set by the discovery service.
-    ///
-    /// <para>
-    /// Null, or a false <c>HasPublished</c>, means "no opinion" and callers must not conclude anything is
-    /// stale: before the first pass nothing has been published, so every retained config on the broker
-    /// would look orphaned and clearing them would delete every device out of Home Assistant.
-    /// </para>
-    /// </summary>
+    /// <summary>What discovery published on its last pass; null or !HasPublished means unknown, not stale.</summary>
     public Func<(bool HasPublished, IReadOnlyCollection<string> Ids)>? PublishedDevices { get; set; }
 
     /// <summary>Invoked when a rediscovery is requested. The discovery service subscribes to this.</summary>
@@ -38,8 +27,7 @@ public sealed class DiscoveryCoordinator
 
     public Task RequestRediscoverAsync(CancellationToken cancellationToken)
     {
-        // Hot-reload config from the source so saved override/template/name edits take effect on
-        // republish without a full restart (connection-level settings still need a restart).
+        // Reload config so saved edits apply on republish.
         ReloadConfig();
         return RediscoverRequested?.Invoke(cancellationToken) ?? Task.CompletedTask;
     }
@@ -49,7 +37,7 @@ public sealed class DiscoveryCoordinator
         try
         {
             config.CopyFrom(configSource.Load());
-            pdu.InvalidateCache();
+            pdus.Primary?.InvalidateCache();
             Log.Information("Reloaded configuration from source for rediscovery.");
         }
         catch (Exception ex)

@@ -9,26 +9,13 @@ namespace rPDU2MQTT.Plugins;
 /// <param name="File">The assembly's path, as reported on the Status board.</param>
 /// <param name="Integrations">The integrations it contributed, empty when it contributed none.</param>
 /// <param name="Error">Why it could not be loaded, or null.</param>
-public sealed record LoadedPlugin(string File, IReadOnlyList<IIntegration> Integrations, string? Error = null);
+/// <param name="Key">The folder or DLL name that <c>DisabledPlugins</c> matches.</param>
+/// <param name="Bundled">Shipped with the bridge.</param>
+/// <param name="Disabled">Skipped by <c>DisabledPlugins</c>; never loaded.</param>
+public sealed record LoadedPlugin(string File, IReadOnlyList<IIntegration> Integrations, string? Error = null,
+                                  string Key = "", bool Bundled = false, bool Disabled = false);
 
-/// <summary>
-/// Loads integrations from assemblies dropped into a plugins directory.
-///
-/// <para>
-/// Writing one is: reference <c>rPDU2MQTT.Core</c>, implement <see cref="IIntegration"/> and whichever
-/// capabilities apply, drop the DLL in <c>plugins/</c>. Core is the whole SDK — it carries the contracts,
-/// the config model, the flow engine and the helpers, and it references no ASP.NET and no MQTT
-/// client, so a plugin inherits none of those either.
-/// </para>
-/// <para>
-/// What a runtime plugin gets for free, because both are generated rather than compiled: a rendered
-/// settings page (the GUI's form is drawn from a schema built by reflection at startup) and its actions on
-/// the API (routes are derived from the capabilities it declares). What it does not get is a place in the
-/// Kubernetes CRD — that is a compile-time contract published to the API server, and it cannot describe a
-/// type that exists only on one operator's machine. Under Kubernetes, plugin settings live in the
-/// <c>Plugins</c> map, which the CRD leaves open.
-/// </para>
-/// </summary>
+/// <summary>Loads integrations from plugin assemblies.</summary>
 public static class PluginLoader
 {
     /// <summary>Where plugins live, unless <c>RPDU2MQTT_PLUGINS</c> says otherwise.</summary>
@@ -37,56 +24,96 @@ public static class PluginLoader
             ? dir
             : Path.Combine(AppContext.BaseDirectory, "plugins");
 
-    /// <summary>
-    /// Load every plugin in <paramref name="directory"/>. Never throws: a plugin that will not load is
-    /// reported and skipped, because a third-party DLL must not be able to stop the bridge starting.
-    /// </summary>
-    public static IReadOnlyList<LoadedPlugin> Load(string? directory = null, Action<string>? log = null)
+    /// <summary>Plugins shipped with the bridge; not hidden by a volume over <see cref="DefaultDirectory"/>.</summary>
+    public static string BundledDirectory => Path.Combine(AppContext.BaseDirectory, "bundled-plugins");
+
+    /// <summary>External plugins, then bundled ones not already loaded from the external directory.</summary>
+    /// <param name="disabled">Folder or DLL names to skip without loading.</param>
+    public static IReadOnlyList<LoadedPlugin> LoadAll(IEnumerable<string>? disabled = null, Action<string>? log = null)
+        => LoadAll(DefaultDirectory, BundledDirectory, disabled, log);
+
+    internal static IReadOnlyList<LoadedPlugin> LoadAll(string externalDir, string bundledDir, IEnumerable<string>? disabled, Action<string>? log)
     {
-        var dir = directory ?? DefaultDirectory;
-        if (!Directory.Exists(dir)) return Array.Empty<LoadedPlugin>();
-
-        var found = new List<LoadedPlugin>();
-        foreach (var file in Directory.EnumerateFiles(dir, "*.dll", SearchOption.AllDirectories).OrderBy(f => f))
-        {
-            try
-            {
-                var assembly = new PluginLoadContext(file).LoadFromAssemblyPath(Path.GetFullPath(file));
-                var integrations = new List<IIntegration>();
-
-                foreach (var type in assembly.GetTypes().Where(t => t is { IsClass: true, IsAbstract: false })
-                                             .Where(typeof(IIntegration).IsAssignableFrom))
-                {
-                    // A plugin is constructed with no arguments on purpose: it is handed its settings
-                    // through IConfigurablePlugin instead. Taking a constructor dependency would mean a
-                    // plugin binding against this build's internals, which is exactly what it must not do.
-                    if (Activator.CreateInstance(type) is IIntegration integration)
-                        integrations.Add(integration);
-                }
-
-                if (integrations.Count == 0) continue;   // a dependency, not a plugin
-                found.Add(new LoadedPlugin(file, integrations));
-                log?.Invoke($"Plugin loaded: {Path.GetFileName(file)} — {string.Join(", ", integrations.Select(i => i.Id))}.");
-            }
-            catch (ReflectionTypeLoadException ex)
-            {
-                var why = string.Join("; ", ex.LoaderExceptions.Where(e => e is not null).Select(e => e!.Message).Distinct().Take(3));
-                found.Add(new LoadedPlugin(file, Array.Empty<IIntegration>(), why));
-                log?.Invoke($"Plugin '{Path.GetFileName(file)}' could not be loaded: {why}. It is being skipped; everything else starts as normal.");
-            }
-            catch (Exception ex)
-            {
-                found.Add(new LoadedPlugin(file, Array.Empty<IIntegration>(), ex.Message));
-                log?.Invoke($"Plugin '{Path.GetFileName(file)}' could not be loaded: {ex.Message}. It is being skipped; everything else starts as normal.");
-            }
-        }
-        return found;
+        var off = new HashSet<string>(disabled ?? [], StringComparer.OrdinalIgnoreCase);
+        var external = Units(externalDir).ToList();
+        var names = external.SelectMany(u => u.Files).Select(Path.GetFileName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var bundled = Units(bundledDir).Where(u => !u.Files.Any(f => names.Contains(Path.GetFileName(f))));
+        return [.. external.SelectMany(u => LoadUnit(u, false, off, log)), .. bundled.SelectMany(u => LoadUnit(u, true, off, log))];
     }
 
-    /// <summary>
-    /// Bind each loaded plugin to its settings from <paramref name="cfg"/>, writing a default section back
-    /// for any that has never been configured so an operator has something to edit in the GUI.
-    /// </summary>
+    /// <summary>Load every plugin in <paramref name="directory"/>. Never throws; a bad plugin is reported and skipped.</summary>
+    public static IReadOnlyList<LoadedPlugin> Load(string? directory = null, Action<string>? log = null)
+        => Units(directory ?? DefaultDirectory).SelectMany(u => LoadUnit(u, false, new HashSet<string>(), log)).ToList();
+
+    /// <summary>One switchable plugin: a loose DLL, or a folder and everything in it.</summary>
+    private sealed record Unit(string Key, IReadOnlyList<string> Files);
+
+    private static IEnumerable<Unit> Units(string dir)
+    {
+        if (!Directory.Exists(dir)) yield break;
+        foreach (var file in Directory.EnumerateFiles(dir, "*.dll").OrderBy(f => f))
+            yield return new(Path.GetFileNameWithoutExtension(file), [file]);
+        foreach (var sub in Directory.EnumerateDirectories(dir).OrderBy(d => d))
+        {
+            var files = Directory.EnumerateFiles(sub, "*.dll", SearchOption.AllDirectories).OrderBy(f => f).ToList();
+            if (files.Count > 0) yield return new(Path.GetFileName(sub), files);
+        }
+    }
+
+    private static IEnumerable<LoadedPlugin> LoadUnit(Unit unit, bool bundled, ISet<string> off, Action<string>? log)
+    {
+        if (off.Contains(unit.Key))
+        {
+            log?.Invoke($"Plugin disabled: {unit.Key}.");
+            return [new LoadedPlugin(MainFile(unit), [], Key: unit.Key, Bundled: bundled, Disabled: true)];
+        }
+        return unit.Files.Select(f => LoadFile(f, log)).OfType<LoadedPlugin>()
+                   .Select(p => p with { Key = unit.Key, Bundled = bundled }).ToList();
+    }
+
+    // The assembly with a .deps.json is the plugin; the rest are its dependencies.
+    private static string MainFile(Unit unit)
+        => unit.Files.FirstOrDefault(f => File.Exists(Path.ChangeExtension(f, ".deps.json"))) ?? unit.Files[0];
+
+    private static LoadedPlugin? LoadFile(string file, Action<string>? log)
+    {
+        try
+        {
+            if (PluginApi.Incompatible(file) is { } why)
+            {
+                log?.Invoke($"Plugin '{Path.GetFileName(file)}' could not be loaded: {why} It is being skipped; everything else starts as normal.");
+                return new LoadedPlugin(file, Array.Empty<IIntegration>(), why);
+            }
+
+            var assembly = new PluginLoadContext(file).LoadFromAssemblyPath(Path.GetFullPath(file));
+            var integrations = new List<IIntegration>();
+
+            foreach (var type in assembly.GetTypes().Where(t => t is { IsClass: true, IsAbstract: false })
+                                         .Where(typeof(IIntegration).IsAssignableFrom))
+            {
+                // Parameterless; settings arrive through IConfigurablePlugin.
+                if (Activator.CreateInstance(type) is IIntegration integration)
+                    integrations.Add(integration);
+            }
+
+            if (integrations.Count == 0) return null;   // a dependency, not a plugin
+            log?.Invoke($"Plugin loaded: {Path.GetFileName(file)} — {string.Join(", ", integrations.Select(i => i.Id))}.");
+            return new LoadedPlugin(file, integrations);
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            var why = string.Join("; ", ex.LoaderExceptions.Where(e => e is not null).Select(e => e!.Message).Distinct().Take(3));
+            log?.Invoke($"Plugin '{Path.GetFileName(file)}' could not be loaded: {why}. It is being skipped; everything else starts as normal.");
+            return new LoadedPlugin(file, Array.Empty<IIntegration>(), why);
+        }
+        catch (Exception ex)
+        {
+            log?.Invoke($"Plugin '{Path.GetFileName(file)}' could not be loaded: {ex.Message}. It is being skipped; everything else starts as normal.");
+            return new LoadedPlugin(file, Array.Empty<IIntegration>(), ex.Message);
+        }
+    }
+
+    /// <summary>Bind each plugin to its settings, writing a default section for any not yet configured.</summary>
     public static void Configure(IEnumerable<IIntegration> plugins, Config cfg, Action<string>? warn = null)
     {
         foreach (var plugin in plugins.OfType<IConfigurablePlugin>())
@@ -104,16 +131,7 @@ public static class PluginLoader
                                 (string?)((IIntegration)p).Group.ToString()));
 }
 
-/// <summary>
-/// One load context per plugin, so two plugins can depend on different versions of the same library
-/// without one of them silently getting the other's.
-/// </summary>
-/// <remarks>
-/// Types the host already has — <c>IIntegration</c> and everything else in Core — deliberately resolve to
-/// the <i>host's</i> copy rather than a private one. A plugin that loaded its own <c>rPDU2MQTT.Core</c>
-/// would implement an interface that is not, as far as the runtime is concerned, the same interface, and
-/// the cast would fail with a message nobody could act on.
-/// </remarks>
+/// <summary>One load context per plugin; assemblies the host already has resolve to the host's copy.</summary>
 internal sealed class PluginLoadContext : AssemblyLoadContext
 {
     private readonly AssemblyDependencyResolver resolver;
@@ -123,7 +141,6 @@ internal sealed class PluginLoadContext : AssemblyLoadContext
 
     protected override Assembly? Load(AssemblyName name)
     {
-        // Anything already loaded by the host wins, so the contract types are shared.
         if (Default.Assemblies.FirstOrDefault(a => a.GetName().Name == name.Name) is { } shared) return shared;
         var path = resolver.ResolveAssemblyToPath(name);
         return path is null ? null : LoadFromAssemblyPath(path);

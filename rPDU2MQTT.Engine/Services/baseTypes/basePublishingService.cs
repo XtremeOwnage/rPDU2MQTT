@@ -74,7 +74,7 @@ public abstract class basePublishingService : baseMQTTService
     {
         var basePath = outlet.GetTopicPath();
         var idx = outlet.Key;
-        string resolve(string field, string actual) => pdu.ResolveOutletConfig(deviceId, idx, field, actual);
+        string resolve(string field, string actual) => pdu?.ResolveOutletConfig(deviceId, idx, field, actual) ?? actual;
 
         await PublishString(MQTTHelper.JoinPaths(basePath, "onDelay"), resolve("onDelay", outlet.OnDelay.ToString()), cancellationToken);
         await PublishString(MQTTHelper.JoinPaths(basePath, "offDelay"), resolve("offDelay", outlet.OffDelay.ToString()), cancellationToken);

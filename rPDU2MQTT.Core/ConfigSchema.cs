@@ -76,6 +76,9 @@ public sealed class SchemaNode
     /// <summary>Show the choices as radios rather than a dropdown.</summary>
     public bool Radio { get; set; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Resettable { get; set; }
+
     /// <summary>
     /// This section belongs to an externally loaded plugin, so it is stored under <c>Config.Plugins</c>
     /// rather than as a property of its own. The GUI reads and writes it there.
@@ -89,6 +92,18 @@ public sealed class SchemaNode
     /// editors — pages that have no schema section to hang a group off.
     /// </summary>
     public string? Group { get; set; }
+
+    /// <summary>
+    /// Plugins keep their own settings here, for this kind of entity — see <c>ExtensionPointAttribute</c>.
+    /// Stored as a map keyed by plugin id; <see cref="Extensions"/> describes each plugin's entry.
+    /// </summary>
+    public string? ExtensionOf { get; set; }
+
+    /// <summary>One object per plugin that keeps settings on this kind of entity, keyed by plugin id.</summary>
+    public List<SchemaNode>? Extensions { get; set; }
+
+    /// <summary>See <c>ChoicesFromAttribute</c>.</summary>
+    public string? ChoicesFrom { get; set; }
 
     public string[]? TemplateVars { get; set; }
     public List<SchemaNode>? Properties { get; set; }
@@ -198,6 +213,41 @@ public static class ConfigSchema
     /// </para>
     /// </summary>
     public static List<SchemaNode> Build(IEnumerable<(string Id, string Label, Type ConfigType, string? Group)> plugins)
+        => Build(plugins, []);
+
+    /// <summary>
+    /// The schema with a section per plugin, and the settings plugins keep on core entities described on
+    /// each entity's extension point. Like plugin sections, these never reach the CRD, which keeps the
+    /// extension point a free-form map.
+    /// </summary>
+    public static List<SchemaNode> Build(IEnumerable<(string Id, string Label, Type ConfigType, string? Group)> plugins,
+        IEnumerable<Core.Integrations.EntityExtension> extensions)
+    {
+        var schema = BuildWithPlugins(plugins);
+        var byEntity = extensions.GroupBy(e => e.Entity).ToDictionary(g => g.Key, g => g.ToList());
+        if (byEntity.Count > 0) DescribeExtensions(schema, byEntity);
+        return schema;
+    }
+
+    private static void DescribeExtensions(IEnumerable<SchemaNode> nodes, IReadOnlyDictionary<string, List<Core.Integrations.EntityExtension>> byEntity)
+    {
+        foreach (var n in nodes)
+        {
+            if (n.ExtensionOf is { } entity && byEntity.TryGetValue(entity, out var list))
+                n.Extensions = list.Select(e => new SchemaNode
+                {
+                    Key = e.PluginId,
+                    Label = e.Label,
+                    Type = "object",
+                    Properties = BuildObject(e.ConfigType),
+                    IsPlugin = true,
+                }).ToList();
+            if (n.Properties is { } props) DescribeExtensions(props, byEntity);
+            if (n.ValueSchema is { } vs) DescribeExtensions([vs], byEntity);
+        }
+    }
+
+    private static List<SchemaNode> BuildWithPlugins(IEnumerable<(string Id, string Label, Type ConfigType, string? Group)> plugins)
     {
         var schema = BuildObject(typeof(Config));
         foreach (var (id, label, type, group) in plugins)
@@ -263,6 +313,12 @@ public static class ConfigSchema
 
         if (prop.GetCustomAttribute<TemplateVariablesAttribute>() is { } tv)
             node.TemplateVars = tv.Names;
+
+        if (prop.GetCustomAttribute<ExtensionPointAttribute>() is { } ext)
+            node.ExtensionOf = ext.Entity;
+
+        if (prop.GetCustomAttribute<ChoicesFromAttribute>() is { } from)
+            node.ChoicesFrom = from.Path;
 
         // A setting whose "off" would remove the means of turning it back on. Carried on the schema so the
         // form does not need its own hardcoded list of which fields those are.
@@ -340,6 +396,7 @@ public static class ConfigSchema
         node.Type = ClassifyAndPopulate(type, prop.Name, node);
 
         if (prop.GetCustomAttribute<FixedListAttribute>() is { } fixedList) node.FixedListKey = fixedList.KeyProperty;
+        if (prop.GetCustomAttribute<ResettableAttribute>() is not null) node.Resettable = true;
 
         if (prop.GetCustomAttribute<RadioChoicesAttribute>() is not null)
         {
@@ -481,7 +538,8 @@ public static class ConfigSchema
         clone.Api.ApiKey = null;
         // Both of these travelled: the Home Assistant long-lived token and the cache password were written
         // into the CR spec on every save, and into the manifest the Export page offers for GitOps.
-        clone.HASS.EnergyDashboard.Token = null;
+        clone.HASS.Token = null;
+        clone.HASS.EnergyDashboard.LegacyToken = null;
         clone.Cache.Password = null;
         clone.PlanStorage.ObjectStore.SecretAccessKey = null;
         return clone;
@@ -493,6 +551,7 @@ public static class ConfigSchema
         var serializer = new SerializerBuilder()
             .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull)
             .WithQuotingNecessaryStrings()
+            .WithTypeConverter(new JsonYamlConverter())
             .Build();
         return serializer.Serialize(config);
     }

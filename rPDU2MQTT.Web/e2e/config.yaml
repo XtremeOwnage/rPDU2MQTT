@@ -1,0 +1,25 @@
+Mqtt:
+  Connection:
+    Host: 127.0.0.1
+    Port: 1883
+Gui:
+  Enabled: true
+  Port: 18080
+  Password: smoke
+EnergyFlow:
+  Nodes:
+    - Id: solar
+      Label: Solar
+      Kind: solar
+      Value: 1200
+    - Id: grid
+      Label: Grid
+      Kind: grid
+      Value: 300
+    - Id: panel
+      Label: Panel
+  Links:
+    - From: solar
+      To: panel
+    - From: grid
+      To: panel

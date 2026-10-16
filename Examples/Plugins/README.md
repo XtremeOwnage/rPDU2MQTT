@@ -13,6 +13,9 @@ every reading and every energy-flow tier to a file. Copy it and change the middl
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
+    <!-- Name and one-line description on System › Plugins. -->
+    <AssemblyTitle>My Plugin</AssemblyTitle>
+    <Description>What it reads or sends, in one line.</Description>
   </PropertyGroup>
   <ItemGroup>
     <!-- Private/ExcludeAssets so you ship only your own DLL. The host already has Core loaded, and a
@@ -58,6 +61,8 @@ Implement the ones that apply. A plugin is a vendor, not a single interface — 
 | `IIntegrationApi` | Actions beyond the standard ones. |
 | `IStatusProvider` | Decide what your own health means, when the default is not specific enough. |
 | `IConfigurablePlugin` | Carry your own settings section. |
+| `IHistoryBackend` | Be a `History.Provider`, and a target for copied history. |
+| `IPluginHostUser` | Receive the host's services: config, snapshots, live values, broker publisher, export status. |
 
 ### Receiving data
 
@@ -194,6 +199,9 @@ somewhere else.
 
 Each plugin gets its own load context, so two plugins can depend on different versions of the same library.
 A plugin that fails to load is reported and skipped — it cannot stop the bridge starting.
+
+To keep a plugin from loading at all, switch it off on **System › Plugins**, or list its folder or DLL name
+(without `.dll`) under `DisabledPlugins`. Its own `Enabled` setting only stops its work; the DLL still loads.
 
 ## What a plugin does not get
 

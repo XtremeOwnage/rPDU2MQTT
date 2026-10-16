@@ -1,7 +1,6 @@
 using rPDU2MQTT.Classes;
 using rPDU2MQTT.Core.Integrations;
-using rPDU2MQTT.Integrations.EmonCms;
-using rPDU2MQTT.Services;
+using rPDU2MQTT.Plugin.EmonCms;
 using Xunit;
 
 namespace rPDU2MQTT.Tests;
@@ -17,7 +16,7 @@ namespace rPDU2MQTT.Tests;
 public class EmonCmsPublisherGatingTests
 {
     private static EmonCmsIntegration Integration(Config cfg)
-        => new(cfg, new EmonCmsStatus(new IntegrationStatus()), new EmonCmsFeedSync(cfg, new Snapshots()));
+        => new(cfg, new IntegrationStatus(), new EmonCmsFeedSync(cfg, new Snapshots()));
 
     private sealed class Snapshots : rPDU2MQTT.Core.ISnapshotCache
     {

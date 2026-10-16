@@ -12,6 +12,7 @@ import { flowCandidates, renderAutoTagRules } from './nodes.js';
 
 export function addTagsSection(nav: any, sections: any) {
   const link = navLink(nav, 'Tags', '#');
+  link.dataset.section = 'EnergyFlow.Tags';
   const sec = el('div', { class: 'section' });
   sections.appendChild(sec);
   // The ids the tag rules can match: PDUs and outlets the bridge derives from what it polls.
@@ -63,9 +64,10 @@ export function addTagsSection(nav: any, sections: any) {
     }
 
     // --- What exists, what carries it, what decides on it ----------------------------------------------
-    const t = el('table', { class: 'ld' });
+    const t = el('table', { class: 'ld ld-stack' });
     const head = el('tr');
-    ['Tag', 'What it is for', 'Carried by', 'Destinations that decide on it', ''].forEach(h =>
+    const columns = ['Tag', 'What it is for', 'Carried by', 'Destinations that decide on it', ''];
+    columns.forEach(h =>
       head.appendChild(el('th', { text: h })));
     t.appendChild(el('thead', {}, head));
     const tb = el('tbody');
@@ -134,6 +136,8 @@ export function addTagsSection(nav: any, sections: any) {
         removeTag(tag); refreshDirty(); render();
       };
       tr.appendChild(el('td', {}, del));
+      // Headings for the stacked layout a phone uses.
+      [...tr.children].forEach((td: any, i) => { if (columns[i]) td.dataset.label = columns[i]; });
       tb.appendChild(tr);
     });
 

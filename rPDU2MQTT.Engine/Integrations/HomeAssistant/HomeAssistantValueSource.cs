@@ -55,9 +55,9 @@ public sealed class HomeAssistantValueSource : IIntegration, IValueSourcePlugin,
     public string? Misconfigured(Config c)
     {
         if (!Enabled(c)) return null;
-        var ed = c.HASS.EnergyDashboard;
-        return string.IsNullOrWhiteSpace(ed.Url) || string.IsNullOrWhiteSpace(ed.Token)
-            ? "Nodes are bound to Home Assistant entities, but HomeAssistant.EnergyDashboard.Url and a "
+        var ha = c.HASS;
+        return string.IsNullOrWhiteSpace(ha.Url) || string.IsNullOrWhiteSpace(ha.Token)
+            ? "Nodes are bound to Home Assistant entities, but HomeAssistant.Url and a "
               + "long-lived access token are needed to read them."
             : null;
     }
@@ -84,7 +84,7 @@ public sealed class HomeAssistantValueSource : IIntegration, IValueSourcePlugin,
     /// <summary>Read every bound entity's current state. Public so a test can drive it.</summary>
     public async Task FetchAsync(CancellationToken ct)
     {
-        var ed = cfg.HASS.EnergyDashboard;
+        var ha = cfg.HASS;
         if (Misconfigured(cfg) is not null) return;
 
         var fetched = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
@@ -99,8 +99,8 @@ public sealed class HomeAssistantValueSource : IIntegration, IValueSourcePlugin,
             try
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get,
-                    $"{ed.Url!.TrimEnd('/')}/api/states/{Uri.EscapeDataString(entity)}");
-                request.Headers.Authorization = new("Bearer", ed.Token);
+                    $"{ha.Url!.TrimEnd('/')}/api/states/{Uri.EscapeDataString(entity)}");
+                request.Headers.Authorization = new("Bearer", ha.Token);
 
                 var response = await http.SendAsync(request, ct);
                 if (!response.IsSuccessStatusCode)

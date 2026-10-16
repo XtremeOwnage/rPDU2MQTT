@@ -108,7 +108,7 @@ public class KubernetesConfigTests
     {
         var crd = CrdGenerator.ToYaml();
 
-        Assert.Contains("\"Y\":", crd);
+        Assert.Contains("\n  \"Y\":", CrdGenerator.Quoted("properties:\n  Y:\n    type: number\n"));
         Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"(?m)^\s*(y|Y|n|N|yes|no|on|off|true|false):", System.Text.RegularExpressions.RegexOptions.IgnoreCase), crd);
     }
 
@@ -180,6 +180,16 @@ public class KubernetesConfigTests
         Assert.DoesNotContain("enum:", block);
         // The list form — the description mentions "America/Chicago" as an example, which is fine.
         Assert.DoesNotContain("- America/", block);
+    }
+
+    [Fact]
+    public void SourceSettings_AcceptAnyValue()
+    {
+        var yaml = CrdGenerator.ToYaml();
+        var at = yaml.IndexOf("Settings:", yaml.IndexOf("Sources:", StringComparison.Ordinal), StringComparison.Ordinal);
+        var block = yaml[at..yaml.IndexOf("StaleAfterSeconds:", at, StringComparison.Ordinal)];
+        var values = block[block.IndexOf("additionalProperties:", StringComparison.Ordinal)..];
+        Assert.DoesNotContain("type: object", values[..values.IndexOf("description:", StringComparison.Ordinal)]);
     }
 
     private static string FindRepoRoot()

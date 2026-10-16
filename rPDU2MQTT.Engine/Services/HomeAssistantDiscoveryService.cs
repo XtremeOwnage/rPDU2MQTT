@@ -24,8 +24,12 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
     /// <summary>The room name of each PDU and outlet by its discovery identifier, for the current pass.</summary>
     private Dictionary<string, string> deviceAreas = new();
 
-    public HomeAssistantDiscoveryService(MQTTServiceDependencies deps, DiscoveryCoordinator coordinator) : base(deps)
+    private readonly Core.Integrations.ExportContributions contributions;
+
+    public HomeAssistantDiscoveryService(MQTTServiceDependencies deps, DiscoveryCoordinator coordinator,
+        Core.Integrations.ExportContributions? contributions = null) : base(deps)
     {
+        this.contributions = contributions ?? Core.Integrations.ExportContributions.None;
         // Allow the "Rediscover" diagnostic button to trigger an on-demand republish.
         coordinator.PublishedDevices = () => (HasPublished, PublishedDeviceIds);
         coordinator.RediscoverRequested += Execute;
@@ -76,7 +80,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
 
             // A PDU that cannot be read costs its own entities, not everyone's: a plugin device is fine and
             // still deserves its sensors. Without this, one unreachable PDU means no discovery at all.
-            try { data = await pdu.GetRootData_Public(cancellationToken); }
+            try { data = pdu is null ? null : await pdu.ReadAsync(cancellationToken); }
             catch (Exception ex) { Log.Warning($"Discovery could not read the PDU ({ex.Message}); publishing what else it has."); }
 
             if (data is not null)
@@ -87,7 +91,7 @@ public class HomeAssistantDiscoveryService : baseDiscoveryService
                     .ToDictionary(x => x.key, x => x.value);
 
                 // The room each PDU and outlet is in, by its discovery identifier (#467).
-                var rooms = Core.Flow.LocationExport.RoomNames(Core.Flow.LocationIndex.For(cfg.EnergyFlow), Core.Flow.FlowTopology.For(data, cfg.EnergyFlow));
+                var rooms = contributions.Areas(cfg, Core.Flow.FlowTopology.For(data, cfg.EnergyFlow));
                 deviceAreas = data.Devices
                     .SelectMany(d => d.Outlets.Select(o => (o.Entity_Identifier, Node: Core.Flow.FlowNodeId.ForOutlet(d.Entity_Name, o.Key)))
                         .Prepend((d.Entity_Identifier, Node: Core.Flow.FlowNodeId.ForPdu(d.Entity_Name))))

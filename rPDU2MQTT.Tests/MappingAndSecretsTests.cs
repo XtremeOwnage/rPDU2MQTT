@@ -4,6 +4,7 @@ using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Models.Config.Schemas;
 using rPDU2MQTT.Models.PDU;
 using rPDU2MQTT.Models.PDU.OneView;
+using rPDU2MQTT.Plugin.Vertiv;
 using rPDU2MQTT.Services.Gui;
 using Xunit;
 

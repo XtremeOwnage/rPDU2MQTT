@@ -2,7 +2,8 @@
 name: Feature request
 about: Request new feature or functionality for this project
 title: ''
-labels: kind/feature, lifecycle/active, needs-triage, priority/awaiting-more-evidence
+labels: kind/feature, needs-triage
+type: Feature
 assignees: ''
 
 ---

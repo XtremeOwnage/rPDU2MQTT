@@ -18,6 +18,7 @@ const { sandbox, getEl } = makeDom({
   bodies: (url) => url.includes('/api/schema') ? schema
     : url.includes('/api/config') ? config
     : url.includes('/api/instances') ? { ok: true, instances: [] }
+    : url.includes('/api/integrations') ? { ok: true, integrations: [{ id: 'emoncms' }] }
     : { ok: true },
 });
 vm.createContext(sandbox);

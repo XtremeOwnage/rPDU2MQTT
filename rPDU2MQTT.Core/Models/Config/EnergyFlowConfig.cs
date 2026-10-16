@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
+using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config;
 
@@ -87,21 +89,29 @@ public class EnergyFlowConfig
     [Description("CT clamps: which breaker's wire each one is on, the monitor channel it is plugged into, its rating, and whether it is on backwards.")]
     public List<CtClampConfig> Clamps { get; set; } = new();
 
-    /// <summary>Sites, their floors, and the rooms and areas on them (#461).</summary>
-    [Description("Where things are: sites, their floors, and the rooms and areas on each floor. Energy rolls up room → floor → site alongside the electrical hierarchy.")]
-    public List<SiteConfig> Sites { get; set; } = new();
+    /// <summary>Legacy; migrated by LegacyLocations.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("Sites")]
+    [YamlMember(Alias = "Sites")]
+    public object? LegacySites { get; set; }
 
-    /// <summary>Outlets, switches, fixtures and devices placed on the floor plans (#464).</summary>
-    [Description("Outlets, switches, fixtures, appliances and devices placed on the floor plans, each with its room and the circuit feeding it.")]
-    public List<PlacementConfig> Placements { get; set; } = new();
+    /// <summary>Legacy; migrated by LegacyLocations.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("Placements")]
+    [YamlMember(Alias = "Placements")]
+    public object? LegacyPlacements { get; set; }
 
-    /// <summary>Cable runs drawn on the floor plans (#464).</summary>
-    [Description("Cable runs drawn on the floor plans: branch circuits, feeders and the utility service, each between placed items.")]
-    public List<RunConfig> Runs { get; set; } = new();
+    /// <summary>Legacy; migrated by LegacyLocations.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("Runs")]
+    [YamlMember(Alias = "Runs")]
+    public object? LegacyRuns { get; set; }
 
-    /// <summary>Locations for derived nodes, which have no entry of their own to carry one (#461).</summary>
-    [Description("Locations for derived nodes (PDUs and outlets), which have no entry of their own. Matched by node id with '*' as a wildcard; the first match wins, and an exact id beats a pattern.")]
-    public List<AutoLocationRule> AutoLocations { get; set; } = new();
+    /// <summary>Legacy; migrated by LegacyLocations.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("AutoLocations")]
+    [YamlMember(Alias = "AutoLocations")]
+    public object? LegacyAutoLocations { get; set; }
 
     /// <summary>
     /// Legacy single-feeder map (child id → parent id), superseded by <see cref="Links"/>. Still honored on
@@ -201,6 +211,18 @@ public class EnergyFlowGroup
 
     [Description("The ids of the member nodes this group aggregates.")]
     public List<string> Members { get; set; } = new();
+
+    [Description("Id of the group this group is nested in. It shows only while that group is expanded.")]
+    public string? Parent { get; set; }
+
+    [DefaultValue("replace")]
+    [Description("How the group draws when expanded: 'replace' shows its members in place of the group node, 'parents' draws the members feeding the group node, 'children' draws the group node feeding its members.")]
+    [AllowedValues("replace", "parents", "children")]
+    public string Expand { get; set; } = "replace";
+
+    [DefaultValue(false)]
+    [Description("Expanding this group also expands every group nested in it.")]
+    public bool ExpandChildren { get; set; }
 }
 
 /// <summary>A directed energy-flow link: energy flows <see cref="From"/> → <see cref="To"/>.</summary>
@@ -214,7 +236,7 @@ public class EnergyFlowLink
 }
 
 /// <summary>A custom flow node (see <see cref="EnergyFlowConfig.Nodes"/>).</summary>
-public class EnergyFlowNode
+public class EnergyFlowNode : IExtensible
 {
     [Description("Stable unique id used to wire parents/children.")]
     public string Id { get; set; } = "";
@@ -268,11 +290,26 @@ public class EnergyFlowNode
     [Description("Free-form tags for filtering the diagram and the energy views — e.g. 'critical', 'rack-1', 'upstairs'. A tag never changes a reading, only what a view shows.")]
     public List<string> Tags { get; set; } = new();
 
-    [Description("The id of the room, area, floor or site this node is in. Its own consumption counts toward that place.")]
-    public string Location { get; set; } = "";
+    /// <summary>Legacy; migrated by LegacyLocations.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("Location")]
+    [YamlMember(Alias = "Location")]
+    public string? LegacyLocation { get; set; }
 
     [Description("The circuit this node is plugged into, as the panel id and breaker number: 'main_panel/B06'. A circuit then shows it among its metered devices and reports what is left unmetered.")]
     public string Circuit { get; set; } = "";
+
+    [DefaultValue(false)]
+    [Description("Left off the flow diagrams. Still listed and editable.")]
+    public bool Hidden { get; set; }
+
+    /// <summary>
+    /// Show what this node measures beyond its children as a node of its own beneath it. Left blank, a panel,
+    /// an inverter and the grid are switched on when the config is loaded, since unmetered load is the thing
+    /// worth seeing there.
+    /// </summary>
+    [Description("Add an Untracked node beneath this one, for what it measures beyond its children. Left blank, it is turned on for panels, inverters and the grid when the config loads.")]
+    public bool? CreateUntracked { get; set; }
 
     [Description("EmonCMS tag this node's feeds are filed under. Blank uses EmonCMS.Feeds.Tag. Placeholders: {node}, {label}, {kind}.")]
     [TemplateVariables("node", "label", "kind")]
@@ -281,6 +318,10 @@ public class EnergyFlowNode
     [Description("EmonCMS tag this node's virtual feeds are filed under. Blank uses EmonCMS.Feeds.Virtual.Tag. Placeholders: {node}, {label}, {kind}.")]
     [TemplateVariables("node", "label", "kind")]
     public string? EmonCmsVirtualTag { get; set; }
+
+    [ExtensionPoint(EntityKind.Node)]
+    [Description("Settings plugins keep on this node, keyed by plugin id. Kept as they are while the plugin is not loaded.")]
+    public Dictionary<string, object?>? Ext { get; set; }
 
     /// <summary>For <see cref="Kind"/> <c>battery</c>: usable storage capacity in kWh. Metadata for the
     /// diagram/state-of-charge display; does not affect the power roll-up.</summary>

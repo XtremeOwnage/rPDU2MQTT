@@ -20,7 +20,7 @@ public sealed class KubernetesConfigWatcher : IHostedService, IDisposable
     private readonly KubernetesConfigSource source;
     private readonly IHostApplicationLifetime lifetime;
     private readonly Config config;
-    private readonly InstanceManager instances;
+    private readonly Core.Integrations.IPduInstances instances;
     private readonly MqttReconfigurator mqtt;
     private readonly HostRole roles;
     private readonly PeriodicTimer timer = new(TimeSpan.FromSeconds(30));
@@ -28,7 +28,7 @@ public sealed class KubernetesConfigWatcher : IHostedService, IDisposable
     private Task loop = Task.CompletedTask;
     private string? baselineSpec;
 
-    public KubernetesConfigWatcher(KubernetesConfigSource source, IHostApplicationLifetime lifetime, Config config, InstanceManager instances, MqttReconfigurator mqtt, HostRole roles)
+    public KubernetesConfigWatcher(KubernetesConfigSource source, IHostApplicationLifetime lifetime, Config config, Core.Integrations.IPduInstances instances, MqttReconfigurator mqtt, HostRole roles)
     {
         this.source = source;
         this.lifetime = lifetime;

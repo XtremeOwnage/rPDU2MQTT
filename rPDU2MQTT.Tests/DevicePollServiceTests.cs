@@ -58,12 +58,11 @@ public class DevicePollServiceTests
         return (service, reader, published);
     }
 
-    private static async Task<IReadOnlyList<PduSnapshot>> Settle(List<PduSnapshot> published)
+    private static async Task<IReadOnlyList<PduSnapshot>> Settle(List<PduSnapshot> published, int expected)
     {
-        // The bus is a channel with a reader on another task; give it a moment to drain.
         for (var i = 0; i < 50; i++)
         {
-            lock (published) if (published.Count > 0) return published.ToList();
+            lock (published) if (published.Count >= expected) return published.ToList();
             await Task.Delay(10);
         }
         lock (published) return published.ToList();
@@ -77,7 +76,7 @@ public class DevicePollServiceTests
         await service.Poll(CancellationToken.None);
 
         Assert.Equal(2, reader.Reads);
-        var snapshots = await Settle(published);
+        var snapshots = await Settle(published, 2);
         Assert.Equal(["rack-a", "rack-b"], snapshots.Select(s => s.InstanceId).OrderBy(x => x));
     }
 

@@ -1,16 +1,10 @@
-// The fake DOM the GUI tests run against: a real tree, so what was rendered can be asserted on, plus the
-// browser globals the bundle touches. Shared by smoke.mjs and layout.check.mjs — one stub, so a gap in it
-// gets fixed once and both tests get the fix.
-//
-// Where it models a browser, it models the awkward version: EventSource is deliberately absent, so the
-// no-push fallback path stays exercised. A stub that only does the convenient thing is how a bug hides.
+// Fake DOM and browser globals for the GUI checks.
 
 function matches(node, sel) {
   sel = sel.trim();
   const attr = sel.match(/^(\w+)\[type=(\w+)\]$/);
   if (attr) return node.tag === attr[1] && node.attrs.type === attr[2];
-  // Bare attribute selector, e.g. [data-node] — how the focus code finds what it may dim. Without it the
-  // focus matched nothing under test while working fine in a browser, which makes any assertion useless.
+  // Bare attribute selector, e.g. [data-node].
   const bare = sel.match(/^\[([\w-]+)\]$/);
   if (bare) return node.attrs[bare[1]] !== undefined;
   if (sel.startsWith('.')) return node.classList.has(sel.slice(1));
@@ -19,8 +13,7 @@ function matches(node, sel) {
   return node.tag === sel;
 }
 
-// Supports the selector shapes the GUI actually uses: "a", ".field", "nav a", "input[type=checkbox]",
-// and comma lists like "input, select, textarea".
+// Supports "a", ".field", "nav a", "input[type=checkbox]" and comma lists.
 export function query(root, sel, all) {
   const out = [];
   for (const branch of sel.split(',')) {
@@ -40,24 +33,18 @@ function* descendants(node) {
   for (const c of node.children) { yield c; yield* descendants(c); }
 }
 
-// A text node with its text. The browser's append()/appendChild() accept a bare string; the stub used to
-// drop it, so a label built as el('label', {}, checkbox, ' Track daily totals') rendered as a checkbox with
-// no words next to it here while reading correctly in a browser — and any assertion on that text was
-// vacuous rather than failing.
+// A text node, as append()/appendChild() create for a bare string.
 export function textNode(t) { return Object.assign(makeEl('#text'), { _text: String(t ?? '') }); }
 
-// What append()/appendChild() were handed: an element, or text to wrap in a node.
 function asNode(c) { return typeof c === 'string' || typeof c === 'number' ? textNode(c) : c; }
 
-// What has focus, module-wide: the element's focus()/blur() and document.activeElement are the same answer.
+// Shared focus target for focus()/blur() and document.activeElement.
 let focused = null;
 
 export function makeEl(tag = 'div') {
   const node = {
     tag, tagName: String(tag).toUpperCase(), children: [], attrs: {}, style: {}, dataset: {}, _text: '',
-    // Form-control properties a real element always has. el() assigns a prop when `k in e` and falls back
-    // to setAttribute otherwise, so without these an input's value silently became an attribute here while
-    // being a property in the browser — and a test reading either one would disagree with the app.
+    // Form-control properties a real element always has.
     value: '', checked: false, disabled: false,
     classList: {
       _s: new Set(),
@@ -73,16 +60,14 @@ export function makeEl(tag = 'div') {
     set textContent(v) { this._text = String(v); this.children = []; },
     set innerHTML(v) { if (!v) this.children = []; },
     get innerHTML() { return ''; },
-    // Parentage is tracked so remove() actually detaches: a panel mounted on <body> and later closed has
-    // to leave the tree, or a test can't tell an open modal from a closed one.
+    // Parentage is tracked so remove() detaches.
     parent: null,
     appendChild(c) {
       c = asNode(c);
       if (c && c.tag) { c.parent = this; this.children.push(c); this._adoptOption(c); }
       return c;
     },
-    // A <select> reports its first option's value until something sets another — including when that
-    // value is the empty string, which is how a leading "— pick —" option works.
+    // A <select> takes its first option's value until one is set.
     _adoptOption(c) {
       if (this.tag !== 'select' || !c || c.tag !== 'option' || this._adopted) return;
       this._adopted = true;
@@ -91,8 +76,6 @@ export function makeEl(tag = 'div') {
     append(...cs) { cs.forEach(c => { c = asNode(c); if (c && c.tag) { c.parent = this; this.children.push(c); this._adoptOption(c); } }); },
     removeChild(c) { this.children = this.children.filter(x => x !== c); if (c) c.parent = null; },
     remove() { if (this.parent) this.parent.removeChild(this); },
-    // Swap this node for another in the parent's child list, keeping its position — used where a toolbar
-    // rebuilds itself in place.
     replaceWith(next) {
       const p = this.parent;
       if (!p) return;
@@ -102,24 +85,18 @@ export function makeEl(tag = 'div') {
       this.parent = null;
     },
     insertBefore(c) { if (c && c.tag) { c.parent = this; this.children.push(c); } return c; },
-    // focus(): what has it decides whether a redraw would pull a control out from under someone.
     focus() { focused = this; },
     blur() { if (focused === this) focused = null; },
-    // Node.contains(): self or any descendant (used to tell Oidc fields from Basic ones).
     contains(n) { if (n === this) return true; for (const d of descendants(this)) if (d === n) return true; return false; },
-    // `class` set as an attribute is the class list, as it is on an SVG element built with setAttribute.
+    // A `class` attribute sets the class list.
     setAttribute(k, v) { this.attrs[k] = String(v); if (k === 'class') this.className = v; },
     getAttribute(k) { return this.attrs[k] ?? null; },
     removeAttribute(k) { delete this.attrs[k]; },
-    // Listeners are recorded, not discarded, so a test can fire one — the hover card and the focus
-    // highlight are only reachable through events, and an untested interaction rots unnoticed.
+    // Listeners are recorded so a test can fire them.
     _on: {},
     addEventListener(type, fn) { (this._on[type] ||= []).push(fn); },
     removeEventListener(type, fn) { this._on[type] = (this._on[type] || []).filter(f => f !== fn); },
-    // Events that bubble, do — and stopPropagation stops them, or a handler that guards against its own
-    // ancestor (the diagram's "click the canvas to unfocus") would be undone by the ancestor it guarded
-    // against. Only the DOM's own bubbling events are listed: mouseenter/mouseleave do not bubble, and
-    // pretending they did would make a hover test pass where a pointer never reached the element.
+    // Bubbles only the DOM's bubbling events; stopPropagation stops it.
     dispatch(type, ev) {
       const BUBBLES = ['change', 'input', 'click', 'keydown', 'keyup', 'submit', 'focusin', 'focusout'];
       let stopped = false;
@@ -127,7 +104,7 @@ export function makeEl(tag = 'div') {
       const inner = e.stopPropagation;
       e.stopPropagation = function () { stopped = true; if (typeof inner === 'function') inner.call(this); };
       for (let node = this; node; node = node.parent) {
-        // Both ways of listening, as the DOM does: the `on<type>` property and addEventListener.
+        // Both the on<type> property and addEventListener.
         const prop = node['on' + type];
         if (typeof prop === 'function') prop.call(node, e);
         (node._on?.[type] || []).slice().forEach(f => f(e));
@@ -141,7 +118,6 @@ export function makeEl(tag = 'div') {
     getBoundingClientRect() { return { left: 0, top: 0, width: 100, height: 100 }; },
     getScreenCTM() { return { inverse() { return {}; } }; },
   };
-  // classList.has is used by our matcher; keep `contains` as the DOM-facing name.
   return node;
 }
 
@@ -150,21 +126,18 @@ export function makeDom({ bodies }) {
   const root = makeEl('body');
   const byId = {};
   const getEl = (id) => (byId[id] ||= Object.assign(makeEl(id === 'nav' ? 'nav' : 'div'), { id }));
-  // nav + sections live in the tree so `document.querySelectorAll('nav a')` can find the links.
+  // nav and sections are in the tree so document queries find them.
   root.appendChild(getEl('nav'));
   root.appendChild(getEl('sections'));
 
-  // A tiny localStorage, so the theme can persist the way it does in a browser.
   const storage = new Map();
 
   const sandbox = {
     console,
     document: {
       body: root,
-      // What has focus, as a browser keeps it: a redraw while a control here is in use would close it.
       get activeElement() { return focused; },
       set activeElement(e) { focused = e; },
-      // The theme sets data-theme here; nothing else touches it.
       documentElement: makeEl('html'),
       getElementById: (id) => getEl(id),
       createElement: (t) => makeEl(t), createElementNS: (_ns, t) => makeEl(t),
@@ -172,15 +145,12 @@ export function makeDom({ bodies }) {
       querySelector: (s) => query(root, s, false),
       querySelectorAll: (s) => query(root, s, true),
       elementFromPoint: () => null,
-      // Document-level listeners are how a modal picks up Escape; record them so a test can fire one.
       _on: {},
       addEventListener(type, fn) { (this._on[type] ||= []).push(fn); },
       removeEventListener(type, fn) { this._on[type] = (this._on[type] || []).filter(f => f !== fn); },
       dispatch(type, ev) { (this._on[type] || []).slice().forEach(f => f(ev)); },
     },
-    // Window listeners are recorded, not discarded: a drag reports its movement and release there, so a
-    // test cannot drive one without them. `dispatchEvent` stays inert, so nothing the app already does
-    // starts behaving differently — `dispatch` is the test-side door.
+    // Window listeners are recorded; dispatchEvent stays inert.
     window: {
       _on: {},
       addEventListener(type, fn) { (this._on[type] ||= []).push(fn); },
@@ -189,7 +159,6 @@ export function makeDom({ bodies }) {
       dispatchEvent() { return true; },
       prompt: () => null,
     },
-    // protocol/hostname are read when building the API docs links (#190).
     location: { hash: '', protocol: 'http:', hostname: 'localhost' },
     navigator: { clipboard: { writeText() { } } },
     localStorage: {
@@ -203,9 +172,8 @@ export function makeDom({ bodies }) {
     clearTimeout() { },
     setInterval: () => 0, clearInterval() { },
     confirm: () => true,
-    fetch: async (url, opts) => ({ ok: true, status: 200, text: async () => '', json: async () => bodies(String(url), opts) }),
-    // EventSource is deliberately absent: it exercises the no-push path, where every section must still
-    // work off its manual refresh / polling fallback.
+    fetch: async (url, opts) => ({ ok: true, status: 200, text: async () => { const b = bodies(String(url), opts); return typeof b === 'string' ? b : ''; }, json: async () => bodies(String(url), opts) }),
+    // EventSource is deliberately absent so the polling fallback is exercised.
   };
   sandbox.globalThis = sandbox;
 

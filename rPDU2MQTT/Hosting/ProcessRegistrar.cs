@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using rPDU2MQTT.Core;
 using rPDU2MQTT.Core.Diagnostics;
+using rPDU2MQTT.Core.Integrations;
 using rPDU2MQTT.Helpers;
 using rPDU2MQTT.Services;
 
@@ -8,19 +9,18 @@ namespace rPDU2MQTT.Hosting;
 
 /// <summary>
 /// Registers this process with the <see cref="ProcessRegistry"/> on a timer, replacing the MQTT
-/// <c>HeartbeatService</c> beacons. Carries the process's roles + EmonCMS export status so the GUI Status
-/// board lists every role process in a split deployment.
+/// <c>HeartbeatService</c> beacons.
 /// </summary>
 public sealed class ProcessRegistrar : BackgroundService
 {
     private readonly Core.Diagnostics.ProcessRegistry registry;
-    private readonly EmonCmsStatus emon;
+    private readonly IntegrationStatus status;
     private readonly ProcessInfo baseInfo;
 
-    public ProcessRegistrar(EmonCmsStatus emon, ProcessIdentity self, Core.Diagnostics.ProcessRegistry? processRegistry = null)
+    public ProcessRegistrar(IntegrationStatus status, ProcessIdentity self, Core.Diagnostics.ProcessRegistry? processRegistry = null)
     {
         registry = processRegistry ?? new Core.Diagnostics.ProcessRegistry();
-        this.emon = emon;
+        this.status = status;
 
         baseInfo = new ProcessInfo
         {
@@ -39,14 +39,7 @@ public sealed class ProcessRegistrar : BackgroundService
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
         do
         {
-            EmonCmsReport? emonReport = null;
-            if (emon.HasAttempted)
-            {
-                var s = emon.Snapshot();
-                emonReport = new EmonCmsReport { Ok = s.Ok, LastSuccessUtc = s.LastSuccessUtc, LastError = s.LastError, Count = s.Count };
-            }
-
-            var info = baseInfo with { TimestampUtc = DateTime.UtcNow, EmonCms = emonReport };
+            var info = baseInfo with { TimestampUtc = DateTime.UtcNow, Integrations = IntegrationReports.Local(status) };
             try { registry.Register(info); }
             catch (Exception ex) { Serilog.Log.Debug($"Process registrar: {ex.Message}"); }
         }

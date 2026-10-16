@@ -107,4 +107,10 @@ await new Promise(r => setTimeout(r, 100));
 // One level out: to what feeds the sub panel.
 if (query(sec, '.flow-drill', false)?.value !== 'inv') fail(`the root bar backed out to "${query(sec, '.flow-drill', false)?.value}", not the inverter`);
 
+// Zoom: each chart sits in a pane; + enlarges it.
+const maps = query(sec, '.treemap', true);
+if (!maps.length || !maps.every(m => query(sec, '.tree-zoom', true).some(p => p.children.includes(m)))) fail('a treemap is not in a zoom pane');
+const mw0 = parseFloat(maps[0].style.width);
+query(query(sec, '.flow-zoom'), 'button', true).find(b => b.textContent === '+').onclick();
+if (!(parseFloat(maps[0].style.width) > mw0)) fail(`zooming in does not enlarge the treemap: ${mw0} -> ${maps[0].style.width}`);
 console.log('treemap check passed (squarified tiling, shares, nesting, what a node keeps, hover and opening a box).');

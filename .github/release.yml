@@ -1,0 +1,34 @@
+changelog:
+  exclude:
+    authors:
+      - github-actions[bot]
+  categories:
+    - title: Breaking Changes
+      labels:
+        - impact/breaking
+        - kind/major
+    - title: Migrations and Config Changes
+      labels:
+        - impact/migration
+        - impact/config
+    - title: Features
+      labels:
+        - kind/feature
+    - title: Bug Fixes
+      labels:
+        - kind/bug
+    - title: Documentation
+      labels:
+        - kind/documentation
+    - title: Dependencies
+      labels:
+        - kind/dependency
+    - title: Workflows
+      labels:
+        - kind/workflow
+    - title: Chores
+      labels:
+        - kind/chore
+    - title: Other Changes
+      labels:
+        - "*"

@@ -7,10 +7,11 @@ import { sourceEditorFor, genericSourceEditor } from '../source-editors.js';
 import { tagInput } from '../tags.js';
 import { templateHelp } from '../template-field.js';
 import { BALANCE_ROLES, balanceRoleOf, renameInBalance, setBalanceRole } from './balance.js';
-import { locationChoices, circuitChoices, choiceSelect } from '../location-options.js';
+import { circuitChoices, choiceSelect } from '../location-options.js';
+import { extensionsFor, renderExtensions } from '../entity-extensions.js';
 import {
   DIRECTIONAL_METRICS, LIVE_HINT, MODBUS_DATATYPES, MODBUS_REGISTER_TYPES, MODBUS_WORDORDERS,
-  NODE_KINDS, NODE_MODES, SIGNED_METRICS, feedsNothing, sourceTypes,
+  NODE_KINDS, NODE_MODES, SIGNED_METRICS, feedsNothing, sourceTypes, untrackedByDefault,
   isAdditiveMetric, kindMeta, metricLabel, metricMeta, sourceMetricKey,
 } from '../flow-vocabulary.js';
 
@@ -478,7 +479,9 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   grid.appendChild(field('Counts toward', roleSel, 'Site total it is summed into.'));
 
   const modeSel = el('select');
-  NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
+  // An untracked slice is asked for on its parent now; the mode stays listed only for a node already set to it.
+  NODE_MODES.filter(([v]) => v !== 'untracked' || node.Mode === 'untracked')
+    .forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
   modeSel.value = node.Mode || 'auto';
   modeSel.onchange = () => {
     node.Mode = modeSel.value === 'auto' ? undefined : modeSel.value;
@@ -843,14 +846,23 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   wireSec.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id),
     id => !feedsNothing((cand.get(id) || {}).kind)));
   wireSec.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
+  // A residual or untracked node is itself a remainder, with no reading of its own to be beyond.
+  if (!feedsNothing(node.Kind) && node.Mode !== 'untracked' && node.Mode !== 'residual') {
+    // Explicit either way once touched: left blank, the bridge turns it on for panels, inverters and the grid.
+    const untrackedBox = el('input', { type: 'checkbox', checked: node.CreateUntracked ?? untrackedByDefault(node.Kind) }) as HTMLInputElement;
+    untrackedBox.onchange = () => { node.CreateUntracked = untrackedBox.checked; };
+    wireSec.appendChild(field('Create untracked', el('span', { class: 'ne-check' }, untrackedBox,
+      el('span', { text: `add "${node.Label || node.Id}: Untracked" beneath it` })),
+      'What this node measures beyond its children, as a node of its own. Needs a reading on this node.'));
+  }
 
-  // --- Filing: tags, where it is, and where its EmonCMS feeds go. Folded until something is set. ---
+  // --- Filing: tags, its circuit, and where its EmonCMS feeds go. Folded until something is set. ---
   const more = el('details', { class: 'ne-more' }) as HTMLDetailsElement;
-  const filed = [(node.Tags || []).length, node.Location, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag].filter(Boolean).length;
+  const filed = [(node.Tags || []).length, node.Circuit, node.EmonCmsTag, node.EmonCmsVirtualTag, node.Hidden].filter(Boolean).length;
   more.open = filed > 0 || nodeEditorFilingOpen;
   more.addEventListener('toggle', () => { nodeEditorFilingOpen = more.open; });
   more.appendChild(el('summary', { class: 'ne-more-summary' },
-    el('span', { text: 'Tags, location & EmonCMS' }),
+    el('span', { text: 'Tags, circuit & EmonCMS' }),
     el('span', { class: 'ne-count', text: filed ? `${filed} set` : '' })));
   const moreGrid = el('div', { class: 'node-editor-fields' });
 
@@ -862,13 +874,13 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     onChange: () => { if (!tags.length) node.Tags = undefined; rerender(); },
   }), 'Filter, highlight and export by tag. Never changes a reading.'));
 
-  // Where it is and which circuit it is plugged into (#461, #465).
-  const locSel = choiceSelect(locationChoices(), node.Location || '', '— not placed —');
-  locSel.onchange = () => { node.Location = locSel.value || undefined; };
-  moreGrid.appendChild(field('Location', locSel, 'Counted there on Floor Plans.'));
+  // Which circuit it is plugged into (#465).
   const circSel = choiceSelect(circuitChoices(), node.Circuit || '', '— not known —');
   circSel.onchange = () => { node.Circuit = circSel.value || undefined; };
   moreGrid.appendChild(field('Circuit', circSel, 'Breaker it is on. Counted among its metered devices.'));
+  const hiddenBox = el('input', { type: 'checkbox', checked: !!node.Hidden }) as HTMLInputElement;
+  hiddenBox.onchange = () => { node.Hidden = hiddenBox.checked || undefined; };
+  moreGrid.appendChild(field('Hidden', el('span', { class: 'ne-check' }, hiddenBox, el('span', { text: 'hide on the flow diagrams' }))));
 
   // Where this node's EmonCMS feeds are filed; blank uses the EmonCMS page's tags.
   const emonTag = el('input', { type: 'text', value: node.EmonCmsTag || '', placeholder: 'EmonCMS default' }) as HTMLInputElement;
@@ -888,8 +900,24 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   more.appendChild(moreGrid);
   box.appendChild(more);
 
+  // --- Settings plugins keep on this node. Folded until one of them has something set. ---
+  if (extensionsFor('node').length) {
+    const ext = el('details', { class: 'ne-more ne-ext' }) as HTMLDetailsElement;
+    const kept = Object.keys(node.Ext || {}).length;
+    ext.open = kept > 0 || nodeEditorPluginsOpen;
+    ext.addEventListener('toggle', () => { nodeEditorPluginsOpen = ext.open; });
+    ext.appendChild(el('summary', { class: 'ne-more-summary' },
+      el('span', { text: 'Plugin settings' }),
+      el('span', { class: 'ne-count', text: kept ? `${kept} set` : '' })));
+    const at = ((state.data?.EnergyFlow?.Nodes || []) as any[]).indexOf(node);
+    renderExtensions('node', node, ext, ['EnergyFlow', 'Nodes', String(at)]);
+    box.appendChild(ext);
+  }
+
   return box;
 }
 
 /// Whether the filing section was left open, so a redraw after an edit inside it does not fold it away.
 let nodeEditorFilingOpen = false;
+/// Likewise for the plugin settings.
+let nodeEditorPluginsOpen = false;

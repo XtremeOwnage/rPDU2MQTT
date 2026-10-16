@@ -111,8 +111,8 @@ public class HaDeviceCleanupClientTests : IDisposable
     private HaEnergyDashboardSync Sync()
     {
         var cfg = new Config();
-        cfg.HASS.EnergyDashboard.Url = url;
-        cfg.HASS.EnergyDashboard.Token = "test-token";
+        cfg.HASS.Url = url;
+        cfg.HASS.Token = "test-token";
         return new HaEnergyDashboardSync(cfg, new StubSnapshots());
     }
 

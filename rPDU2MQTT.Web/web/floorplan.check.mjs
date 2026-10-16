@@ -7,7 +7,9 @@ import vm from 'node:vm';
 import { makeDom, query } from './domstub.mjs';
 
 const code = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
-const css = await readFile(new URL('../wwwroot/styles.css', import.meta.url), 'utf8');
+const page = (f) => readFile(new URL('../../plugins/rPDU2MQTT.Plugin.Locations/wwwroot/floor-plans.' + f, import.meta.url), 'utf8');
+const pageJs = await page('js'), css = await page('css');
+const pages = [{ id: 'floor-plans', title: 'Floor Plans', group: 'Energy Flow', icon: '⌗', configSection: 'Plugins.locations' }];
 const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import.meta.url), 'utf8')).filter(n => n.key !== '_README');
 const fail = (m) => { console.error('floor plan check FAILED: ' + m); process.exit(1); };
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
@@ -16,28 +18,34 @@ const rect = (x1, y1, x2, y2) => [{ X: x1, Y: y1 }, { X: x2, Y: y1 }, { X: x2, Y
 const config = {
   History: { Enabled: false },
   Gui: { DistanceUnits: 'imperial' },
+  Plugins: {
+    locations: {
+      Sites: [{
+        Id: 'home', Name: 'Home',
+        Floors: [{
+          Id: 'ground', Name: 'Ground', Level: 0, Width: 1000, Height: 700, Image: '',
+          Rooms: [
+            { Id: 'kitchen', Name: 'Kitchen', Shape: rect(0, 0, 400, 300) },
+            { Id: 'office', Name: 'Office', Shape: rect(400, 0, 800, 300) },
+            { Id: 'garage', Name: 'Garage', Shape: [] },
+          ],
+          Areas: [{ Id: 'front', Name: 'Front', Rooms: ['kitchen', 'office'], Shape: [] }],
+        }],
+      }],
+      Placements: [{ Id: 'fridge', Kind: 'appliance', Label: 'Fridge', Room: 'kitchen', Floor: 'ground', X: 100, Y: 100, Circuit: 'main/B06', Node: 'plug_fridge' }],
+    },
+  },
   EnergyFlow: {
     Nodes: [{ Id: 'desk', Label: 'Desk', Tags: ['office'] }],
     Links: [],
-    Sites: [{
-      Id: 'home', Name: 'Home',
-      Floors: [{
-        Id: 'ground', Name: 'Ground', Level: 0, Width: 1000, Height: 700, Image: '',
-        Rooms: [
-          { Id: 'kitchen', Name: 'Kitchen', Shape: rect(0, 0, 400, 300) },
-          { Id: 'office', Name: 'Office', Shape: rect(400, 0, 800, 300) },
-          { Id: 'garage', Name: 'Garage', Shape: [] },
-        ],
-        Areas: [{ Id: 'front', Name: 'Front', Rooms: ['kitchen', 'office'], Shape: [] }],
-      }],
-    }],
-    Placements: [{ Id: 'fridge', Kind: 'appliance', Label: 'Fridge', Room: 'kitchen', Floor: 'ground', X: 100, Y: 100, Circuit: 'main/B06', Node: 'plug_fridge' }],
-    Panels: [{ Id: 'main', Name: 'Main Panel', Slots: 12, Breakers: [{ Slot: 6, Number: 'B06', Description: 'Kitchen', Rooms: ['kitchen'] }] }],
+    Panels: [{ Id: 'main', Name: 'Main Panel', Slots: 12, Breakers: [{ Slot: 6, Number: 'B06', Description: 'Kitchen', Ext: { locations: { Rooms: ['kitchen'] } } }] }],
     Clamps: [{ Panel: 'main', Breaker: 'B06', Channel: 'ch5' }],
   },
 };
 
-// The bridge's rollup as /api/locations reports it: the kitchen known, the office waiting on a reading, the garage with nothing metered.
+const loc = () => config.Plugins.locations;
+
+// The bridge's rollup as the plugin's totals action reports it: the kitchen known, the office waiting on a reading, the garage with nothing metered.
 const places = [
   { id: 'home', name: 'Home', kind: 'site', site: 'home', floor: null, value: 500, state: 'known', nodes: [], missing: [], split: [] },
   { id: 'ground', name: 'Ground', kind: 'floor', site: 'home', floor: 'ground', value: 500, state: 'known', nodes: [], missing: [], split: [] },
@@ -55,9 +63,9 @@ const nodes = [
   { id: 'ch5', label: 'N30 1-5', kind: 'breaker', value: 500, location: 'kitchen', placed: 'kitchen', circuit: null },
   { id: 'plug_fridge', label: 'Fridge plug', kind: 'load', value: 150, location: 'kitchen', placed: 'kitchen', circuit: null },
 ];
-const locations = (flow) => ({
+const locations = (loc) => ({
   ok: true, metric: 'realpower', units: 'W', problems: [], message: null, places, circuits, nodes,
-  placements: (flow.Placements || []).map(p => ({ id: p.Id, value: p.Node === 'plug_fridge' ? 150 : null, circuitKnown: p.Circuit === 'main/B06' })),
+  placements: (loc?.Placements || []).map(p => ({ id: p.Id, value: p.Node === 'plug_fridge' ? 150 : null, circuitKnown: p.Circuit === 'main/B06' })),
 });
 const migrateTags = [{ tag: 'office', count: 1, suggest: 'room', id: 'office', name: 'Office' }, { tag: 'critical', count: 2, suggest: 'skip', id: 'critical', name: 'Critical' }];
 const migratePlan = {
@@ -76,11 +84,16 @@ const haPlan = {
 
 const { sandbox, getEl } = makeDom({
   bodies: (url, opts) => {
-    if (url.includes('/api/locations/resolve')) return locations(JSON.parse(opts.body).EnergyFlow);
-    if (url.includes('/api/locations/migrate')) { const b = JSON.parse(opts.body); posted.migrate = b; return { ok: true, tags: migrateTags, plan: b.mappings ? migratePlan : { creates: [], nodes: [], rules: [], removeTags: [], skipped: [] } }; }
-    if (url.includes('/api/ha/areas/preview')) return { ok: true, plan: haPlan };
-    if (url.includes('/api/ha/areas/apply')) return { ok: true, plan: haPlan, linked: { kitchen: 'area_kitchen' }, failed: [], message: 'Published 1 room(s) as areas.' };
+    // The plugin's actions answer as { ok, result }.
+    const action = (result) => ({ ok: true, result });
+    if (url.includes('/api/integrations/locations/totals')) return action(locations(JSON.parse(opts.body).Plugins?.locations));
+    if (url.includes('/api/integrations/locations/migrate')) { const b = JSON.parse(opts.body); posted.migrate = b; return action({ ok: true, tags: migrateTags, plan: b.mappings ? migratePlan : { creates: [], nodes: [], rules: [], removeTags: [], skipped: [] } }); }
+    if (url.includes('/api/integrations/locations/areas-preview')) return action({ ok: true, plan: haPlan });
+    if (url.includes('/api/integrations/locations/areas-apply')) return action({ ok: true, plan: haPlan, linked: { kitchen: 'area_kitchen' }, failed: [], message: 'Published 1 room(s) as areas.' });
     if (url.includes('/api/plans/storage')) return { ok: true, where: 'the directory /app/plans', limits: 'PNG, JPEG, WebP or SVG, up to 10 MB.', persistent: false, configWritable: true, why: 'No plan storage is configured, so uploaded plan images are lost when it restarts.' };
+    if (url.endsWith('/api/integrations/locations/pages/floor-plans.js')) return pageJs;
+    if (url.endsWith('/api/integrations/locations/pages/floor-plans.css')) return css;
+    if (url.endsWith('/api/integrations')) return { ok: true, integrations: [{ id: 'locations', pages }] };
     if (url.includes('/api/schema')) return schema;
     if (url.includes('/api/instances')) return { ok: true, instances: [] };
     if (url.includes('/api/config')) return config;
@@ -93,8 +106,10 @@ vm.runInContext(code, sandbox, { filename: 'app.js' });
 await wait(50);
 
 // --- The geometry, the units and the history the editor stands on ---
-const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory } = sandbox;
-if (typeof planSnap !== 'function') fail('the plan geometry is not in the bundle');
+// The page's own helpers, from the plugin's script.
+const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle };\n') + '})()', sandbox);
+const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory } = lib;
+if (typeof planSnap !== 'function') fail('the plan geometry is not in the plugin page');
 const office = rect(400, 0, 800, 300);
 const s1 = planSnap({ X: 405, Y: 4 }, [office], 12, 10);
 if (s1.to !== 'corner' || s1.pt.X !== 400 || s1.pt.Y !== 0) fail(`a point beside a corner did not snap to it: ${JSON.stringify(s1)}`);
@@ -123,7 +138,7 @@ h.redo(); if (box.v !== 2) fail('redo did not come forward');
 h.push(); box.v = 9; if (h.canRedo()) fail('a new change did not clear what could be redone');
 
 // --- The constraint solver ---
-const { planSolve } = sandbox;
+const { planSolve } = lib;
 const sq = () => ({ Id: 'a', Shape: rect(0, 0, 400, 300) });
 const near1 = (a, b) => Math.abs(a - b) <= 1;
 {
@@ -139,8 +154,8 @@ const near1 = (a, b) => Math.abs(a - b) <= 1;
 }
 {
   const a = { Id: 'a', Shape: [{ X: 0, Y: 0 }, { X: 100, Y: 0 }, { X: 60, Y: 90 }] };
-  planSolve([a], [{ Id: 'g', Kind: 'angle', Refs: [{ Room: 'a', Corner: 1 }], Value: 90 * Math.sign(sandbox.planCornerAngle(a, 1)) }], new Set(['a#0', 'a#1']));
-  if (!near1(Math.abs(sandbox.planCornerAngle(a, 1)), 90)) fail(`a square corner is not square: ${sandbox.planCornerAngle(a, 1)}`);
+  planSolve([a], [{ Id: 'g', Kind: 'angle', Refs: [{ Room: 'a', Corner: 1 }], Value: 90 * Math.sign(lib.planCornerAngle(a, 1)) }], new Set(['a#0', 'a#1']));
+  if (!near1(Math.abs(lib.planCornerAngle(a, 1)), 90)) fail(`a square corner is not square: ${lib.planCornerAngle(a, 1)}`);
 }
 {
   const a = { Id: 'a', Shape: rect(0, 0, 100, 100) }, b = { Id: 'b', Shape: [{ X: 200, Y: 0 }, { X: 300, Y: 30 }, { X: 300, Y: 100 }, { X: 200, Y: 100 }] };
@@ -192,7 +207,7 @@ const sheet = () => query(getEl('overlay'), '.sheet');
 const shut = () => getEl('overlay').onclick({ target: getEl('overlay') });
 const textOf = (n) => (n?.textContent || '').replace(/\s+/g, ' ');
 const key = (k, extra = {}) => sandbox.window.dispatch('keydown', { key: k, target: { tagName: 'BODY' }, preventDefault() { }, ...extra });
-const floor = () => config.EnergyFlow.Sites[0].Floors[0];
+const floor = () => loc().Sites[0].Floors[0];
 const roomById = (id) => floor().Rooms.find(r => r.Id === id);
 const undoButton = () => buttons().find(b => b.getAttribute('aria-label') === 'Undo');
 let pid = 1;
@@ -214,9 +229,14 @@ const kitchen = polygonFor('kitchen');
 if (!kitchen?.classList.contains('is-known')) fail(`the kitchen is not shaded as known: ${kitchen?.className}`);
 if (!/color-mix/.test(kitchen.style.fill || '')) fail(`the kitchen is not shaded by its reading: ${kitchen.style.fill}`);
 if (!polygonFor('office')?.classList.contains('is-unknown')) fail('the office, waiting on a reading, is not drawn as unknown');
+// Room labels are fitted to their rooms as drawn, and the stub's pane is only 100px wide: zoom in to read them.
+const tooSmall = labels();
+if (tooSmall.some(t => /Kitchen\s*300 W/.test(t))) fail(`a 40px-wide kitchen kept a label wider than itself: ${JSON.stringify(tooSmall)}`);
+svg.dispatch('wheel', { deltaX: 0, deltaY: -300, deltaMode: 0, preventDefault() { }, clientX: 50, clientY: 50 });
 if (!labels().some(t => /Kitchen\s*300 W/.test(t))) fail(`the kitchen's label does not carry its reading: ${JSON.stringify(labels())}`);
 if (!labels().some(t => /Office\s*no data/.test(t))) fail(`the office does not read "no data": ${JSON.stringify(labels())}`);
 if (labels().some(t => /Office\s*0 W/.test(t))) fail('an unknown room is labelled 0 W');
+key('0');
 if (!/Garage\s*unmetered/.test(textOf(side()))) fail(`the garage is not listed as unmetered: ${textOf(side())}`);
 const legend = textOf(query(sec, '.fp-legend'));
 if (!/unmetered/.test(legend) || !/no data/.test(legend)) fail(`the legend does not say what unshaded rooms mean: ${legend}`);
@@ -244,7 +264,7 @@ if (!/Placed on it.*Fridge/.test(textOf(sheet()))) fail('the circuit does not li
 // Which rooms the circuit serves is set here — and undone with Ctrl+Z, and redone with Ctrl+Y.
 const officeBox = query(query(sheet(), 'label', true).find(l => /Office/.test(textOf(l))), 'input', false);
 officeBox.checked = true; officeBox.onchange();
-const served = () => config.EnergyFlow.Panels[0].Breakers[0].Rooms;
+const served = () => config.EnergyFlow.Panels[0].Breakers[0].Ext?.locations?.Rooms;
 if (!served().includes('office')) fail('ticking a room the circuit serves did not record it on the breaker');
 shut();
 key('z', { ctrlKey: true });
@@ -298,7 +318,7 @@ key('z', { ctrlKey: true });
 toolBtn('Item').onclick();
 query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Outlet').onclick();
 tap(svg, 300, 200);
-const placement = (kind) => config.EnergyFlow.Placements.find(p => p.Kind === kind);
+const placement = (kind) => loc().Placements.find(p => p.Kind === kind);
 if (placement('outlet')?.Room !== 'kitchen' || placement('outlet').Floor !== 'ground') fail(`the outlet is not in the room it was placed in: ${JSON.stringify(placement('outlet'))}`);
 query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Light').onclick();
 tap(svg, 600, 600);
@@ -319,18 +339,18 @@ if (placement('outlet').Room !== 'office' || Math.abs(placement('outlet').X - 60
 toolBtn('Item').onclick();
 query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Outlet').onclick();
 tap(svg, 50, 290);
-const wallOutlet = config.EnergyFlow.Placements[config.EnergyFlow.Placements.length - 1];
+const wallOutlet = loc().Placements[loc().Placements.length - 1];
 if (wallOutlet.Kind !== 'outlet' || wallOutlet.Y !== 300 || wallOutlet.Room !== 'kitchen') fail(`an outlet dropped by the kitchen's wall did not sit on it: ${JSON.stringify(wallOutlet)}`);
 // …on the kitchen's side of it: it faces up into the kitchen, and is drawn beside the wall rather than across it.
 if (wallOutlet.Facing !== 270) fail(`the wall outlet does not face into the kitchen: ${wallOutlet.Facing}`);
 const drawnAt = (itemEl(wallOutlet.Id).getAttribute('transform') || '').match(/translate\(([-\d.]+),([-\d.]+)\)/);
 if (!drawnAt || !(Number(drawnAt[2]) < 300)) fail(`the wall outlet is drawn across its wall rather than beside it: ${itemEl(wallOutlet.Id).getAttribute('transform')}`);
 if (!query(sec, 'line', true).some(l => l.classList.contains('fp-item-stub'))) fail('the wall outlet is not joined to its wall');
-const before = config.EnergyFlow.Placements.length;
+const before = loc().Placements.length;
 key('d', { ctrlKey: true });
-if (config.EnergyFlow.Placements.length !== before + 1) fail('Ctrl+D did not duplicate the selected outlet');
+if (loc().Placements.length !== before + 1) fail('Ctrl+D did not duplicate the selected outlet');
 key('z', { ctrlKey: true });
-if (config.EnergyFlow.Placements.length !== before) fail('undo did not remove the duplicate');
+if (loc().Placements.length !== before) fail('undo did not remove the duplicate');
 
 // A door tapped beside the kitchen's right wall sits in it, lying along it.
 toolBtn('Door').onclick();
@@ -358,13 +378,13 @@ drag(svg, [-20, -20], [405, 305]);
 svg.dispatch('pointerdown', { ...at(600, 150), pointerId: 901, button: 0, target: polygonFor('office'), shiftKey: true });
 svg.dispatch('pointerup', { ...at(600, 150), pointerId: 901, target: polygonFor('office'), shiftKey: true });
 if (Number(textOf(query(side(), 'h3')).match(/(\d+) selected/)?.[1]) !== boxed + 1) fail(`Shift-click did not add the office to the selection: ${textOf(query(side(), 'h3'))}`);
-const fridgeY = config.EnergyFlow.Placements.find(p => p.Id === 'fridge').Y;
+const fridgeY = loc().Placements.find(p => p.Id === 'fridge').Y;
 drag(polygonFor('kitchen'), [200, 150], [200, 250]);
-const fridgeMoved = config.EnergyFlow.Placements.find(p => p.Id === 'fridge').Y - fridgeY;
+const fridgeMoved = loc().Placements.find(p => p.Id === 'fridge').Y - fridgeY;
 const officeMoved = roomById('office').Shape[0].Y;
 if (fridgeMoved < 90 || officeMoved < 90) fail(`dragging the kitchen did not move the rest of the selection with it: fridge ${fridgeMoved}, office ${officeMoved}`);
 key('z', { ctrlKey: true });
-if (roomById('office').Shape[0].Y !== 0 || config.EnergyFlow.Placements.find(p => p.Id === 'fridge').Y !== fridgeY) fail('undo did not put the whole group back');
+if (roomById('office').Shape[0].Y !== 0 || loc().Placements.find(p => p.Id === 'fridge').Y !== fridgeY) fail('undo did not put the whole group back');
 key('a', { ctrlKey: true });
 if (!/\d+ selected/.test(textOf(side()))) fail('Ctrl+A did not select everything');
 key('Escape');
@@ -403,7 +423,7 @@ search.value = 'kitch'; search.oninput();
 const offered = query(circuitPick, '.ss-opt', true);
 if (offered.length !== 1 || !/B06/.test(textOf(offered[0]))) fail(`searching the circuits did not narrow them: ${offered.map(textOf).join(' | ')}`);
 offered[0].onclick();
-if (config.EnergyFlow.Placements.find(p => p.Id === wallOutlet.Id).Circuit !== 'main/B06') fail('picking from the searched list did not set the circuit');
+if (loc().Placements.find(p => p.Id === wallOutlet.Id).Circuit !== 'main/B06') fail('picking from the searched list did not set the circuit');
 query(query(side(), '.ss', true)[1], 'button', false).onclick();
 const meters = query(query(side(), '.ss', true)[1], '.ss-opt', true).map(textOf);
 if (meters.some(t => /N30 1-5/.test(t))) fail(`a breaker's channel is offered as the meter for an outlet: ${meters.join(' | ')}`);
@@ -415,7 +435,7 @@ toolBtn('Wire').onclick();
 tap(itemEl('fridge'), 100, 100);
 tap(svg, 300, 100);
 tap(itemEl(outletId), 600, 100);
-const run = config.EnergyFlow.Runs?.[0];
+const run = loc().Runs?.[0];
 if (!run || run.From !== 'fridge' || run.To !== outletId || run.Points.length !== 1) fail(`the wire was not drawn between the two: ${JSON.stringify(run)}`);
 if (run.Circuit !== 'main/B06' || placement('outlet').Circuit !== 'main/B06') fail(`wiring the outlet to the fridge did not put it on the fridge's circuit: ${placement('outlet').Circuit}`);
 if (!query(sec, 'polyline', true).some(p => p.classList.contains('fp-run-line'))) fail('the wire is not drawn');
@@ -442,7 +462,7 @@ toolBtn('Wire').onclick();
 tap(svg, 394, 6);
 tap(svg, 520, 12);
 button('Finish here', sec).onclick();
-const cornerRun = config.EnergyFlow.Runs[config.EnergyFlow.Runs.length - 1];
+const cornerRun = loc().Runs[loc().Runs.length - 1];
 if (cornerRun.Points[0].X !== 400 || cornerRun.Points[0].Y !== 0) fail(`a bend next to a wall corner did not land on it: ${JSON.stringify(cornerRun.Points)}`);
 key('z', { ctrlKey: true });
 
@@ -470,10 +490,10 @@ tap(cornerHandle(2), 0, 0);
 key('Delete');
 if (roomById(denId).Shape.length !== 3 || !roomById(denId)) fail('Delete on a picked corner did not remove just that corner');
 key('z', { ctrlKey: true });
-tap(query(sec, 'polyline', true).find(p => p.dataset?.run === config.EnergyFlow.Runs[0].Id), 300, 100);
+tap(query(sec, 'polyline', true).find(p => p.dataset?.run === loc().Runs[0].Id), 300, 100);
 const bendHandle = query(sec, 'circle', true).find(c => c.dataset?.runpt === '0');
 tap(bendHandle, 0, 0); tap(bendHandle, 0, 0);
-if (config.EnergyFlow.Runs[0].Points.length !== 0) fail(`double-tapping a wire bend did not remove it: ${JSON.stringify(config.EnergyFlow.Runs[0].Points)}`);
+if (loc().Runs[0].Points.length !== 0) fail(`double-tapping a wire bend did not remove it: ${JSON.stringify(loc().Runs[0].Points)}`);
 key('z', { ctrlKey: true });
 key('Escape');
 
@@ -520,9 +540,9 @@ if (!query(sec, 'pattern', true).some(p => p.getAttribute('id') === 'fp-tex-wood
 toolBtn('Select').onclick();
 tap(itemEl(porch.Id), 600, 600);
 key('Delete');
-if (config.EnergyFlow.Placements.some(p => p.Id === porch.Id)) fail('Delete did not remove the selected item');
+if (loc().Placements.some(p => p.Id === porch.Id)) fail('Delete did not remove the selected item');
 key('z', { ctrlKey: true });
-if (!config.EnergyFlow.Placements.some(p => p.Id === porch.Id)) fail('Ctrl+Z did not bring the deleted item back');
+if (!loc().Placements.some(p => p.Id === porch.Id)) fail('Ctrl+Z did not bring the deleted item back');
 
 // The background image is a button of its own, with a place to drop the file.
 button('Background', sec).onclick();
@@ -540,7 +560,7 @@ if (!/Places created.*Laundry/.test(textOf(sheet()))) fail(`the preview does not
 if (floor().Rooms.some(r => r.Id === 'laundry')) fail('previewing wrote something');
 button('Apply', sheet()).onclick();
 if (!floor().Rooms.some(r => r.Id === 'laundry')) fail('applying did not create the room');
-if (config.EnergyFlow.Nodes[0].Location !== 'office' || config.EnergyFlow.Nodes[0].Tags.includes('office')) fail('applying did not place the node and drop its tag');
+if (config.EnergyFlow.Nodes[0].Ext?.locations?.Location !== 'office' || config.EnergyFlow.Nodes[0].Tags.includes('office')) fail('applying did not place the node and drop its tag');
 
 // Tools › Home Assistant: the plan shown, then applied, and each room remembers its area.
 button('Tools…', sec).onclick();
@@ -646,7 +666,7 @@ toolBtn('Item').onclick();
 query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Washer').onclick();
 key('0');
 tap(svg, 30, 150);
-const washer = config.EnergyFlow.Placements.find(p => p.Label === 'Washer');
+const washer = loc().Placements.find(p => p.Label === 'Washer');
 if (!washer) fail('a washer could not be placed');
 if (Math.abs(washer.Width - 68.6) > 0.2 || Math.abs(washer.Depth - 76.2) > 0.2) fail(`the washer is not 27 by 30 inches: ${washer.Width} × ${washer.Depth}`);
 if (Math.abs(washer.X - (washer.Depth / 2 + 0.5)) > 0.2 || washer.Rotation !== 270) fail(`the washer does not stand with its back to the wall, facing the room: ${JSON.stringify(washer)}`);
@@ -664,11 +684,11 @@ if (!rs || !knob) fail('a selected appliance has no handles to size and turn it'
 const wBefore = washer.Width;
 const rx = Number(rs.getAttribute('x')) + Number(rs.getAttribute('width')) / 2, ry = Number(rs.getAttribute('y')) + Number(rs.getAttribute('height')) / 2;
 drag(rs, [rx, ry], [rx + 20, ry]);
-const w2 = config.EnergyFlow.Placements.find(p => p.Id === washer.Id);
+const w2 = loc().Placements.find(p => p.Id === washer.Id);
 if (w2.Width === wBefore && w2.Depth === washer.Depth) fail('dragging the corner did not resize the washer');
 key('z', { ctrlKey: true });
 drag(query(sec, 'circle', true).find(c => c.dataset?.rotate === washer.Id), [Number(knob.getAttribute('cx')), Number(knob.getAttribute('cy'))], [washer.X, washer.Y - 200]);
-if (config.EnergyFlow.Placements.find(p => p.Id === washer.Id).Rotation !== 0) fail(`turning the washer to face down the plan did not: ${config.EnergyFlow.Placements.find(p => p.Id === washer.Id).Rotation}`);
+if (loc().Placements.find(p => p.Id === washer.Id).Rotation !== 0) fail(`turning the washer to face down the plan did not: ${loc().Placements.find(p => p.Id === washer.Id).Rotation}`);
 key('z', { ctrlKey: true });
 if (!/Size/.test(textOf(side())) || !button('Draw as an icon', side())) fail('the appliance panel does not offer its size');
 key('Escape');
@@ -696,9 +716,9 @@ const rightClick = (target, x, y) => svg.dispatch('contextmenu', { ...at(x, y), 
 rightClick(itemEl('fridge'), 100, 100);
 if (menu().hidden) fail('right-clicking an item opened no menu');
 if (!/Fridge/.test(textOf(menu())) || !menuItem('Duplicate') || !menuItem('Wire from here')) fail(`the item menu is not about the item: ${textOf(menu())}`);
-const items0 = config.EnergyFlow.Placements.length;
+const items0 = loc().Placements.length;
 menuItem('Duplicate').onclick();
-if (config.EnergyFlow.Placements.length !== items0 + 1) fail('Duplicate from the menu did nothing');
+if (loc().Placements.length !== items0 + 1) fail('Duplicate from the menu did nothing');
 if (!menu().hidden) fail('the menu stayed open after a choice');
 key('z', { ctrlKey: true });
 rightClick(polygonFor('kitchen'), 200, 150);
@@ -716,9 +736,9 @@ if (!menu().hidden) fail('Escape did not close the menu');
 button('View', sec).onclick();
 rightClick(itemEl('fridge'), 100, 100);
 if (menuItem('Duplicate').disabled) fail('the menu greys out editing while viewing instead of switching to Edit');
-const countBefore = config.EnergyFlow.Placements.length;
+const countBefore = loc().Placements.length;
 menuItem('Duplicate').onclick();
-if (config.EnergyFlow.Placements.length !== countBefore + 1) fail('duplicating from the menu while viewing did nothing');
+if (loc().Placements.length !== countBefore + 1) fail('duplicating from the menu while viewing did nothing');
 if (!button('Edit', sec).classList.contains('is-on')) fail('it did not switch to Edit');
 key('z', { ctrlKey: true });
 
@@ -737,7 +757,7 @@ if (!query(sec, 'rect', true).some(r => r.getAttribute('fill') === 'url(#fp-tex-
 button('+ Floor', sec).onclick();
 query(sheet(), 'input', true).find(i => (i.placeholder || i.getAttribute('placeholder')) === 'Ground floor').value = 'Upstairs';
 button('Add floor', sheet()).onclick();
-const upstairs = config.EnergyFlow.Sites[0].Floors.find(f => f.Name === 'Upstairs');
+const upstairs = loc().Sites[0].Floors.find(f => f.Name === 'Upstairs');
 if (!upstairs || Math.abs(upstairs.Width - 60 * ft * 100) > 1) fail(`adding a floor did not make a 60 ft plot: ${JSON.stringify(upstairs)}`);
 if (!query(sec, '.fp-empty').hidden) fail('the empty-floor card covers the plan while drawing');
 button('View', sec).onclick();

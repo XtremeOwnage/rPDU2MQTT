@@ -1,4 +1,6 @@
 ﻿using System.ComponentModel;
+using System.Text.Json.Serialization;
+using YamlDotNet.Serialization;
 
 namespace rPDU2MQTT.Models.Config;
 
@@ -13,6 +15,12 @@ public class HomeAssistantConfig
     [Display(Description = "Indicates whether Home Assistant discovery is enabled.")]
     [FeatureToggle]
     public bool DiscoveryEnabled { get; set; } = false;
+
+    [Description("Home Assistant base URL, e.g. http://homeassistant.local:8123 . Used by everything that talks to Home Assistant's API: the Energy Dashboard sync, rooms as areas, entity bindings and history.")]
+    public string? Url { get; set; }
+
+    [Description("Home Assistant long-lived access token (or set RPDU2MQTT_HASS_TOKEN).")]
+    public string? Token { get; set; }
 
     /// <summary>
     /// Gets or sets the discovery topic for Home Assistant.
@@ -73,18 +81,24 @@ public class HomeAssistantConfig
 public class HomeAssistantEnergyDashboardConfig
 {
     [DefaultValue(false)]
-    [Description("Sync the energy-flow hierarchy into HA's Energy Dashboard via its API. Requires Url + a long-lived access token.")]
+    [Description("Sync the energy-flow hierarchy into HA's Energy Dashboard via its API. Requires HomeAssistant.Url and Token.")]
     public bool Enabled { get; set; }
 
     /// <summary>Which energy-flow nodes are synced into the Energy Dashboard (#342).</summary>
     [Description("Limit the Energy Dashboard sync to nodes with particular tags. Empty syncs every node. Filtering changes only what is sent — never a value, and never any other destination.")]
     public NodeTagFilter NodeTags { get; set; } = new();
 
-    [Description("Home Assistant base URL, e.g. http://homeassistant.local:8123 .")]
-    public string? Url { get; set; }
+    /// <summary>Where the URL used to live. Moved to <see cref="HomeAssistantConfig.Url"/> on load; never written once moved.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("Url")]
+    [YamlMember(Alias = "Url")]
+    public string? LegacyUrl { get; set; }
 
-    [Description("Home Assistant long-lived access token (or set RPDU2MQTT_HASS_TOKEN).")]
-    public string? Token { get; set; }
+    /// <summary>Where the token used to live. Moved to <see cref="HomeAssistantConfig.Token"/> on load; never written once moved.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("Token")]
+    [YamlMember(Alias = "Token")]
+    public string? LegacyToken { get; set; }
 
     [DefaultValue("energy")]
     [Description("Measurement type holding each entity's cumulative energy (kWh) — used to find the Energy Dashboard stat for each tier.")]

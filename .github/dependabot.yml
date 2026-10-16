@@ -10,7 +10,9 @@ updates:
     schedule:
       interval: "weekly"
     labels:
-      - "area/dependency"
+      - "kind/dependency"
+    commit-message:
+      prefix: "[Dependency]"
     open-pull-requests-limit: 10
     ignore:
       # Microsoft.OpenApi is pinned here only to lift the 2.0.0 that Microsoft.AspNetCore.OpenApi resolves
