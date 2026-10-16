@@ -249,34 +249,38 @@ sandbox.document.dispatch('keydown', { key: 'Escape' });
 await new Promise(r => setTimeout(r, 20));
 if (query(sandbox.document.body, '.node-editor', false)) fail('Escape did not close the node editor modal');
 
-// --- Wiring from the Nodes table (no dragging) ---
+// --- Wiring without dragging, from the node editor ---
 // The Flow tab's canvas needs a node's port dragged onto its target, which means scrolling a tall column.
+// The table only shows what feeds a node; changing it is an edit, so it happens in the editor.
 nodesLink.click();
 await new Promise(r => setTimeout(r, 50));
 
-// Matched by the row's id cell, not its text: every row's dropdown lists every other node.
 const nodeRow = (id) => query(getEl('sections'), 'tr', true).find(r => query(r, 'code')?.textContent === id);
 const solarRow = nodeRow('solar');
 if (!solarRow) fail('no row for the solar node in the virtual-node table');
-const fedBySel = query(solarRow, 'select', true)[0];
-if (!fedBySel) fail('the node table offers no way to set what feeds a node without dragging');
-
-const feedOpts = (fedBySel.children || []).map(o => o.value || (o.attrs && o.attrs.value));
-if (!feedOpts.includes('panel')) fail(`the fed-by control does not offer the other nodes: ${feedOpts.join(', ')}`);
+if (query(solarRow, 'select', true).length) fail('the node table rewires a node without opening Edit');
+const panelRow = nodeRow('panel');
+const fedByCell = query(panelRow, 'td', true).find(td => td.dataset.label === 'Fed by');
+if (!/solar/i.test(fedByCell?.textContent || ''))
+  fail(`the table shows the wrong direction: panel reads as fed by "${fedByCell?.textContent}"`);
 
 // Solar already feeds panel, so panel feeding solar would close a cycle.
+query(solarRow, 'button', true).find(b => b.textContent === 'Edit')?.click();
+await new Promise(r => setTimeout(r, 20));
+const solarEditor = query(sandbox.document.body, '.node-editor', false);
+if (!solarEditor) fail('Edit did not open the node editor for solar');
+const fedByWire = query(solarEditor, '.ne-wire', true).find(w => query(w, '.ne-wire-label')?.textContent === 'Fed by');
+const fedBySel = fedByWire && query(fedByWire, 'select', true)[0];
+if (!fedBySel) fail('the node editor offers no way to set what feeds a node without dragging');
+const feedOpts = (fedBySel.children || []).map(o => o.value || (o.attrs && o.attrs.value));
+if (!feedOpts.includes('panel')) fail(`the Fed by picker does not offer the other nodes: ${feedOpts.join(', ')}`);
 fedBySel.value = 'panel';
 fedBySel.onchange({});
 await new Promise(r => setTimeout(r, 20));
 const looped = (config.EnergyFlow.Links || []).some(l => l.From === 'panel' && l.To === 'solar');
-if (looped) fail('the fed-by control accepted a wiring that closes a feeder loop');
-
-// And a legitimate feeder is written the right way round: panel is fed by solar, not the reverse.
-const panelRow = nodeRow('panel');
-const panelFedBy = query(panelRow, 'select', true)[0];
-if (!panelFedBy) fail('no fed-by control on the panel row');
-if (panelFedBy.value !== 'solar')
-  fail(`the fed-by control shows the wrong direction: panel reads as fed by "${panelFedBy.value}"`);
+if (looped) fail('the Fed by picker accepted a wiring that closes a feeder loop');
+sandbox.document.dispatch('keydown', { key: 'Escape' });
+await new Promise(r => setTimeout(r, 20));
 
 // --- Flow node hover card ----------------------------------------------------------------------------
 // The card is only reachable by hovering a Sankey node, so nothing else would notice it breaking.

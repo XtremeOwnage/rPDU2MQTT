@@ -1130,7 +1130,6 @@
     .nodes-scroll table.ld td.nd-same { display:none; }
     /* Tags sit beside Bindings; Fed by gets a row of its own above the buttons. */
     .nodes-scroll table.ld td:nth-child(8) { order:1; grid-column:1 / -1; }
-    .nodes-scroll table.ld td:nth-child(8) select { width:100% !important; }
     .nodes-scroll table.ld td:nth-child(9) { flex-direction:row; flex-wrap:wrap; align-items:baseline; }
     .nodes-scroll table.ld td:nth-child(9)::before { flex-basis:100%; }
     .nodes-scroll table.ld td:last-child {

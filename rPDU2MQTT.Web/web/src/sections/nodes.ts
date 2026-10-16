@@ -2,7 +2,7 @@
 import { api, btn, el, ensure, activate, navLink, toast } from '../helpers.js';
 import { state } from '../state.js';
 import { refreshDirty, onDirty } from '../dirty.js';
-import { feedsNothing, kindMeta, NODE_KINDS } from '../flow-vocabulary.js';
+import { kindMeta, NODE_KINDS } from '../flow-vocabulary.js';
 import { flowGroups } from '../flow-view.js';
 import { renderImportPanel } from '../node-templates.js';
 import { renderNodeEditor, overlay, openRenameDialog } from './node-editor.js';
@@ -253,7 +253,7 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
   cols.forEach(h => {
     const th = el('th', { text: h });
     if (h === 'Tags') th.title = 'Free-form labels for filtering the views. A tag never changes a reading.';
-    if (h === 'Fed by') th.title = 'What supplies this node. The same wiring as dragging on the Hierarchy tab, without the dragging.';
+    if (h === 'Fed by') th.title = 'What supplies this node. Change it with Edit, or by dragging on the Flow tab.';
     if (h === 'Max') th.title = 'Full-scale value for this node’s gauge on the Energy page — a PV array’s peak output, an inverter’s rating, a breaker’s size. Blank shows the plain reading instead; no ceiling is ever guessed.';
     if (h === 'Bindings') th.title = 'Live source bindings. ⚠ = bound, but no energy (kWh) metric — the node won’t appear on Home Assistant’s Energy Dashboard until you add an Energy source.';
     head.appendChild(th);
@@ -272,30 +272,8 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     tr.appendChild(el('td', { text: (n.Tags || []).join(', ') || '—' }));
 
     const incoming = links.filter((l: any) => l.To === n.Id).map((l: any) => l.From);
-    const fedByCell = el('td');
-    if (incoming.length > 1) {
-      fedByCell.appendChild(el('span', { text: incoming.map((f: string) => (cand.get(f) || {}).label || f).join(', ') }));
-    } else {
-      const sel = el('select', { style: { width: 'auto' } }) as HTMLSelectElement;
-      sel.appendChild(el('option', { value: '', text: '— none —' }));
-      [...cand.keys()]
-        .filter(id => id !== n.Id && !String(id).includes('#') && (!feedsNothing((cand.get(id) || {}).kind) || id === incoming[0]))
-        .sort((a, b) => ((cand.get(a) || {}).label || a).localeCompare((cand.get(b) || {}).label || b))
-        .forEach(id => sel.appendChild(el('option', { value: id, text: (cand.get(id) || {}).label || id })));
-      sel.value = incoming[0] || '';
-      sel.onchange = () => {
-        const feeder = sel.value;
-        if (feeder && wouldLoop(links.filter((l: any) => l.To !== n.Id), feeder, n.Id)) {
-          toast('That would create a feeder loop.', false);
-          sel.value = incoming[0] || '';
-          return;
-        }
-        for (let i = links.length - 1; i >= 0; i--) if (links[i].To === n.Id) links.splice(i, 1);
-        if (feeder) links.push({ From: feeder, To: n.Id });
-        rerender();
-      };
-      fedByCell.appendChild(sel);
-    }
+    // Read-only here; Edit is where the wiring changes.
+    const fedByCell = el('td', { text: incoming.map((f: string) => (cand.get(f) || {}).label || f).join(', ') || '—' });
     tr.appendChild(fedByCell);
     // Measured but no kWh source.
     const srcs = [...(n.Sources || []), ...(n.Mqtt || [])];
