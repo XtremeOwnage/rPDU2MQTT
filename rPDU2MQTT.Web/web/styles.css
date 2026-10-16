@@ -1067,6 +1067,21 @@
     .appbar-status #st-live .dot, .appbar-status #st-mqtt .dot { margin:0; }
     /* "Up to date" can wait for a wider screen; an available update still shows. */
     .appbar-status #st-update.good { display:none; }
+    /* Brand on the left, controls on the right, nothing boxed. */
+    .appbar { gap:var(--sp-2); padding:0 var(--sp-2) 0 var(--sp-3); }
+    .cmd-open {
+      order:1; margin-left:auto; width:36px; height:36px; min-width:0; padding:0; justify-content:center;
+      background:none; border-color:transparent; color:var(--muted);
+    }
+    .cmd-open-icon { font-size:22px; line-height:1; }
+    .appbar-status { order:2; margin-left:0; gap:2px; }
+    .appbar-status #st-live, .appbar-status #st-mqtt { background:none; border:0; padding:6px 5px; }
+    .appbar-status .icon-btn { width:36px; height:36px; font-size:20px; line-height:1; }
+    .appbar-logout { padding:0 2px 0 6px; font-size:13px; }
+  }
+  /* A cut-off name reads worse than none; the bolt stays. */
+  @media (max-width: 374px) {
+    .brand-name { display:none; }
 
     /* Dialogs sit at the top and take the full width. */
     .overlay, .sheet-backdrop { padding:var(--sp-2); align-items:flex-start; }
