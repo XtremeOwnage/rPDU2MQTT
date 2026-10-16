@@ -347,7 +347,12 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     actions.append(edit, ' ', rename, ' ', copy, ' ', rm);
     tr.appendChild(actions);
     // Labels for the stacked phone layout.
-    Array.from(tr.children).forEach((td: any, i: number) => { if (cols[i]) td.dataset.label = cols[i]; });
+    Array.from(tr.children).forEach((td: any, i: number) => {
+      if (cols[i]) td.dataset.label = cols[i];
+      if (td.textContent === '—') td.classList.add('nd-empty');
+    });
+    // No need to show the id twice when the label is the id.
+    if ((n.Label || n.Id) === n.Id) tr.children[0].classList.add('nd-same');
     body.appendChild(tr);
   });
   tbl.appendChild(body);
