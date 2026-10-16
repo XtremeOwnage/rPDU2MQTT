@@ -158,6 +158,30 @@
     border-radius:var(--r-sm); cursor:pointer; transition:border-color .12s, color .12s;
   }
   .cmd-open:hover { border-color:var(--faint); color:var(--muted); }
+  /* The time every data page shows: back to live while in the past, and the picker. */
+  .range-bar { display:inline-flex; align-items:center; gap:var(--sp-2); }
+  .range-live, .range-open {
+    display:inline-flex; align-items:center; gap:6px; padding:5px 10px; font:inherit; font-size:12.5px; white-space:nowrap;
+    color:var(--fg); background:var(--panel2); border:1px solid var(--line); border-radius:var(--r-sm); cursor:pointer;
+  }
+  .range-live:hover, .range-open:hover { border-color:var(--faint); }
+  .range-live[hidden], .range-step[hidden] { display:none; }
+  .range-step { padding:5px 8px; font-size:11px; line-height:1; color:var(--muted); background:var(--panel2); border:1px solid var(--line); border-radius:var(--r-sm); cursor:pointer; }
+  .range-step:disabled { opacity:.4; cursor:default; }
+  .range-bar .range-step + .range-open { margin-left:-6px; }
+  .range-bar .range-open + .range-step { margin-left:-6px; }
+  .range-open.is-past { color:var(--warn); border-color:var(--warn); background:var(--warn-bg); }
+  .range-icon { font-size:13px; line-height:1; }
+  .range-sheet { display:flex; flex-direction:column; gap:var(--sp-2); padding:var(--sp-2); }
+  .range-h { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin-top:var(--sp-2); }
+  .range-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:var(--sp-2); }
+  .range-form { display:flex; flex-wrap:wrap; align-items:flex-end; gap:var(--sp-3); }
+  .range-form label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  /* A data page that cannot show the past, while a past time is picked. */
+  .range-banner { display:flex; align-items:center; gap:var(--sp-3); margin:0 0 var(--sp-3); padding:10px 14px; border:1px solid var(--warn); border-radius:var(--r); background:var(--warn-bg); font-size:13px; }
+  .range-banner-text { flex:1; min-width:0; }
+  /* A short form: the dialog fits it rather than standing at full height. */
+  .sheet:has(.range-sheet) { align-self:flex-start; }
   .cmd-open-icon { font-size:14px; }
   .cmd-open-text { margin-right:auto; }
 
@@ -1259,15 +1283,52 @@
 
   /* Tiles: today's figures, and the 24-hour strips. */
   .ov-tiles { display: flex; gap: 12px; flex-wrap: wrap; }
+  /* Drawn as the Energy page's tiles are: a coloured edge per source, and a small capitalised label. */
   .ov-tile {
-    flex: 1 1 220px; min-width: 190px; padding: 12px 14px;
+    position: relative; overflow: hidden;
+    flex: 1 1 220px; min-width: 190px; padding: var(--sp-3) var(--sp-4);
     background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow-sm);
+    transition: border-color .15s, transform .15s, box-shadow .15s;
   }
+  .ov-tile::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--faint); opacity: .6; }
+  .ov-tile.ov-solar::before   { background: var(--warn);   opacity: 1; }
+  .ov-tile.ov-battery::before { background: var(--good);   opacity: 1; }
+  .ov-tile.ov-grid::before    { background: var(--accent); opacity: 1; }
+  .ov-tile.ov-home::before    { background: var(--muted);  opacity: 1; }
+  .ov-tile:hover { border-color: var(--accent-dim); transform: translateY(-1px); box-shadow: var(--shadow); }
   .ov-tile.is-link { cursor: pointer; }
-  .ov-tile.is-link:hover { border-color: var(--accent-dim); }
-  .ov-tile-head { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--muted); font-weight: 700; }
-  .ov-icon { font-size: 14px; }
-  .ov-value { font-size: 26px; font-weight: 700; margin: 4px 0 2px; font-variant-numeric: tabular-nums; }
+  .ov-tile-head {
+    display: flex; align-items: center; gap: var(--sp-2);
+    font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
+  }
+  .ov-icon { font-size: 15px; line-height: 1; }
+  .ov-value { font-size: 27px; font-weight: 680; letter-spacing: -.03em; margin: 6px 0 2px; font-variant-numeric: tabular-nums; }
+
+  /* The pages most visits are for, one large button each. */
+  .ov-jumps { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--sp-3); margin: 0 0 var(--sp-4); }
+  .ov-jump {
+    display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); text-align: left;
+    font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r);
+    white-space: normal; min-width: 0; box-shadow: var(--shadow-sm); cursor: pointer; transition: border-color .15s, transform .15s, box-shadow .15s;
+  }
+  .ov-jump:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: var(--shadow); }
+  .ov-jump:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .ov-jump-icon {
+    flex: none; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px;
+    font-size: 20px; border-radius: var(--r-sm); background: var(--panel2); color: var(--accent);
+  }
+  .ov-jump-text { display: flex; flex-direction: column; min-width: 0; }
+  .ov-jump-label { font-weight: 700; font-size: 14px; }
+  .ov-jump-sub { font-size: 12px; color: var(--faint); }
+  @media (max-width: 560px) {
+    .ov-jumps { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
+    .ov-jump { gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
+    .ov-jump-icon { width: 32px; height: 32px; font-size: 17px; }
+    .ov-jump-sub { display: none; }
+    /* The app bar has no room for words on a phone: the icon opens the picker, the dot goes back to live. */
+    .range-open span:last-child, .range-live span:last-child, .range-bar .range-step { display: none; }
+    .range-live, .range-open { padding: 5px 7px; }
+  }
   .ov-sub { font-size: 11.5px; color: var(--faint); }
   .ov-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 4px; }
   .ov-cols .ov-value { margin-top: 0; }

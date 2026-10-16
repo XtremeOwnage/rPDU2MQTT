@@ -10,6 +10,7 @@ import { initPalette } from './palette.js';
 import { loadPluginPages } from './plugin-pages.js';
 import { initStackTables } from './stack-tables.js';
 import { initPhoneNav, openNav } from './phone-nav.js';
+import { rangeBar, refreshRangeBar } from './history-control.js';
 
 // Back/forward and hash edits: open the matching tab if it isn't already active.
 window.addEventListener('hashchange', () => {
@@ -27,6 +28,7 @@ export async function load() {
   catch { state.derivations = []; }
   await loadPluginPages();
   build();
+  refreshRangeBar();
   setBaseline();
   refreshStatus();
 }
@@ -70,7 +72,10 @@ function renderUpdate(u: any) {
     toast(`Update applied — rolling to ${u.applied}. The bridge is restarting.`, true);
   }
   upd.classList.remove('is-hidden', 'busy');
-  if (u.available) {
+  // A roll in the last few minutes, or an update the user started here, is still under way.
+  const rolling = u.applied && u.appliedAt && Date.now() - Date.parse(u.appliedAt) < 10 * 60_000;
+  if (rolling || updateRestart()) showUpdating(upd, rolling ? `Auto-updating to ${u.applied}` : updateRestart());
+  else if (u.available) {
     upd.className = 'pill pill-btn warn';
     upd.textContent = '↑ ' + (u.latest || 'Update');
     upd.title = 'Update available: ' + (u.latest || '?') + (u.current ? ' (on ' + u.current + ')' : '')
@@ -84,6 +89,16 @@ function renderUpdate(u: any) {
     upd.textContent = 'Check updates';
     upd.title = (u.message || '') + '\nClick to check now';
   }
+}
+
+/// The expected restart, when it is an update; "Applying saved settings" restarts the same build.
+const updateRestart = () => { const why = expectedRestart(); return why && /updat|switch|pull/i.test(why) ? why : null; };
+
+/// While a new build rolls out, the chip says so instead of offering the update again.
+function showUpdating(upd: any, why: string | null) {
+  upd.className = 'pill pill-btn warn';
+  upd.textContent = '⟳ Updating';
+  upd.title = (why || 'Updating') + '. The bridge restarts on the new build; this page reconnects on its own.';
 }
 
 /// Badge for settings saved but not yet running; clicking it restarts.
@@ -247,7 +262,12 @@ function initLiveIndicator() {
     down: ['pill bad', 'Offline', 'The live update stream dropped — retrying. Pages fall back to manual refresh.'],
     idle: ['pill', 'Idle', 'Nothing on this page needs live updates.'],
   };
-  onExpectRestart(() => { showRestartOverlay(expectedRestart() || 'Restarting'); watchForReturn(); });
+  onExpectRestart(() => {
+    showRestartOverlay(expectedRestart() || 'Restarting');
+    watchForReturn();
+    const upd: any = document.getElementById('st-update');
+    if (upd && !upd.classList.contains('is-hidden') && updateRestart()) showUpdating(upd, updateRestart());
+  });
   onRealtimeState(s => {
     if (s === 'down') watchForReturn();
     if (!pill) return;
@@ -427,6 +447,7 @@ function initShell() {
   initTheme();
   initPalette();
   initLiveIndicator();
+  document.getElementById('st-range')?.appendChild(rangeBar());
 }
 
 initShell();

@@ -387,7 +387,8 @@ function mount(sec     , host     ) {
       el('div', { class: 'sa-panel-value' }, num + (unit ? ' ' : ''), el('span', { class: 'sa-unit', text: unit })),
       el('div', { class: 'sa-panel-sub', text: others }));
     if (editing || !o) t.append(el('div', { class: 'sa-panel-serial', text: serial || '' }));
-    t.append(el('div', { class: 'sa-bar' }, el('i', { style: { width: `${Math.round(frac * 100)}%` } })));
+    // A tile never heard shows its serial where the bar would be, at the height of the others.
+    if (editing || o) t.append(el('div', { class: 'sa-bar' }, el('i', { style: { width: `${Math.round(frac * 100)}%` } })));
     const type = saTypes().find(x => x.Id === typeOf(node));
     t.title = `${node?.Label || panelId} · optimizer ${serial}` + (type ? ` · ${saTypeName(type)}` : '')
       + (o ? ` · reported ${Math.round(o.ageSeconds)} s ago` : ' · not heard on the bus');
@@ -556,8 +557,6 @@ function mount(sec     , host     ) {
       const rating = ratingOf(panels, s.Id);
       if (rating) card.appendChild(el('div', { class: 'sa-string-rating', text: rating
         + (electricalOf(s.Id)?.vocCold != null ? ` · cold Voc ${Math.round(electricalOf(s.Id) .vocCold )} V` : '') }));
-      if (mppt) mpptIssues(mppt).filter(([, , who]) => who && saSame(who, s.Id)).forEach(([level, text]) =>
-        card.appendChild(el('div', { class: `sa-issue is-${level}`, text: (level === 'bad' ? '⛔ ' : '⚠ ') + text })));
 
       const row = el('div', { class: 'sa-panels' });
       row.style.setProperty?.('--sa-cols', String(colsOf(s.Id)));
@@ -581,6 +580,9 @@ function mount(sec     , host     ) {
         });
       }
       card.appendChild(row);
+      // Warnings go under the panels, so the panels of strings side by side start on one line.
+      if (mppt) mpptIssues(mppt).filter(([, , who]) => who && saSame(who, s.Id)).forEach(([level, text]) =>
+        card.appendChild(el('div', { class: `sa-issue is-${level}`, text: (level === 'bad' ? '⛔ ' : '⚠ ') + text })));
       cards.push({ s, card, mppt });
     });
 
@@ -630,12 +632,12 @@ function mount(sec     , host     ) {
           const limits = FIELDS.filter(([k]) => lim[k] != null).map(([k, t]) => `${t.replace(/ \(.*\)$/, '')} ${lim[k]}`).join(' · ');
           box.appendChild(el('div', { class: 'desc sa-mppt-limits', text: limits || 'No limits set. Add them in Edit.' }));
         }
-        mpptIssues(id).filter(([, , who]) => !who).forEach(([level, text]) =>
-          box.appendChild(el('div', { class: `sa-issue is-${level}`, text: (level === 'bad' ? '⛔ ' : '⚠ ') + text })));
       }
       const inner = el('div', { class: 'sa-mppt-strings' });
       inBox.forEach(c => inner.appendChild(c.card));
       box.appendChild(inner);
+      if (id) mpptIssues(id).filter(([, , who]) => !who).forEach(([level, text]) =>
+        box.appendChild(el('div', { class: `sa-issue is-${level}`, text: (level === 'bad' ? '⛔ ' : '⚠ ') + text })));
       array.appendChild(box);
     });
 

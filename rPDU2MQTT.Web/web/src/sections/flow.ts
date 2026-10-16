@@ -5,7 +5,7 @@ import { setBaseline, refreshDirty } from '../dirty.js';
 import { state } from '../state.js';
 import { exportData } from '../overrides.js';
 import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.js';
-import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
+import { historyControl, historyQuery, historyNote, followRange, rangeSpan } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusedNode, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard, updateNodeCard } from '../flow-focus.js';
 import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, groupChips, viewSwitches, applyUnmeasuredPref, collapseGraph, ensureGroupState, hideHiddenNodes, explodeExpandedGroups, nestExpandedGroups, toggleGroup, drawnMembers, expandMode, foldedInto, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
@@ -121,55 +121,36 @@ export function addFlowSection(nav: any, sections: any) {
   MODES.forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
   try { const m = localStorage.getItem('rpdu-flow-mode'); modeSel.value = MODES.some(([v]) => v === m) ? m! : 'sankey'; } catch { modeSel.value = 'sankey'; }
   modeSel.onchange = () => { try { localStorage.setItem('rpdu-flow-mode', modeSel.value); } catch { /* this session only */ } refit = true; redrawBoth(); };
-  const historyBtn = btn('History ▾');
   const viewBtn = btn('View ▾');
   viewBtn.title = 'Hide empty/small/no-data nodes, unmeasured load, animation, routing, groups and tags.';
-  bar.append(modeSel, metricSel, drillSlot, instSel.wrap, historyBtn, viewBtn, refresh, count, dayNote);
+  bar.append(modeSel, metricSel, drillSlot, instSel.wrap, viewBtn, refresh, count, dayNote);
   head.appendChild(bar);
-  // Picking a whole day asks an energy question — power at 23:59:59 of a day gone by says almost nothing —
-  let hadDay = false;
-  const hist = historyControl((what: any) => {
-    periods.mark(null);
-    // Only on the way out of live.
-    const leftLive = what === 'day' && !hadDay && !!hist.day();
-    hadDay = !!hist.day();
-    // Only the daily total can be added across days, so asking for a span asks for that metric.
-    if ((leftLive && !hist.time() && metricSel.value === 'realpower') || (what === 'span' && hist.span() > 1)) {
-      if (measured() !== 'energy_d') metricSel.value = 'energy_d';
-      showDayNote();
-    }
+  // The moment shown is the header's; this row only says which it is.
+  const hist = historyControl(() => load(), true);
+  followRange(sec, r => {
+    const span = rangeSpan(r);
+    // Only on the way out of live: a metric chosen while in the past stays chosen.
+    const leftLive = !hist.day();
+    hist.set(span ? span.day : '', span ? span.days : 1, span ? span.time : '');
+    // A whole day, or a run of them, asks an energy question — power at 23:59:59 of a day gone by says almost
+    // nothing — and only the daily total can be added across days.
+    if (span && ((leftLive && !span.time) || span.days > 1) && measured() !== 'energy_d') { metricSel.value = 'energy_d'; showDayNote(); }
+    syncPanels();
     load();
   });
-  // One click for the periods people actually ask for, as on the Energy and Trends pages. A period is a
-  // question about energy — "how much yesterday" — so it answers in energy rather than leaving a power
-  // reading under a heading about a month.
-  const periods = periodRow((key: PeriodKey) => {
-    const { day, days } = periodWindow(key);
-    hist.set(day, days);
-    if (measured() !== 'energy_d') { metricSel.value = 'energy_d'; showDayNote(); }
-    periods.mark(key);
-    hadDay = true;
-    load();
-  });
-  // Behind buttons rather than over the diagram: the past, and how the diagram is drawn.
-  const historyPanel = el('div', { class: 'flow-panel' }, periods.row, hist.row);
+  const historyPanel = el('div', { class: 'flow-panel' }, hist.row);
   const viewBody = el('div', { class: 'flow-view-body' });
   const viewPanel = el('div', { class: 'flow-panel' }, viewBody);
   sec.append(historyPanel, viewPanel);
-  let historyOpen = false, viewOpen = false;
+  let viewOpen = false;
   const syncPanels = () => {
-    // Open while a past view is showing, so what is being looked at is never hidden.
-    const hOpen = historyOpen || !!hist.day();
-    historyPanel.hidden = !hOpen;
-    historyBtn.textContent = hist.day() ? `History: ${hist.day()} ▴` : hOpen ? 'History ▴' : 'History ▾';
-    historyBtn.classList[hist.day() ? 'add' : 'remove']('primary');
-    historyBtn.hidden = hist.row.classList.contains('is-hidden') && !hist.day();
+    // Shown while a past moment is, so what is being looked at is never unsaid.
+    historyPanel.hidden = !hist.day();
     viewPanel.hidden = !viewOpen;
     // A tag highlight dims most of the diagram; say so while the panel that set it is closed.
     viewBtn.textContent = (activeTag ? `View · ${activeTag}` : 'View') + (viewOpen ? ' ▴' : ' ▾');
     viewBtn.classList[activeTag ? 'add' : 'remove']('primary');
   };
-  historyBtn.onclick = () => { historyOpen = !(historyOpen || !!hist.day()); syncPanels(); };
   viewBtn.onclick = () => { viewOpen = !viewOpen; syncPanels(); };
   syncPanels();
   const wrap = document.createElement('div'); sec.appendChild(wrap);
