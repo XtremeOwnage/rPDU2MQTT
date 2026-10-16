@@ -1062,8 +1062,9 @@
     /* Hide the build string on a phone. */
     .appbar-status .pill-mono { display:none; }
     .appbar-status { gap:var(--sp-1); }
-    /* Connection pills keep their dot and drop the word. */
-    .appbar-status #st-live, .appbar-status #st-mqtt { font-size:0; padding:4px 6px; gap:0; }
+    /* One light when all is well; a word only when something is not. MQTT speaks up only when down. */
+    .appbar-status #st-mqtt.good { display:none; }
+    .appbar-status #st-live.good { font-size:0; gap:0; }
     .appbar-status #st-live .dot, .appbar-status #st-mqtt .dot { margin:0; }
     /* "Up to date" can wait for a wider screen; an available update still shows. */
     .appbar-status #st-update.good { display:none; }
@@ -1075,7 +1076,8 @@
     }
     .cmd-open-icon { font-size:22px; line-height:1; }
     .appbar-status { order:2; margin-left:0; gap:2px; }
-    .appbar-status #st-live, .appbar-status #st-mqtt { background:none; border:0; padding:6px 5px; }
+    .appbar-status #st-live.good { background:none; border:0; padding:6px 5px; }
+    .appbar-status #st-live:not(.good), .appbar-status #st-mqtt { padding:3px 8px; font-size:11px; }
     .appbar-status .icon-btn { width:36px; height:36px; font-size:20px; line-height:1; }
     .appbar-logout { padding:0 2px 0 6px; font-size:13px; }
 
