@@ -3,7 +3,19 @@ import { liveWhileActive, realtimeLive } from '../realtime.js';
 import { drawEnergyFlow, type FlowArm } from '../energy-diagram.js';
 import { sparkline, KIND_COLOR } from '../charts.js';
 import { homeEnergy, selfSufficiencyPct, netSelfProducedPct, shareBand, sumKnown } from '../energy.js';
-import { requestFocus } from '../state.js';
+import { requestFocus, state } from '../state.js';
+import { followRange, currentRange, rangeSpan, rangeLabel, LIVE, type SharedRange } from '../history-control.js';
+
+/// The pages most visits are for, offered as large buttons at the top of the Overview.
+const JUMPS: [string, string, string][] = [
+  ['Energy', '⚡', 'Totals, and where the power came from'],
+  ['Flow', '⇄', 'Follow power from source to circuit'],
+  ['Live Data', '∿', 'Every outlet and reading, right now'],
+  ['Trends', '▦', 'Charts over hours, days or months'],
+  ['Node Trends', '▥', 'Compare circuits over time'],
+  ['Floor Plans', '⌗', 'Power and climate, room by room'],
+  ['Panel Schedule', '🗂', 'Your breaker panel'],
+];
 
 export function addOverviewSection(nav: any, sections: any) {
   const link = navLink(nav, 'Overview', '⌂');
@@ -24,16 +36,42 @@ export function addOverviewSection(nav: any, sections: any) {
   const stamp = el('span', { class: 'ld-count' });
   bar.append(showSel, refresh, stamp); sec.appendChild(bar);
 
+  // The period shown: live, or one the reader picked here or anywhere else.
+  // The moment shown is the header's.
+  let range: SharedRange = currentRange();
+  const isLive = () => range.kind === 'live';
+  followRange(sec, r => { range = r; load(); });
+  const markRange = () => {
+    // A past period is a question about energy; power is only known for now.
+    showSel.disabled = !isLive();
+    if (!isLive()) showSel.value = 'energy_d';
+  };
+  const historyOn = () => !!((state.data && state.data.History) || {}).Enabled;
+
   const alerts = el('div'); sec.appendChild(alerts);
+
+  const jumps = el('div', { class: 'ov-jumps' }); sec.appendChild(jumps);
+  const drawJumps = () => {
+    jumps.innerHTML = '';
+    for (const [label, icon, sub] of JUMPS) {
+      const target = ([...document.querySelectorAll('nav a')] as any[]).find(a => a.dataset?.label === label);
+      if (!target) continue;
+      const b = el('button', { class: 'ov-jump', type: 'button', title: `Open ${label}` },
+        el('span', { class: 'ov-jump-icon', text: icon, 'aria-hidden': 'true' }),
+        el('span', { class: 'ov-jump-text' }, el('span', { class: 'ov-jump-label', text: label }), el('span', { class: 'ov-jump-sub', text: sub })));
+      b.onclick = () => target.click();
+      jumps.appendChild(b);
+    }
+  };
 
   const now = el('div', { class: 'ov-now' }); sec.appendChild(now);
   const flowWrap = el('div', { class: 'energy-flow ov-flow' }); now.appendChild(flowWrap);
   const battWrap = el('div', { class: 'ov-batt-side' }); now.appendChild(battWrap);
 
-  sec.appendChild(el('h3', { text: 'Today so far', class: 'ov-h3' }));
+  const todayHead = el('h3', { text: 'Today so far', class: 'ov-h3' }); sec.appendChild(todayHead);
   const todayRow = el('div', { class: 'ov-tiles' }); sec.appendChild(todayRow);
 
-  sec.appendChild(el('h3', { text: 'Last 24 hours', class: 'ov-h3' }));
+  const dayHead = el('h3', { text: 'Last 24 hours', class: 'ov-h3' }); sec.appendChild(dayHead);
   const dayRow = el('div', { class: 'ov-tiles' }); sec.appendChild(dayRow);
 
   const fmtW = (w: number | null) => w == null ? '—'
@@ -200,7 +238,7 @@ export function addOverviewSection(nav: any, sections: any) {
     dayRow.innerHTML = '';
     const body = lastDay;
     if (!body?.ok || !(body.series || []).length) {
-      dayRow.appendChild(el('div', { class: 'desc', text: 'No history for the last 24 hours yet.' }));
+      dayRow.appendChild(el('div', { class: 'desc', text: isLive() ? 'No history for the last 24 hours yet.' : `No history for ${rangePhrase()}.` }));
       return;
     }
     const steps = ((body.series || [])[0]?.values || []).length;
@@ -238,7 +276,10 @@ export function addOverviewSection(nav: any, sections: any) {
       const values = kind === 'home' ? homeValues() : sumSeries(ofRole(kind));
       if (!values.length || !values.some(v => v != null)) return;
       const known = values.filter((v): v is number => typeof v === 'number');
-      const nowV = [...values].reverse().find((v): v is number => typeof v === 'number') ?? null;
+      // Now for the last 24 hours; over a past period the average says more than its last reading.
+      const nowV = isLive()
+        ? [...values].reverse().find((v): v is number => typeof v === 'number') ?? null
+        : known.length ? known.reduce((a, b) => a + b, 0) / known.length : null;
       const peak = known.length ? Math.max(...known) : null;
       const box = el('div', { class: 'ov-tile ov-strip ov-' + kind });
       box.append(
@@ -249,17 +290,40 @@ export function addOverviewSection(nav: any, sections: any) {
         sparkline({
           values, color: kind === 'home' ? 'var(--accent)' : (KIND_COLOR[kind] || 'var(--accent)'), units: body.units || 'W',
           width: 300, height: 72,
-          at: (i: number) => (body.at || [])[i] ? new Date(body.at[i]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          at: (i: number) => !(body.at || [])[i] ? ''
+            : (rangeSpan(range)?.days ?? 1) < 2
+              ? new Date(body.at[i]).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : new Date(body.at[i]).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
         }),
-        el('div', { class: 'ov-sub', text: known.length ? `${known.length} of ${values.length} readings` : 'no readings' }));
+        el('div', { class: 'ov-sub', text: !known.length ? 'no readings'
+          : `${isLive() ? '' : 'average · '}${known.length} of ${values.length} readings` }));
       dayRow.appendChild(box);
     };
     ([['solar', 'Solar', '☀'], ['grid', 'Grid', '⚡'], ['battery', 'Battery', '🔋'], ['home', 'Home', '⌂']] as [string, string, string][]).forEach(strip);
   };
 
+  const shownLabel = () => rangeLabel(range);
+  const rangePhrase = () => range.kind === 'period' ? shownLabel().toLowerCase() : shownLabel();
+  /// The shown moment as the instants it runs between, ending no later than now.
+  const rangeWindow = () => {
+    const { day, days, time } = rangeSpan(range)!;
+    const end = new Date(`${day}T${time || '23:59:59'}`);
+    const start = new Date(`${day}T00:00:00`);
+    start.setDate(start.getDate() - (days - 1));
+    const now = new Date();
+    return { from: start, to: end > now ? now : end, days };
+  };
+
   const loadDay = async () => {
     try {
-      const r = await api('/api/flow/series?minutes=1440&step=900&metric=realpower');
+      let q = 'minutes=1440&step=900';
+      if (!isLive()) {
+        const w = rangeWindow();
+        // About a hundred points across whatever the period is.
+        const step = Math.max(900, Math.round((w.to.getTime() - w.from.getTime()) / 1000 / 96 / 300) * 300);
+        q = `from=${encodeURIComponent(w.from.toISOString())}&to=${encodeURIComponent(w.to.toISOString())}&step=${step}`;
+      }
+      const r = await api(`/api/flow/series?${q}&metric=realpower`);
       lastDay = r.body;
     } catch { lastDay = null; }
     drawDay();
@@ -313,6 +377,7 @@ export function addOverviewSection(nav: any, sections: any) {
       };
     });
 
+    battWrap.hidden = !isLive();
     const socVals = battIds.map(id => live[`${id}|soc`]).filter((v): v is number => typeof v === 'number');
     const voltVals = battIds.map(id => live[`${id}|voltage`]).filter((v): v is number => typeof v === 'number');
     drawBattery(socVals.length ? Math.round(socVals.reduce((a, b) => a + b, 0) / socVals.length) : null,
@@ -321,13 +386,14 @@ export function addOverviewSection(nav: any, sections: any) {
 
     todayRow.innerHTML = '';
     if (!eNodes.length) {
-      todayRow.appendChild(el('div', { class: 'desc', text: 'No energy totals yet — history is off, or nothing has reported today.' }));
+      todayRow.appendChild(el('div', { class: 'desc', text: isLive() ? 'No energy totals yet — history is off, or nothing has reported today.'
+        : `No energy totals for ${rangePhrase()}.` }));
       return;
     }
 
-    const note = originNote();
+    const note = isLive() ? originNote() : null;
     if (note) todayRow.appendChild(note);
-    if (solarIds.length) todayRow.appendChild(tile('solar', '☀', 'Solar produced', fmtKwh(eSolar), sinceLabel(), solarIds));
+    if (solarIds.length) todayRow.appendChild(tile('solar', '☀', 'Solar produced', fmtKwh(eSolar), isLive() ? sinceLabel() : rangePhrase(), solarIds));
     if (gridIds.length) {
       const eGridNet = eGridOut == null || eGridIn == null ? null : eGridOut - eGridIn;
       const cols = el('div', { class: 'ov-cols' },
@@ -350,9 +416,22 @@ export function addOverviewSection(nav: any, sections: any) {
   let power: any = null, energy: any = null;
 
   const load = async () => {
+    // Without a history backend there is only now.
+    if (!historyOn()) range = LIVE;
+    markRange();
+    const past = !isLive();
+    todayHead.textContent = past ? shownLabel() : 'Today so far';
+    dayHead.textContent = past ? `Power through ${rangePhrase()}` : 'Last 24 hours';
+    drawJumps();
     stamp.textContent = 'loading…';
     try {
-      const [p, e] = await Promise.all([api('/api/flow?metric=realpower'), api('/api/flow?metric=energy_d')]);
+      let past = '';
+      if (!isLive()) {
+        const w = rangeWindow();
+        past = `&at=${encodeURIComponent(w.to.toISOString())}${w.days > 1 ? '&span=' + w.days : ''}`;
+      }
+      // Power is only asked for now; a past period still needs the graph's roles, so it reads the energy graph for both.
+      const [p, e] = await Promise.all([api('/api/flow?metric=' + (past ? 'energy_d' : 'realpower') + past), api('/api/flow?metric=energy_d' + past)]);
       try { origin = (await api('/api/time')).body?.period ?? null; } catch { origin = null; }
       power = p.body; energy = e.body;
       const nodes = (power?.nodes || []) as any[];
@@ -391,8 +470,8 @@ export function addOverviewSection(nav: any, sections: any) {
     try { localStorage.setItem('rpdu-overview-show', showSel.value); } catch { /* not remembered */ }
     load();
   };
-  liveWhileActive(sec, () => 'flow:realpower', () => load());
-  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive()) load(); }, 15000);
+  liveWhileActive(sec, () => 'flow:realpower', () => { if (isLive()) load(); });
+  setInterval(() => { if (sec.classList.contains('active') && !realtimeLive() && isLive()) load(); }, 15000);
   link.onclick = () => { activate(link, sec); load(); };
   return { link, load };
 }

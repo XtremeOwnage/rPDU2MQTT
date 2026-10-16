@@ -409,22 +409,28 @@ function renderList(node: any, arr: any[], path: string[]) {
   return fs;
 }
 
-// Nav groups; ungrouped schema sections fall into System.
+// Nav groups; ungrouped schema sections fall into System. The pages for reading data come first, setup after.
 /// `after` names the schema section(s) a tool follows; without it a tool goes to the end of its group.
+/// `pdu` drops a tool when the Vertiv plugin is not loaded.
 /// `page` holds a plugin page's place; it is dropped when that plugin is not loaded.
 type NavItem = { schema: string, child?: boolean }
-  | { tool: (nav: any, sections: any) => any, child?: boolean, after?: string | string[] }
+  | { tool: (nav: any, sections: any) => any, child?: boolean, after?: string | string[], pdu?: boolean }
   | { page: string };
 /** Anchors for the PDU tabs, in order of preference. */
 const PDU_BLOCK = ['Overrides', 'Pdus'];
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
+  { title: 'Dashboards', items: [{ tool: addEnergyOverviewSection }, { tool: addFlowSection }, { tool: addLiveDataSection, pdu: true }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addPanelScheduleSection }, { page: 'locations' }, { page: 'floor-plans' }, { page: 'solar-array' }] },
+  { title: 'Tools', items: [{ tool: addCircuitFinderSection }, { tool: addNodeDataSection }] },
+  // Flow's Hierarchy and Settings pages join this group too (see FLOW_SETUP_GROUP).
+  { title: 'Energy Setup', items: [{ tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addBalanceSection, child: true }, { tool: addTagsSection }] },
   // Sources: the PDU tabs are children of the Vertiv rPDU page.
-  { title: 'Sources', items: [{ tool: addLiveDataSection, child: true, after: PDU_BLOCK }, { tool: addControlSection, child: true, after: PDU_BLOCK }, { tool: addPathsSection, child: true, after: PDU_BLOCK }] },
-  { title: 'Energy Flow', items: [{ tool: addEnergyOverviewSection }, { tool: addNodesSection }, { tool: addGroupsSection, child: true }, { tool: addBalanceSection, child: true }, { tool: addTagsSection }, { tool: addFlowSection }, { tool: addTrendsSection }, { tool: addNodeTrendsSection }, { tool: addCircuitFinderSection }, { tool: addPanelScheduleSection }, { page: 'locations' }, { page: 'floor-plans' }, { tool: addNodeDataSection }] },
+  { title: 'Sources', items: [{ tool: addControlSection, child: true, after: PDU_BLOCK, pdu: true }, { tool: addPathsSection, child: true, after: PDU_BLOCK, pdu: true }] },
   { title: 'Integrations', items: [{ tool: addMqttExplorerSection, child: true, after: 'MQTT' }, { tool: addMqttImportSection, child: true, after: 'MQTT' }] },
   { title: 'Destinations', items: [{ tool: addHaEnergySection, child: true, after: 'HomeAssistant' }] },
   { title: 'System', items: [{ tool: addHomeSection }, { tool: addPluginsSection }, { tool: addExportSection }, { tool: addDiagnosticsSection }] },
 ];
+/** Group titles plugins may still declare, mapped to where those pages now live. */
+const NAV_GROUP_ALIASES: Record<string, string> = { 'Energy Flow': 'Energy Setup' };
 
 // Display-label fixes, keyed by schema section key.
 const LABEL_OVERRIDES: Record<string, string> = { Pdus: 'Vertiv rPDU', Api: 'API', Gui: 'GUI', Modbus: 'Modbus TCP', HomeAssistant: 'Home Assistant' };
@@ -720,14 +726,14 @@ export function build() {
     groupFor(n.group || 'System').items.push({ schema: n.key, child: n.key === 'Overrides' });
   });
   const placed = new Set<PluginPage>();
-  const navItems = NAV_GROUPS.map(g => g.items.filter(it => !(noPdu && 'after' in it && it.after === PDU_BLOCK)).flatMap(it => {
+  const navItems = NAV_GROUPS.map(g => g.items.filter(it => !(noPdu && 'pdu' in it && it.pdu)).flatMap(it => {
     if (!('page' in it)) return [it];
     const p = pluginPages.find(pp => pp.id === it.page && !placed.has(pp));
     if (!p) return [];
     placed.add(p);
     return [{ tool: pluginPageTool(p) }];
   }));
-  pluginPages.filter(p => !placed.has(p)).forEach(p => (navItems[NAV_GROUPS.findIndex(g => g.title === p.group)] ?? navItems[navItems.length - 1]).push({ tool: pluginPageTool(p) }));
+  pluginPages.filter(p => !placed.has(p)).forEach(p => (navItems[NAV_GROUPS.findIndex(g => g.title === (NAV_GROUP_ALIASES[p.group] ?? p.group))] ?? navItems[navItems.length - 1]).push({ tool: pluginPageTool(p) }));
   navItems.forEach((list, i) => list.forEach(it => {
     // Place a tool after its first present anchor, behind tools already there; otherwise at the end.
     const items = navGroups[i].items;
@@ -743,11 +749,13 @@ export function build() {
   const overview = addOverviewSection(nav, sections);
   const first: any = overview.link;
 
+  const containers = new Map<string, any>();
   for (const g of navGroups) {
     // Drop items whose schema section is absent.
     const items = g.items.filter(it => 'tool' in it || byKey.get((it as any).schema));
     if (!items.length) continue;
     const container = navGroup(nav, g.title);
+    containers.set(g.title, container);
     for (const it of items) {
       if ('schema' in it) {
         const l = renderConfigSection(byKey.get(it.schema), container, sections);
@@ -759,6 +767,12 @@ export function build() {
       }
     }
   }
+
+  // A page built alongside another can ask to be listed in a different group.
+  ([...nav.querySelectorAll('a')] as any[]).forEach((a: any) => {
+    const home = a.dataset?.navGroup && containers.get(a.dataset.navGroup);
+    if (home) { a.classList.remove('nav-child'); home.appendChild(a); }
+  });
 
   // Open the tab named in the URL hash, else the first.
   const wanted = decodeURIComponent((location.hash || '').slice(1));

@@ -4,7 +4,7 @@
 // looks exactly like the live one. The page has to request the moment and then say it is showing one.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { makeDom, query } from './domstub.mjs';
+import { makeDom, query, pickRange } from './domstub.mjs';
 
 const code = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
 const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import.meta.url), 'utf8'))
@@ -91,14 +91,13 @@ const badge = () => query(flowSection(), 'span', true).find(x => /^(LIVE|HISTORI
 if (!badge()) fail('nothing says whether the page is showing live or historical data');
 if (badge().textContent !== 'LIVE') fail(`the page opened on live data but reads "${badge().textContent}"`);
 
-// A date, not a datetime: a datetime-local reads '' until both halves are filled, so picking a day and
-// leaving the time blank sent nothing and the page silently stayed live.
-const at = query(flowSection(), 'input', true).find(i => (i.attrs?.type || i.type) === 'date');
-if (!at) fail('no day control on the Flow page');
+// The moment is picked once, in the app bar, for every page: the page carries no date controls of its own.
+if (query(flowSection(), 'input', true).some(i => (i.attrs?.type || i.type) === 'date'))
+  fail('the Flow page has its own date picker beside the app bar\'s');
+const rangeBtn = (cls) => query(getEl('st-range'), 'button', true).find(b => String(b.className || b.attrs?.class || '').includes(cls));
 
-at.value = '2026-08-03';
-at.onchange({});
-await new Promise(r => setTimeout(r, 300));
+// A day with no time picked asks for the day's totals.
+await pickRange(getEl, { day: '2026-08-03' });
 
 // The request carried the moment, as an absolute instant rather than the browser's wall clock.
 const withAt = asked.filter(u => u.includes('at='));
@@ -110,13 +109,16 @@ if (!withAt.at(-1).includes('metric=energy_d'))
   fail(`choosing a day did not switch the metric to energy: ${withAt.at(-1)}`);
 
 if (badge().textContent !== 'HISTORICAL') fail('a past moment is still badged as live data');
+// The app bar says which moment every page is showing, and offers the way back.
+if (!/Aug 3, 2026/.test(rangeBtn('range-open')?.textContent || '')) fail(`the app bar does not name the day shown: ${rangeBtn('range-open')?.textContent}`);
+if (rangeBtn('range-live')?.hidden !== false) fail('no Back to live button beside a past moment');
 
-// The arrows step a day without touching the picker.
-const stepBack = query(flowSection(), 'button', true).find(b => b.textContent === '◀');
+// The arrows step a day without opening the picker.
+const stepBack = query(getEl('st-range'), 'button', true).find(b => b.textContent === '◀');
 if (!stepBack) fail('no previous-day control');
-stepBack.click();
+stepBack.onclick();
 await new Promise(r => setTimeout(r, 300));
-if (at.value !== '2026-08-02') fail(`the previous-day arrow did not step the date: ${at.value}`);
+if (!/Aug 2, 2026/.test(rangeBtn('range-open').textContent)) fail(`the previous-day arrow did not step the date: ${rangeBtn('range-open').textContent}`);
 
 // The diagram is the past one...
 if (!labels().includes('1.23 kW')) fail('the diagram did not switch to the historical values');
@@ -134,12 +136,7 @@ if (!labels().includes('1.23 kW')) fail('the historical view was lost');
 // An optional time: blank means the end of the day, so the day's totals are complete.
 const instantOf = (u) => Date.parse(decodeURIComponent(u).match(/at=([^&]+)/)[1]);
 const endOfDay = instantOf(asked.filter(u => u.includes('at=')).at(-1));
-
-const timeIn = query(flowSection(), 'input', true).find(i => (i.attrs?.type || i.type) === 'time');
-if (!timeIn) fail('no optional time control beside the day');
-timeIn.value = '06:30:00';
-timeIn.onchange({});
-await new Promise(r => setTimeout(r, 200));
+await pickRange(getEl, { day: '2026-08-02', time: '06:30:00' });
 const withTime = instantOf(asked.filter(u => u.includes('at=')).at(-1));
 // 06:30:00 rather than the 23:59:59 a blank time means — the same day, 17h29m59s earlier.
 if (endOfDay - withTime !== 62999_000)
@@ -158,7 +155,7 @@ const asPower = decodeURIComponent(asked.filter(u => u.includes('at=')).at(-1));
 if (asPower.includes('metric=energy_d')) fail(`choosing Power at a past moment was overridden: ${asPower}`);
 
 // ...and stepping to another day keeps it, rather than snapping back to energy on every press.
-stepBack.click();
+stepBack.onclick();
 await new Promise(r => setTimeout(r, 300));
 if (metricSel.value !== 'realpower') fail('stepping a day discarded the chosen metric');
 
@@ -168,12 +165,7 @@ await new Promise(r => setTimeout(r, 300));
 
 // A span adds up whole days: a week is the sum of seven daily totals, which is a question the single-instant
 // view could not ask at all.
-const spanSel = query(flowSection(), 'select', true)
-  .find(x => (x.children || []).some(o => (o.value || (o.attrs && o.attrs.value)) === '7'));
-if (!spanSel) fail('no way to ask for more than one day');
-spanSel.value = '7';
-spanSel.onchange({});
-await new Promise(r => setTimeout(r, 300));
+await pickRange(getEl, { day: '2026-08-01', days: '7' });
 
 const spanned = decodeURIComponent(asked.filter(u => u.includes('span=')).at(-1) || '');
 if (!spanned) fail(`choosing a span asked for no window: ${asked.slice(-3).join(' | ')}`);
@@ -189,26 +181,22 @@ if (!/panel 5\/7d/.test(spanNote)) fail(`a short window is not declared: ${spanN
 
 // The arrows move by what is on screen: a week at a time on a week, not a day at a time. Stepping one day
 // through a 30-day window is 30 presses, each of them a fresh set of history queries.
-const beforeStep = at.value;
-stepBack.click();
+const dayOf = (u) => new Date(instantOf(u)).toISOString().slice(0, 10);
+const beforeStep = dayOf(asked.filter(u => u.includes('span=')).at(-1));
+stepBack.onclick();
 await new Promise(r => setTimeout(r, 300));
+const afterStep = dayOf(asked.filter(u => u.includes('span=')).at(-1));
 const days = (a, b) => Math.round((Date.parse(a + 'T12:00:00Z') - Date.parse(b + 'T12:00:00Z')) / 86400000);
-if (days(beforeStep, at.value) !== 7)
-  fail(`the arrow stepped ${days(beforeStep, at.value)} day(s) on a 7-day window, not 7`);
+if (days(beforeStep, afterStep) !== 7)
+  fail(`the arrow stepped ${days(beforeStep, afterStep)} day(s) on a 7-day window, not 7`);
 
-spanSel.value = '1';
-spanSel.onchange({});
-await new Promise(r => setTimeout(r, 300));
-
-// Live returns to now and drops the note.
-const liveBtn = query(flowSection(), 'button', true).find(b => b.textContent === 'Live');
-if (!liveBtn) fail('no Live control to return to now');
-liveBtn.click();
-await new Promise(r => setTimeout(r, 300));
+// Back to live returns to now and drops the note.
+await pickRange(getEl, { live: true });
 if (!labels().includes('7.08 kW')) fail('Live did not return to the current values');
 if (badge().textContent !== 'LIVE') fail('returning to live left the page badged as historical');
 if (/showing .* from/.test(query(flowSection(), 'span', true).map(s => s.textContent).join(' ')))
   fail('the historical note survived returning to live');
+if (rangeBtn('range-live')?.hidden !== true) fail('Back to live is still offered while live');
 
 // --- The settings page shows the chosen provider's settings, and only those --------------------------
 //
@@ -313,8 +301,8 @@ if (!verdict || !verdict.textContent.trim())
 if (!/test-ok|test-bad/.test(verdict.className)) fail(`the verdict does not say whether it passed: "${verdict.textContent}"`);
 if (testBtn.disabled) fail('the test button was left disabled after the test finished');
 
-console.log('history: the Flow page requests a moment as a UTC instant, renders it, says which backend it '
-  + 'came from, keeps the metric you chose, and returns to live; the settings page shows only the chosen '
+console.log('history: the app bar\'s time picker sends the Flow page a moment as a UTC instant, which it '
+  + 'renders and says which backend it came from; the arrows step by what is shown; the metric you chose is kept; Back to live returns to now; the settings page shows only the chosen '
   + 'provider\'s settings \u2014 the bridge\'s own store by default \u2014 with human labels and the retention '
   + 'settings in a box of their own, while the store\'s own settings, a '
   + 'retention per resolution, stay on the page whatever is read from, since it records either way; and says '

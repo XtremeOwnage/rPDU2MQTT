@@ -106,3 +106,9 @@
 .sa-mppt-strings { display:flex; flex-wrap:wrap; gap:var(--sp-3); align-items:flex-start; margin-top:var(--sp-2); }
 .sa-array.is-editing .sa-mppt-box { flex-basis:100%; }
 .sa-array.is-editing .sa-mppt-strings { flex-direction:column; align-items:stretch; }
+/* Boxes side by side share a height, and the panel grids in them start on one line. */
+.sa-array:not(.is-editing) { align-items:stretch; }
+.sa-array:not(.is-editing) .sa-mppt-box { display:flex; flex-direction:column; }
+.sa-array:not(.is-editing) .sa-mppt-strings { flex:1; align-items:stretch; }
+.sa-array:not(.is-editing) .sa-panel { height:92px; min-height:0; }
+.sa-panel:not(.is-editing) .sa-panel-serial { margin-top:auto; }

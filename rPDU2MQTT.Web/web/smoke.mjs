@@ -91,8 +91,16 @@ const linkText = navLinks.map(a => a.dataset.label || a.textContent);
 const groups = query(nav, '.nav-group', true).map(g => g.textContent);
 
 if (!linkText.length) fail('no nav links were rendered');
-for (const g of ['Sources', 'Energy Flow', 'Integrations', 'Destinations', 'System'])
+for (const g of ['Dashboards', 'Tools', 'Energy Setup', 'Sources', 'Integrations', 'Destinations', 'System'])
   if (!groups.includes(g)) fail(`nav group "${g}" missing (got: ${groups.join(', ')})`);
+if (groups.indexOf('Dashboards') !== 0) fail(`the data pages are not the first group (got: ${groups.join(', ')})`);
+
+// Pages for reading data sit above setup; Flow's setup pages are listed with the energy setup.
+const groupOf = (label) => query(nav, '.nav-group-wrap', true).find(w => query(w, 'a', true).some(a => a.dataset.label === label));
+const groupTitle = (label) => query(groupOf(label) || nav, '.nav-group', false)?.textContent;
+for (const [label, want] of [['Energy', 'Dashboards'], ['Flow', 'Dashboards'], ['Roll-up', 'Dashboards'], ['Trends', 'Dashboards'], ['Node Trends', 'Dashboards'],
+  ['Nodes', 'Energy Setup'], ['Tags', 'Energy Setup'], ['Hierarchy', 'Energy Setup'], ['Settings', 'Energy Setup']])
+  if (groupTitle(label) !== want) fail(`${label} is listed under ${groupTitle(label)}, not ${want}`);
 
 // Every non-hidden schema section must reach the nav (tokens match the display label, e.g. Pdus renders as
 // "Vertiv rPDU"). "Logging" is deliberately in no NAV_GROUPS list, so this also pins the catch-all: without
@@ -105,6 +113,11 @@ for (const key of ['MQTT', 'Vertiv', 'EmonCMS', 'HomeAssistant', 'Prometheus', '
 if (linkText.includes('EnergyFlow')) fail('EnergyFlow should be hidden from the config nav');
 
 if (!query(getEl('sections'), '.section', true).length) fail('no sections were rendered');
+
+// The Overview opens with a large button for each page most visits are for.
+const jumps = query(getEl('sections'), '.ov-jump', true).map(b => b.textContent);
+for (const want of ['Energy', 'Flow', 'Trends'])
+  if (!jumps.some(t => t.includes(want))) fail(`the Overview has no button for ${want} (got: ${jumps.join(', ')})`);
 
 // Settings saved but not running are announced in the header until a restart applies them — most of the
 // configuration is read once at startup, so a save changes the file and nothing else, and a single toast
@@ -173,11 +186,11 @@ const activeSec = () => query(getEl('sections'), '.section', true).find(s => s.c
 if (!query(activeSec(), 'rect', true).some(r => r.attrs['data-node']))
   fail('the Flow tab did not render the diagram');
 
-// The roll-up table, the wiring editor and the roll-up settings are three pages of their own under Energy
-// Flow, reachable without going through the diagram first.
+// The roll-up table, the wiring editor and the roll-up settings are three pages of their own; Roll-up stays under Flow, the other two under Energy Setup.
+// Each is reachable without going through the diagram first.
 for (const [label, marker, paths] of [['Roll-up', 'Rolled-up values', undefined], ['Hierarchy', 'Drag from a node', 'EnergyFlow.Links,EnergyFlow.Parents'], ['Settings', 'Track daily totals', 'EnergyFlow.*']]) {
   const l = navLinksNow().find(a => a.dataset.label === label);
-  if (!l) fail(`no ${label} page under Energy Flow`);
+  if (!l) fail(`no ${label} page`);
   if (l.dataset.section !== paths) fail(`the ${label} page counts ${l.dataset.section}, not ${paths}`);
   l.click();
   await new Promise(r => setTimeout(r, 50));

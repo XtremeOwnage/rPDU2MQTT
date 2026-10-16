@@ -2,7 +2,7 @@
 // kWh reading (Max is a power figure), and the grid's day figure is the signed net of import minus export.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { makeDom, query } from './domstub.mjs';
+import { makeDom, query, pickRange } from './domstub.mjs';
 
 const code = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
 const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import.meta.url), 'utf8'))
@@ -75,15 +75,16 @@ const tileText = (label) => {
   return t;
 };
 
-// The figures come first: no paragraph over them, and the past is behind one History button until asked
-// for, rather than two rows of period buttons and a date picker above every live view.
+// The figures come first: no paragraph over them, and no period buttons or date picker over a live view —
+// the past is picked once, in the header, for every page.
 const energySec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
 if (query(energySec, 'div', true).some(d => cn(d) === 'desc' && /Where your power is flowing/.test(d.textContent)))
   fail('the explanatory paragraph is back over the figures');
 const historyPanel = query(energySec, 'div', true).find(d => cn(d).includes('energy-history'));
-if (!historyPanel) fail('the period and date controls are not gathered behind History');
-if (!historyPanel.hidden) fail('the period and date controls open over a live view');
-if (!query(energySec, 'button', true).some(b => /^History/.test(b.textContent || ''))) fail('no History button');
+if (!historyPanel) fail('the board has no line saying which moment it shows');
+if (!historyPanel.hidden) fail('a live view carries the line about a past moment');
+if (query(energySec, 'input', true).some(i => (i.attrs?.type || i.type) === 'date')) fail('the board has its own date picker beside the header\'s');
+if (query(energySec, 'button', true).some(b => /^(History|Yesterday|This week)/.test(b.textContent || ''))) fail('the board has its own period buttons beside the header\'s');
 
 // A viewer who has not chosen sees the day's energy. The choice is remembered.
 {
@@ -102,12 +103,9 @@ if (!query(energySec, 'button', true).some(b => /^History/.test(b.textContent ||
 if (!/board\.style\.minHeight = held \+ 'px'/.test(code) || !/finally \{ board\.style\.minHeight = ''; \}/.test(code))
   fail('the board does not hold its height across a refresh, so the scroll resets');
 
-// History is on here, so the moment picker is offered. (That it is hidden when the feature is off is
-// pinned in smoke, whose config has no History section.)
-const histBar = query(getEl('sections'), 'div', true).filter(d => cn(d).includes('history-bar'));
-if (!histBar.length) fail('the board never built a history control');
-if (histBar.every(b => cn(b).includes('is-hidden')))
-  fail('the date picker is hidden while the History feature is on');
+// History is on here, so the header offers the past.
+if (cn(query(getEl('st-range'), 'span', false)).includes('is-hidden'))
+  fail('the header\'s time picker is hidden while the History feature is on');
 
 // On the power view, self-sufficiency covers TODAY. It used to fetch lifetime energy, so a board of live
 // watts carried a figure describing every kWh since each counter was first bound — one that barely moves
@@ -158,17 +156,15 @@ if (!/today/.test(ss.textContent) || /lifetime/.test(ss.textContent))
 // and printed them under that date. The in-direction comes from the graph, which carries the return lanes;
 // SoC has no history at all, so it is absent rather than today's.
 const liveAsks = [];
-const histSel = query(getEl('sections'), 'input', true).find(i => (i.attrs?.type || i.type) === 'date');
-if (!histSel) fail('no date control on the energy board');
 
 // Everything the page asks for from here on, so a live read during a past view is visible.
 const seen = [];
 const realFetch = sandbox.fetch;
 sandbox.fetch = async (url, opt) => { seen.push(String(url)); return realFetch(url, opt); };
 
-histSel.value = '2026-08-03';
-histSel.onchange({});
-await new Promise(r => setTimeout(r, 400));
+await pickRange(getEl, { day: '2026-08-03' });
+await new Promise(r => setTimeout(r, 100));
+if (historyPanel.hidden) fail('a past view does not say which moment it shows');
 
 if (seen.some(u => u.includes('/api/flow/live')))
   fail('a past view of the board still read the live cache');
@@ -177,6 +173,20 @@ const pastTiles = tiles().map(t => t.textContent).join(' | ');
 // 3.5 imported, 1.5 exported: the net is 2, and it came from the graph rather than from now.
 if (!/2 kWh/.test(pastTiles)) fail(`the past view's grid net is wrong: ${pastTiles}`);
 if (/%/.test(pastTiles.split('GRID')[0] || '')) fail(`a state of charge was shown for a day history has none for: ${pastTiles}`);
+
+// Every data page follows the header's time: the Overview names the day it shows instead of "Today so far"…
+query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Overview').click();
+await new Promise(r => setTimeout(r, 300));
+const ovHeads = query(getEl('sections'), 'h3', true).filter(h => query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'))?.contains(h)).map(h => h.textContent);
+if (!ovHeads.some(h => /Aug 3, 2026/.test(h)) || ovHeads.includes('Today so far'))
+  fail(`the Overview does not follow the header's time: ${ovHeads.join(' | ')}`);
+// …and a data page that cannot show the past says so, rather than live readings under a header naming another day.
+query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Node Data').click();
+await new Promise(r => setTimeout(r, 100));
+const activeSec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
+if (!query(activeSec, 'div', true).some(d => cn(d).includes('range-banner'))) fail('a live-only data page carries no banner while a past time is picked');
+await pickRange(getEl, { live: true });
+if (query(getEl('sections'), 'div', true).some(d => cn(d).includes('range-banner'))) fail('the live-only banner stayed after going back to live');
 
 console.log('energy-show: the board switches between power and energy today; no dial against a power '
   + 'ceiling on kWh; the grid shows the signed net for the day; self-sufficiency covers that same day');

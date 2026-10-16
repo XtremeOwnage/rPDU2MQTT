@@ -4,7 +4,7 @@ import { state } from '../state.js';
 import { homeEnergy, homeBalanceTrend, selfSufficiencyPct, coveredEnergy, netSelfProducedPct, shareBand } from '../energy.js';
 import { sparkline, KIND_COLOR } from '../charts.js';
 import { requestFocus } from '../state.js';
-import { historyControl, historyQuery, historyNote, periodRow, periodWindow, type PeriodKey } from '../history-control.js';
+import { historyControl, historyQuery, historyNote, followRange, rangeSpan } from '../history-control.js';
 import { drawEnergyFlow, type FlowArm } from '../energy-diagram.js';
 
 
@@ -23,38 +23,23 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   try { showSel.value = localStorage.getItem('rpdu-energy-show') === 'realpower' ? 'realpower' : 'energy_d'; } catch { showSel.value = 'energy_d'; }
   const instSel = instanceSelector(() => load());
   const status = el('span', { class: 'ld-count' });
-  const historyBtn = btn('History ▾');
-  bar.append(showSel, instSel.wrap, historyBtn, refresh, status);
+  bar.append(showSel, instSel.wrap, refresh, status);
   head.appendChild(bar);
-  let hadDay = false;
-  const hist = historyControl((what: any) => {
-    periods.mark(null);
-    const leftLive = what === 'day' && !hadDay && !!hist.day();
-    hadDay = !!hist.day();
-    if ((leftLive && !hist.time() && showSel.value === 'realpower') || (what === 'span' && hist.span() > 1))
-      showSel.value = 'energy_d';
+  // The moment shown is the header's; this row only says which it is.
+  const hist = historyControl(() => load(), true);
+  const histRow = el('div', { class: 'energy-history' }, hist.row);
+  histRow.hidden = true;
+  sec.appendChild(histRow);
+  followRange(sec, r => {
+    const span = rangeSpan(r);
+    // Only on the way out of live: a metric chosen while in the past stays chosen.
+    const leftLive = !hist.day();
+    hist.set(span ? span.day : '', span ? span.days : 1, span ? span.time : '');
+    histRow.hidden = !span;
+    // A whole day, or a run of them, is a question about energy: power at the end of one says almost nothing.
+    if (span && ((leftLive && !span.time) || span.days > 1)) showSel.value = 'energy_d';
     load();
   });
-  const periods = periodRow((key: PeriodKey) => {
-    const { day, days } = periodWindow(key);
-    hist.set(day, days);
-    showSel.value = 'energy_d';
-    periods.mark(key);
-    hadDay = true;
-    load();
-  });
-  const historyPanel = el('div', { class: 'energy-history' }, periods.row, hist.row);
-  sec.appendChild(historyPanel);
-  let historyOpen = false;
-  const syncHistory = () => {
-    const open = historyOpen || !!hist.day();
-    historyPanel.hidden = !open;
-    historyBtn.textContent = hist.day() ? `History: ${hist.day()} ▴` : open ? 'History ▴' : 'History ▾';
-    historyBtn.classList[hist.day() ? 'add' : 'remove']('primary');
-    historyBtn.hidden = hist.row.classList.contains('is-hidden') && !hist.day();
-  };
-  historyBtn.onclick = () => { historyOpen = !(historyOpen || !!hist.day()); syncHistory(); };
-  syncHistory();
   showSel.onchange = () => { try { localStorage.setItem('rpdu-energy-show', showSel.value); } catch { /* this session only */ } load(); };
 
   const board = el('div', { class: 'energy-board' }); sec.appendChild(board);
@@ -223,7 +208,6 @@ export function addEnergyOverviewSection(nav: any, sections: any) {
   };
 
   const loadBoard = async () => {
-    syncHistory();
     const held = board.offsetHeight || 0;
     if (held) board.style.minHeight = held + 'px';
     try { await fillBoard(); } finally { board.style.minHeight = ''; }
