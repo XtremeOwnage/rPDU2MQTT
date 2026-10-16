@@ -81,8 +81,8 @@ internal sealed class LocationEndpoints(IPluginHost host, IPluginStore? store = 
             && string.Equals(p.Panel, c.Chain.Panel.Id, StringComparison.OrdinalIgnoreCase)
             && string.Equals(p.Breaker, c.Chain.Breaker.Number, StringComparison.OrdinalIgnoreCase);
         var map = PanelMap.For(flow);
-        var temperature = LocationExport.ValuesOf(FlowGraphBuilder.Build(data, flow, LocationClimate.TemperatureMetric, live));
-        var humidity = LocationExport.ValuesOf(FlowGraphBuilder.Build(data, flow, LocationClimate.HumidityMetric, live));
+        var temperature = LocationSensors.Reader(cfg, live, LocationClimate.TemperatureMetric, LocationExport.ValuesOf(FlowGraphBuilder.Build(data, flow, LocationClimate.TemperatureMetric, live)));
+        var humidity = LocationSensors.Reader(cfg, live, LocationClimate.HumidityMetric, LocationExport.ValuesOf(FlowGraphBuilder.Build(data, flow, LocationClimate.HumidityMetric, live)));
         return new
         {
             ok = true,
@@ -110,6 +110,13 @@ internal sealed class LocationEndpoints(IPluginHost host, IPluginStore? store = 
                     temperature = temp,
                     humidity = hum,
                 };
+            }).ToArray(),
+            sensors = (settings.Sensors ?? new()).Where(x => !string.IsNullOrWhiteSpace(x.Id)).Select(x => new
+            {
+                id = x.Id,
+                name = x.Name is { Length: > 0 } n ? n : x.Id,
+                temperature = temperature(x.Id),
+                humidity = humidity(x.Id),
             }).ToArray(),
             nodes = graph.Nodes.Where(n => !n.Synthetic).Select(n => new
             {

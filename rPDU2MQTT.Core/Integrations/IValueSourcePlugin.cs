@@ -84,10 +84,30 @@ public static class SourceBindings
     /// Every binding in <paramref name="cfg"/> whose <c>Type</c> is <paramref name="sourceType"/>.
     /// </summary>
     public static IReadOnlyList<SourceBinding> For(Config cfg, string sourceType)
-        => cfg.EnergyFlow.Nodes
+        => Nodes(cfg)
             .Where(n => !string.IsNullOrEmpty(n.Id))
             .SelectMany(n => n.AllSources()
                 .Where(s => string.Equals(s.Type, sourceType, StringComparison.OrdinalIgnoreCase))
                 .Select(s => new SourceBinding(n.Id, s.Metric ?? "", s)))
             .ToList();
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Func<Config, IEnumerable<EnergyFlowNode>>> Contributors = new();
+
+    /// <summary>
+    /// Adds bound nodes that live outside <c>EnergyFlow.Nodes</c>, such as a plugin's sensors. They are read by
+    /// the ingests but are not part of the energy hierarchy. Replaces an earlier contributor under <paramref name="key"/>.
+    /// </summary>
+    public static void Contribute(string key, Func<Config, IEnumerable<EnergyFlowNode>> nodes) => Contributors[key] = nodes;
+
+    /// <summary>Every node with bindings: <c>EnergyFlow.Nodes</c>, then contributed ones.</summary>
+    public static IEnumerable<EnergyFlowNode> Nodes(Config cfg)
+    {
+        foreach (var n in cfg.EnergyFlow.Nodes) yield return n;
+        foreach (var f in Contributors.Values)
+        {
+            IEnumerable<EnergyFlowNode> extra;
+            try { extra = f(cfg).ToList(); } catch { continue; }
+            foreach (var n in extra) yield return n;
+        }
+    }
 }

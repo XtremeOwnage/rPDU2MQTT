@@ -18,6 +18,9 @@ public sealed class LocationSettings
     [Description("Locations for derived nodes (PDUs and outlets), which have no entry of their own. Matched by node id with '*' as a wildcard; the first match wins, and an exact id beats a pattern.")]
     public List<AutoLocationRule> AutoLocations { get; set; } = new();
 
+    [Description("Temperature and humidity sensors that rooms and areas read from. Not energy nodes.")]
+    public List<SensorConfig> Sensors { get; set; } = new();
+
     [Description("What publishing to Home Assistant changes.")]
     public HaSyncConfig HomeAssistant { get; set; } = new();
 

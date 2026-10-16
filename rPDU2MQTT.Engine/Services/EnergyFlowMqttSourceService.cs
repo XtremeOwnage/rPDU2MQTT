@@ -147,7 +147,7 @@ public sealed class EnergyFlowMqttSourceService : BackgroundService, IFlowValueS
             subscribed.Clear();
         }
 
-        var desired = BuildBindings(cfg.EnergyFlow.Nodes);
+        var desired = BuildBindings(Core.Integrations.SourceBindings.Nodes(cfg));
         bindings = desired;
 
         // Make "did it find any bindings" visible without turning on Debug — the silent failure mode is a
