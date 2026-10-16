@@ -112,7 +112,7 @@ public sealed class EnergyFlowModbusSourceService : BackgroundService, IFlowValu
     /// <summary>Poll each due connection, and drop cached readings whose binding has gone away.</summary>
     private void Reconcile(DateTime nowUtc)
     {
-        var bindings = BuildBindings(cfg.EnergyFlow.Nodes);
+        var bindings = BuildBindings(Core.Integrations.SourceBindings.Nodes(cfg));
 
         // Prune readings no longer produced by any current modbus binding (a removed/retyped source).
         var live = bindings.Values.SelectMany(v => v)

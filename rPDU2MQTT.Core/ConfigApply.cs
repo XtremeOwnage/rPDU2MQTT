@@ -74,4 +74,18 @@ public static class ConfigApply
         var live = alsoLive?.ToList();
         return ChangedPaths(before, after).Where(p => !AppliesLive(p, live)).ToList();
     }
+
+    /// <summary>Copies the given keys under <c>Plugins.{id}</c> from the saved document into the running one.</summary>
+    public static void CopyPluginKeys(Config running, Config saved, string id, IEnumerable<string> keys)
+    {
+        var to = running.Plugins.TryGetValue(id, out var r) ? Core.Integrations.PluginConfigBinder.ToJson(r) as JsonObject ?? new() : new JsonObject();
+        var from = saved.Plugins.TryGetValue(id, out var s) ? Core.Integrations.PluginConfigBinder.ToJson(s) as JsonObject : null;
+        foreach (var key in keys)
+        {
+            var hit = from?.FirstOrDefault(kv => string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase));
+            foreach (var old in to.Where(kv => string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase)).Select(kv => kv.Key).ToList()) to.Remove(old);
+            if (hit?.Value is { } v) to[hit.Value.Key] = v.DeepClone();
+        }
+        running.Plugins[id] = to;
+    }
 }

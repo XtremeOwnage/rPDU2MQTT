@@ -82,7 +82,7 @@ public sealed class ModbusPollService : BackgroundService
             var first = group.First();
 
             var bindings = new List<ModbusBinding>();
-            foreach (var node in config.EnergyFlow.Nodes)
+            foreach (var node in Core.Integrations.SourceBindings.Nodes(config))
                 foreach (var s in node.AllSources())
                     if (string.Equals(s.Type, "modbus", StringComparison.OrdinalIgnoreCase) && s.Connection is { } conn && connIds.Contains(conn))
                         bindings.Add(new ModbusBinding
