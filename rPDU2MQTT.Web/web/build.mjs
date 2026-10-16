@@ -35,6 +35,8 @@ const MODULES = [
   'flow-view.ts',
   'node-templates.ts',
   'palette.ts',
+  'stack-tables.ts',
+  'phone-nav.ts',
   'overrides.ts',
   'circuit-finder.ts',
   'circuit-session.ts',

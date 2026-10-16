@@ -7,6 +7,19 @@ const out = new URL('./out/', import.meta.url).pathname;
 const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 const failures = [];
 
+// Install-as-app: the manifest and its icons load without credentials, as a home screen fetches them.
+try {
+  const res = await fetch(base + '/manifest.webmanifest');
+  if (!res.ok) throw new Error(`manifest ${res.status}`);
+  const manifest = await res.json();
+  for (const icon of manifest.icons) {
+    const r = await fetch(new URL(icon.src, base));
+    if (!r.ok || r.headers.get('content-type') !== icon.type) throw new Error(`${icon.src} ${r.status} ${r.headers.get('content-type')}`);
+  }
+  const touch = await fetch(base + '/apple-touch-icon.png');
+  if (!touch.ok) throw new Error(`apple-touch-icon ${touch.status}`);
+} catch (e) { failures.push(`install assets: ${e.message}`); }
+
 for (const [name, viewport] of [['desktop', { width: 1280, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
   const ctx = await browser.newContext({ viewport, httpCredentials: { username: 'admin', password: 'smoke' } });
   const page = await ctx.newPage();

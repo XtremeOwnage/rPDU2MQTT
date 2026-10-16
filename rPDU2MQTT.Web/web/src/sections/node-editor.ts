@@ -11,7 +11,7 @@ import { circuitChoices, choiceSelect } from '../location-options.js';
 import { extensionsFor, renderExtensions } from '../entity-extensions.js';
 import {
   DIRECTIONAL_METRICS, LIVE_HINT, MODBUS_DATATYPES, MODBUS_REGISTER_TYPES, MODBUS_WORDORDERS,
-  NODE_KINDS, NODE_MODES, SIGNED_METRICS, feedsNothing, sourceTypes,
+  NODE_KINDS, NODE_MODES, SIGNED_METRICS, feedsNothing, sourceTypes, untrackedByDefault,
   isAdditiveMetric, kindMeta, metricLabel, metricMeta, sourceMetricKey,
 } from '../flow-vocabulary.js';
 
@@ -479,7 +479,9 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   grid.appendChild(field('Counts toward', roleSel, 'Site total it is summed into.'));
 
   const modeSel = el('select');
-  NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
+  // An untracked slice is asked for on its parent now; the mode stays listed only for a node already set to it.
+  NODE_MODES.filter(([v]) => v !== 'untracked' || node.Mode === 'untracked')
+    .forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
   modeSel.value = node.Mode || 'auto';
   modeSel.onchange = () => {
     node.Mode = modeSel.value === 'auto' ? undefined : modeSel.value;
@@ -844,6 +846,15 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   wireSec.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id),
     id => !feedsNothing((cand.get(id) || {}).kind)));
   wireSec.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
+  // A residual or untracked node is itself a remainder, with no reading of its own to be beyond.
+  if (!feedsNothing(node.Kind) && node.Mode !== 'untracked' && node.Mode !== 'residual') {
+    // Explicit either way once touched: left blank, the bridge turns it on for panels, inverters and the grid.
+    const untrackedBox = el('input', { type: 'checkbox', checked: node.CreateUntracked ?? untrackedByDefault(node.Kind) }) as HTMLInputElement;
+    untrackedBox.onchange = () => { node.CreateUntracked = untrackedBox.checked; };
+    wireSec.appendChild(field('Create untracked', el('span', { class: 'ne-check' }, untrackedBox,
+      el('span', { text: `add "${node.Label || node.Id}: Untracked" beneath it` })),
+      'What this node measures beyond its children, as a node of its own. Needs a reading on this node.'));
+  }
 
   // --- Filing: tags, its circuit, and where its EmonCMS feeds go. Folded until something is set. ---
   const more = el('details', { class: 'ne-more' }) as HTMLDetailsElement;

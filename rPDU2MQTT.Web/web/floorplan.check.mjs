@@ -229,9 +229,14 @@ const kitchen = polygonFor('kitchen');
 if (!kitchen?.classList.contains('is-known')) fail(`the kitchen is not shaded as known: ${kitchen?.className}`);
 if (!/color-mix/.test(kitchen.style.fill || '')) fail(`the kitchen is not shaded by its reading: ${kitchen.style.fill}`);
 if (!polygonFor('office')?.classList.contains('is-unknown')) fail('the office, waiting on a reading, is not drawn as unknown');
+// Room labels are fitted to their rooms as drawn, and the stub's pane is only 100px wide: zoom in to read them.
+const tooSmall = labels();
+if (tooSmall.some(t => /Kitchen\s*300 W/.test(t))) fail(`a 40px-wide kitchen kept a label wider than itself: ${JSON.stringify(tooSmall)}`);
+svg.dispatch('wheel', { deltaX: 0, deltaY: -300, deltaMode: 0, preventDefault() { }, clientX: 50, clientY: 50 });
 if (!labels().some(t => /Kitchen\s*300 W/.test(t))) fail(`the kitchen's label does not carry its reading: ${JSON.stringify(labels())}`);
 if (!labels().some(t => /Office\s*no data/.test(t))) fail(`the office does not read "no data": ${JSON.stringify(labels())}`);
 if (labels().some(t => /Office\s*0 W/.test(t))) fail('an unknown room is labelled 0 W');
+key('0');
 if (!/Garage\s*unmetered/.test(textOf(side()))) fail(`the garage is not listed as unmetered: ${textOf(side())}`);
 const legend = textOf(query(sec, '.fp-legend'));
 if (!/unmetered/.test(legend) || !/no data/.test(legend)) fail(`the legend does not say what unshaded rooms mean: ${legend}`);

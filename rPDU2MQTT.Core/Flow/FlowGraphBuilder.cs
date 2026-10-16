@@ -236,6 +236,23 @@ public static class FlowGraphBuilder
             if (!string.IsNullOrEmpty(b.PanelNode) && label.ContainsKey(b.PanelNode)) AddEdgeSafe(b.PanelNode, b.Id);
         }
 
+        // What a measured node carries beyond its children, as a node of its own where it asks for one. A node
+        // already wired with an untracked or residual child by hand keeps that one.
+        var takesSpare = new HashSet<string>(flow.Nodes.Where(n => !string.IsNullOrEmpty(n.Id) && UntrackedNode.TakesSpare(n)).Select(n => n.Id),
+                                             StringComparer.OrdinalIgnoreCase);
+        var untrackedIds = new HashSet<string>(flow.Nodes.Where(n => !string.IsNullOrEmpty(n.Id) && UntrackedNode.Is(n)).Select(n => n.Id),
+                                               StringComparer.OrdinalIgnoreCase);
+        foreach (var n in flow.Nodes)
+        {
+            if (string.IsNullOrEmpty(n.Id) || UntrackedNode.Is(n) || !UntrackedNode.Wanted(n)) continue;
+            if (!leaf.ContainsKey(n.Id) || !outgoing.TryGetValue(n.Id, out var below) || below.Count == 0) continue;
+            if (below.Any(takesSpare.Contains)) continue;
+            var uid = UntrackedNode.IdFor(n.Id);
+            if (!label.ContainsKey(uid)) label[uid] = UntrackedNode.LabelFor(label.TryGetValue(n.Id, out var pl) ? pl : n.Id);
+            if (!kind.ContainsKey(uid)) kind[uid] = "unmeasured";
+            if (AddEdgeSafe(n.Id, uid)) untrackedIds.Add(uid);
+        }
+
         // Which feeders point into each node.
         var incoming = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (from, kids) in outgoing)
@@ -250,6 +267,7 @@ public static class FlowGraphBuilder
         foreach (var n in flow.Nodes)
             if (!string.IsNullOrEmpty(n.Id))
                 mode[n.Id] = string.IsNullOrWhiteSpace(n.Mode) ? "auto" : n.Mode.Trim().ToLowerInvariant();
+        foreach (var id in untrackedIds) mode[id] = UntrackedNode.Mode;
         string Mode(string id) => mode.TryGetValue(id, out var m) ? m : "auto";
 
         // Need(id): power this node must receive = its known value (outlet sink or producer).
@@ -268,6 +286,12 @@ public static class FlowGraphBuilder
         // Demand a single child draws through one of its feeders, split if it has several.
         double DemandShare(string child, HashSet<string> path)
             => Need(child, path) / Math.Max(1, incoming.TryGetValue(child, out var f) ? f.Count : 1);
+        // What one feeder supplies of a child: what the others' meters leave, where they say it all.
+        double ShareOf(string from, string child, HashSet<string> path)
+            => FedAlongside(from, child)
+                ? Math.Max(0, Need(child, path) - incoming[child]
+                    .Where(f => !string.Equals(f, from, StringComparison.OrdinalIgnoreCase)).Sum(f => leaf[f]))
+                : DemandShare(child, path);
 
         // A 'none' node never infers a value.
         static bool Inert(string m) => m is "none" or "static";
@@ -370,21 +394,29 @@ public static class FlowGraphBuilder
             var untracked = kids.Where(c => Mode(c) == "untracked").ToList();
             if (untracked.Count > 0)
                 return Mode(to) != "untracked"
-                    ? MultiFed(to)
-                    : untracked.Count > 1 || kids.Any(c => Mode(c) != "untracked" && MultiFed(c));
+                    ? Split(from, to)
+                    : untracked.Count > 1 || kids.Any(c => Mode(c) != "untracked" && Split(from, c));
             var metered = kids.Count > 1 || Distributes(from) ? kids.Where(leaf.ContainsKey).ToList() : new List<string>();
-            if (metered.Contains(to, StringComparer.OrdinalIgnoreCase)) return MultiFed(to);
+            if (metered.Contains(to, StringComparer.OrdinalIgnoreCase)) return Split(from, to);
             if (leaf.ContainsKey(to)) return false;
             var estimated = kids.Where(c => !metered.Contains(c, StringComparer.OrdinalIgnoreCase) && !Inert(Mode(c))).ToList();
             if (metered.Count == 0 && kids.Count <= 1) return false;
             var fromSpare = estimated.Count == 1
                 || (estimated.Count(c => Mode(c) == "residual") == 1 && Mode(to) == "residual");
-            if (fromSpare) return metered.Any(MultiFed);
-            return MultiFed(to) || Need(to, new HashSet<string>(StringComparer.OrdinalIgnoreCase)) <= 0;
+            if (fromSpare) return metered.Any(c => Split(from, c));
+            return Split(from, to) || Need(to, new HashSet<string>(StringComparer.OrdinalIgnoreCase)) <= 0;
         }
 
         // A child with several feeders: what each one supplies is not measured.
         bool MultiFed(string id) => incoming.TryGetValue(id, out var f) && f.Count > 1;
+
+        // ...unless every other feeder is a meter feeding only that child: those supply their reading, so this
+        // one supplies the rest. The grid beside a solar array into an inverter is the usual case.
+        bool FedAlongside(string from, string to)
+            => incoming.TryGetValue(to, out var fs) && fs.Count > 1
+               && fs.All(f => string.Equals(f, from, StringComparison.OrdinalIgnoreCase)
+                              || (leaf.ContainsKey(f) && outgoing.TryGetValue(f, out var o) && o.Count == 1));
+        bool Split(string from, string to) => MultiFed(to) && !FedAlongside(from, to);
 
         // EdgeFlow(from -> to): how much flows along one link.
         double EdgeFlow(string from, string to, HashSet<string> path)
@@ -397,9 +429,9 @@ public static class FlowGraphBuilder
                 var untracked = kids.Where(c => Mode(c) == "untracked").ToList();
                 if (untracked.Count > 0)
                 {
-                    var trackedDraw = kids.Where(c => Mode(c) != "untracked").Sum(c => DemandShare(c, path));
+                    var trackedDraw = kids.Where(c => Mode(c) != "untracked").Sum(c => ShareOf(from, c, path));
                     var spare = Math.Max(0, produced - trackedDraw);
-                    return Mode(to) == "untracked" ? spare : DemandShare(to, path);
+                    return Mode(to) == "untracked" ? spare : ShareOf(from, to, path);
                 }
 
                 // A metered circuit draws what its own clamp says, not a share of its parent scaled to
@@ -429,8 +461,8 @@ public static class FlowGraphBuilder
                     : new List<string>();
                 if (metered.Count > 0)
                 {
-                    var meteredDraw = metered.Sum(c => DemandShare(c, path));
-                    if (metered.Contains(to, StringComparer.OrdinalIgnoreCase)) return DemandShare(to, path);
+                    var meteredDraw = metered.Sum(c => ShareOf(from, c, path));
+                    if (metered.Contains(to, StringComparer.OrdinalIgnoreCase)) return ShareOf(from, to, path);
                     if (Inert(Mode(to))) return 0;
 
                     // What the metered children leave goes to the one child nothing measures; with several, each
@@ -643,7 +675,7 @@ public static class FlowGraphBuilder
             .OrderBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        return new FlowGraph(nodes, links, metric, units);
+        return new FlowGraph(nodes, links, metric, units) { Edges = edges, Untracked = untrackedIds };
 
         static string BaseOf(string id) => id.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal) ? id[..^FlowMetricKey.InSuffix.Length] : id;
         string KindOf(string id) => kind.TryGetValue(BaseOf(id), out var bk) ? bk : kind.TryGetValue(id, out var k2) ? k2 : "node";

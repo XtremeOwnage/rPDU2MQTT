@@ -152,6 +152,9 @@ export default function mount(sec: any, host: any) {
   let spaceDown = false;
   let gfciNext = remembered('gfci', '0') === '1';
   let showCons = remembered('cons', '1') === '1';
+  // The constraints are drafting marks. On a phone's plan they sit on top of the room names they are about,
+  // so viewing there leaves them out; Edit still shows them.
+  const consShown = () => showCons && !(mode === 'view' && !!window.matchMedia?.('(max-width: 560px)').matches);
   let itemPreset = '';
   let selectedCorner = -1;
   let selectedBend = -1;
@@ -297,6 +300,12 @@ export default function mount(sec: any, host: any) {
   const zoomOut = el('button', { class: 'fp-zbtn', text: '−', title: 'Zoom out (−)', type: 'button' });
   const zoomFit = el('button', { class: 'fp-zbtn', text: '⤢', title: 'Fit the floor (0)', type: 'button' });
   const hint = el('div', { class: 'fp-hint' });
+  // The view-mode hint sits over the plan, so it goes once the reader has touched the plan and stays gone.
+  let viewHintSeen = remembered('view-hint', '0') === '1';
+  svg.addEventListener('pointerdown', () => {
+    if (viewHintSeen || mode !== 'view') return;
+    viewHintSeen = true; remember('view-hint', '1'); hint.hidden = true;
+  });
   const scaleBar = el('div', { class: 'fp-scalebar' }, el('span', { class: 'fp-scalebar-bar' }), el('span', { class: 'fp-scalebar-text' }));
   const empty = el('div', { class: 'fp-empty' });
   const fpMenu = makeMenu(() => stage, 'fp-menu');
@@ -612,10 +621,35 @@ export default function mount(sec: any, host: any) {
     const gfci = selection?.type === 'item' && !extra.length ? itemOf(selection.id) : null;
     const downstream = gfci?.Gfci ? planDownstream(runsIn(), gfci.Id) : null;
     const isGfci = (id: string) => !!itemOf(id)?.Gfci;
-    const label = (poly: Pt[], lines: string[], cls: string) => {
-      const c = planCentroid(poly);
-      const t = svgEl('text', { x: c.X, y: c.Y - (lines.length - 1) * font * 0.6, class: cls, 'font-size': font });
-      lines.forEach((ln, i) => { const sp = svgEl('tspan', { x: c.X, dy: i ? font * 1.2 : 0 }); sp.textContent = ln; t.appendChild(sp); });
+    // Labels stay the same size on screen, so at a phone's fitted zoom a small room's label spills over its
+    // neighbours'. Fit it to its room: break a long name over two lines, drop the trailing lines, then shrink a
+    // little, and leave a room too small even for that unlabelled until zoomed in (tapping it still gives its detail).
+    const fitsIn = (b: { w: number; h: number }, lines: string[], f: number) =>
+      Math.max(...lines.map(ln => ln.length)) * f * 0.58 <= b.w * 0.95 && lines.length * f * 1.2 <= b.h * 0.95;
+    const broken = (name: string) => {
+      const words = name.split(' ');
+      if (words.length < 2) return null;
+      let at = 1;
+      while (at < words.length - 1 && words.slice(0, at + 1).join(' ').length <= name.length / 2) at++;
+      return [words.slice(0, at).join(' '), words.slice(at).join(' ')];
+    };
+    const label = (poly: Pt[], given: string[], cls: string) => {
+      const c = planCentroid(poly), b = planBounds(poly);
+      const [name, ...rest] = given, split = broken(name);
+      const tries = [given, split && [...split, ...rest], [name], split].filter(Boolean) as string[][];
+      let lines: string[] | null = null, f = font;
+      for (const size of [font, font * 0.75]) {
+        lines = tries.find(t => fitsIn(b, t, size)) || null;
+        if (lines) { f = size; break; }
+      }
+      if (!lines) return null;
+      // The name may take two lines; what follows it is the reading, then any sizes.
+      const named = lines[0] === name ? 1 : 2;
+      const t = svgEl('text', { x: c.X, y: c.Y - (lines.length - 1) * f * 0.6, class: cls, 'font-size': f });
+      lines.forEach((ln, i) => {
+        const sp = svgEl('tspan', { x: c.X, dy: i ? f * 1.2 : 0, class: i < named ? null : 'fp-label-sub' + (i === named ? ' is-reading' : '') });
+        sp.textContent = ln; t.appendChild(sp);
+      });
       return t;
     };
 
@@ -783,7 +817,7 @@ export default function mount(sec: any, host: any) {
       svg.appendChild(g);
     });
 
-    labels.forEach(t => svg.appendChild(t));
+    labels.forEach(t => { if (t) svg.appendChild(t); });
 
     // Wall lengths along the selected room's edges, or every room's when sizes are on.
     const dimsFor = rooms.filter(rm => showSizes || (mode === 'edit' && selection?.type === 'room' && selection.id === rm.Id));
@@ -851,7 +885,7 @@ export default function mount(sec: any, host: any) {
       }
     });
     // Constraints, where they hold: a pill on each wall or corner, red where they cannot.
-    if (showCons) {
+    if (consShown()) {
       const pill = (at: Pt, text: string, unmet: boolean) => {
         const w = (text.length * 6.5 + 10) * u, hh = 15 * u;
         const g = svgEl('g', { class: 'fp-cons' + (unmet ? ' is-unmet' : ''), transform: `translate(${at.X},${at.Y})` });
@@ -1577,7 +1611,7 @@ export default function mount(sec: any, host: any) {
         'Shade by what each room is drawing now, or by the energy it has used over a period.'));
     }
     subBar.appendChild(check('Wiring', showWiring, v => { showWiring = v; remember('wiring', v ? '1' : '0'); drawPlan(); }, 'Show cable runs, and ring each item in its circuit’s colour.'));
-    if (constraintsNow().length) subBar.appendChild(check('Constraints', showCons, v => { showCons = v; remember('cons', v ? '1' : '0'); drawPlan(); }, 'Show the constraints held on this floor: fixed lengths, angles, parallel and square walls.'));
+    if (constraintsNow().length && !(mode === 'view' && window.matchMedia?.('(max-width: 560px)').matches)) subBar.appendChild(check('Constraints', showCons, v => { showCons = v; remember('cons', v ? '1' : '0'); drawPlan(); }, 'Show the constraints held on this floor: fixed lengths, angles, parallel and square walls.'));
     subBar.appendChild(check('Sizes', showSizes, v => { showSizes = v; remember('sizes', v ? '1' : '0'); drawPlan(); }, 'Show every wall’s length and each room’s floor area.'));
     if (mode === 'edit' && floorBelow()) subBar.appendChild(check('Floor below', showBelow, v => { showBelow = v; remember('below', v ? '1' : '0'); drawPlan(); }, 'Show the floor beneath this one faintly, to line this one up with it.'));
     if (mode === 'edit') subBar.appendChild(check('Snap', snapOn, v => { snapOn = v; remember('snap', v ? '1' : '0'); }, 'Corners snap to other rooms’ corners and edges, and everything to a fine grid.'));
@@ -1594,7 +1628,7 @@ export default function mount(sec: any, host: any) {
     const how = mode === 'view' ? 'Tap a room or item for its detail. Drag to pan, pinch or Ctrl+wheel to zoom.'
       : FP_TOOLS.find(t => t[0] === tool)?.[3] || '';
     hint.textContent = how;
-    hint.hidden = !how || (mode === 'view' && !!selection);
+    hint.hidden = !how || (mode === 'view' && (!!selection || viewHintSeen));
   };
 
   const drawOpts = () => {
@@ -2793,7 +2827,7 @@ export default function mount(sec: any, host: any) {
     body.append(
       el('div', { class: 'fp-tool-row' }, tags, el('div', { class: 'desc', text: 'Turn Version 2.0 room and area tags into rooms, with a preview of what each becomes before anything is written.' })),
       el('div', { class: 'fp-tool-row' }, ha, el('div', { class: 'desc', text: 'Create or match a Home Assistant area for each room, and file this bridge’s devices in them.' })),
-      el('h4', { text: 'Keys' }),
+      el('h4', { class: 'fp-keys-head', text: 'Keys' }),
       el('div', { class: 'fp-keys' }, ...[
         ['Ctrl+Z / Ctrl+Y', 'undo / redo'], ['V H R P O A', 'select, pan, room, outline, outdoor, area'], ['D W I L M', 'door, window, item, wire, measure'],
         ['Delete', 'remove the selection'], ['Arrows', 'nudge; Shift for more'], ['Esc', 'stop drawing'], ['+ − 0', 'zoom in, out, fit'],

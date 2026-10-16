@@ -829,18 +829,18 @@ sandbox.window.print = () => printed++;
 query(sec, 'button', true).find(b => b.textContent === 'Print\u2026').onclick();
 if (printed !== 1) fail('the Print button did not print');
 
-// A phone holds one column, and that has to outrank the placement written on each cell.
+// A phone keeps the panel's two columns: a slot on screen is the slot in front of you. What gives way is the
+// detail beside each name, not the layout.
 const rules = [...css.matchAll(/@media \(max-width: *560px\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)].map(m => m[1]).join('\n');
-// One column of breakers on a phone, with the numbers still stamped beside them.
-if (!/\.ps-grid\s*\{[^}]*grid-template-columns:\s*auto\s+1fr\s*[;}]/.test(rules)) fail('the panel keeps two columns of breakers on a phone');
-if (!/\.ps-cell\s*\{[^}]*grid-column:\s*2\s*!important/.test(rules))
-  fail('the cells keep their two-column placement on a phone — inline placement outranks the media query');
-if (!/\.ps-nums\s*\{[^}]*grid-column:\s*1\s*!important/.test(rules))
-  fail('the number stamps keep their frame-edge placement on a phone, leaving the breakers nowhere to go');
+if (/\.ps-cell\s*\{[^}]*grid-column:[^;}]*!important/.test(rules) || /\.ps-grid\s*\{[^}]*grid-template-columns:\s*auto\s+1fr\s*[;}]/.test(rules))
+  fail('a phone folds the panel into one column, so a slot on screen is no longer where it is on the wall');
+if (!/\.ps-grid\s*\{[^}]*grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+auto/.test(rules))
+  fail('the phone panel does not hold both columns of breakers inside the screen');
+if (!/\.ps-meta[^{]*\{[^}]*display:\s*none/.test(rules)) fail('the wire, rating and gauge still crowd each breaker on a phone');
 
 console.log('panel schedule: a double-pole\u2019s chart is the sum of its legs with each leg on a strip of its own; an unknown breaker is identified by switching it off \u2014 the channel that went dark is named with what it fell from, one already measuring another breaker is flagged, and a circuit drawing nothing says so rather than guessing; the directory prints for the inside of the panel door, every slot in order with the unidentified ones marked; a directory someone already keeps is pasted in and each line shown as it was read \u2014 new, an update, a clash with a slot already held, a channel nothing reads \u2014 with an unreadable line editable there, and nothing written until it is applied nor kept until Save; a breaker\u2019s reading opens what it has been drawing, over a window picked there; the panel is a node whose reading is drawn as the power coming in, with what feeds it picked and dropped here; a mapped breaker is a tier of the flow in its own right, so nothing is wired from the panel by hand; what the mapping contradicts is reported and leads to the breaker it names; drawn as a panel — enclosure, bus bar and a handle per breaker, odd left and even right, '
   + 'a double-pole across both its slots, a tandem as two halves; the slot count is the panel’s own setting and rounds '
   + 'to whole rows; a second breaker can be added to a slot and each half edited on its own; a breaker is pointed at the '
   + 'node measuring it (upstream nodes not offered, a taken one flagged, clearing it removes the record) and takes its '
-  + 'power from it, reading no data rather than zero without one; edits land in the config; and a phone gets one column');
+  + 'power from it, reading no data rather than zero without one; edits land in the config; and a phone keeps both columns with the detail left to the editor');
 process.exit(0);

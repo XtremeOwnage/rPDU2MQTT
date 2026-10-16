@@ -104,9 +104,9 @@
   fill: var(--fg); text-anchor: middle; dominant-baseline: middle; font-weight: 700; pointer-events: none;
   paint-order: stroke; stroke: var(--panel); stroke-width: .32em; stroke-linejoin: round;
 }
-.fp-label tspan + tspan { font-weight: 500; fill: var(--muted); }
-.fp-label.is-known tspan:nth-child(2) { fill: var(--fg); font-weight: 600; }
-.fp-label.is-unknown tspan:nth-child(2) { fill: var(--warn); }
+.fp-label .fp-label-sub { font-weight: 500; fill: var(--muted); }
+.fp-label.is-known .is-reading { fill: var(--fg); font-weight: 600; }
+.fp-label.is-unknown .is-reading { fill: var(--warn); }
 .fp-area-label { fill: var(--series-7); font-style: italic; font-weight: 500; }
 .fp-dim, .fp-draft-size, .fp-measure-text {
   fill: var(--accent); text-anchor: middle; dominant-baseline: middle; font-weight: 600; pointer-events: none;
@@ -206,6 +206,8 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-tool-row { display: grid; gap: 4px; justify-items: start; margin-bottom: var(--sp-3); }
 .fp-keys { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
 .fp-keys kbd { display: inline-block; min-width: 7.5em; color: var(--fg); font: 12px var(--mono); }
+/* A touch screen has no keyboard to press them on. */
+@media (hover: none) and (pointer: coarse) { .fp-keys, .fp-keys-head { display: none; } }
 .fp-drop {
   display: grid; justify-items: center; gap: 10px; padding: var(--sp-5) var(--sp-4); border: 2px dashed var(--line);
   border-radius: var(--r-lg); background: var(--panel2); color: var(--muted); text-align: center;

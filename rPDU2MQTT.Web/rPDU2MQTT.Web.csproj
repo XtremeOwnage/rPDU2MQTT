@@ -13,8 +13,8 @@
 
 	<ItemGroup>
 		<PackageReference Include="HiveMQtt" Version="0.47.1" />
-		<PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.12" />
-		<PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="10.0.12" />
+		<PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.13" />
+		<PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="10.0.13" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -27,6 +27,8 @@
 		<EmbeddedResource Include="wwwroot\index.html" />
 		<EmbeddedResource Include="wwwroot\styles.css" />
 		<EmbeddedResource Include="wwwroot\app.js" />
+		<EmbeddedResource Include="wwwroot\manifest.webmanifest" />
+		<EmbeddedResource Include="wwwroot\*.png" />
 	</ItemGroup>
 
 	<ItemGroup>

@@ -246,10 +246,15 @@ function activate(link     , sec     ) {
 // left a diagram taller than the viewport with no way to scroll it — it felt frozen. With `pan`, dragging the
 // background moves the view like a map (kept off where the SVG has its own drag interactions, e.g. the editor).
 /// `onScale` replaces the default sizing (width/height attributes) for content that is not an SVG.
-function attachZoom(scroll     , svg     , baseW        , baseH        , pan = false, onScale                      ) {
+/// `readable` is the smallest zoom the diagram opens or re-fits at by itself, so its text stays legible on a
+/// narrow screen; the reader pans from there. Fit still shows the whole diagram, however small.
+function attachZoom(scroll     , svg     , baseW        , baseH        , pan = false, onScale                      , readable = 0) {
   let z = 1; const min = 0.15, max = 6;
   // True once the reader has zoomed themselves: after that we never re-fit under them on a resize.
   let chosen = false;
+  // True once the reader pressed Fit: from then on the automatic fit shows the whole diagram, below `readable`.
+  let whole = false;
+  const autoFit = () => whole ? fitZoom() : Math.max(readable, fitZoom());
   const apply = () => { if (onScale) onScale(z); else { svg.setAttribute('width', Math.round(baseW * z)); svg.setAttribute('height', Math.round(baseH * z)); } };
   apply();
 
@@ -264,8 +269,8 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
 
   /// Scale the diagram down until it fits the pane's width, and go back to its top-left corner — what the
   /// Fit button asks for.
-  const fit = () => {
-    const next = fitZoom();
+  const fit = (floor = 0) => {
+    const next = Math.max(floor, fitZoom());
     if (Math.abs(next - z) < 0.005) return;
     z = next; apply(); movedAt = Date.now(); scroll.scrollLeft = 0; scroll.scrollTop = 0;
   };
@@ -383,7 +388,7 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
 
   // Open fitted when the pane cannot show the diagram at its own size — which on a phone is always. Wide
   // panes are left alone: shrinking a diagram that already fits only makes it harder to read.
-  if (width() && width() < baseW) fit();
+  if (width() && width() < baseW) fit(readable);
 
   // Follow a rotation or a pane resize, unless the reader has since set their own zoom. Only a change of
   // width counts: an observer reports once as soon as it is attached, and re-fitting on that report sent the
@@ -395,14 +400,14 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
       const w = width();
       if (!w || Math.abs(w - seenW) < 1) return;
       seenW = w;
-      if (!chosen) keepPlace(fitZoom());
+      if (!chosen) keepPlace(autoFit());
     });
     ro.observe(scroll);
     cleanups.push(() => ro.disconnect());
   } catch { /* no ResizeObserver: the fit on open is what matters */ }
 
   const detach = () => cleanups.forEach(f => f());
-  (detach       ).fit = () => { chosen = false; fit(); };
+  (detach       ).fit = () => { chosen = false; whole = true; fit(); };
   /// The view as it stands, for a redraw to pick up again: the zoom, and where the pane is scrolled to as
   /// fractions of it, so a diagram that came back a little taller lands in the same place rather than at the
   /// same pixel. `chosen` carries whether the reader set this zoom themselves.
@@ -412,7 +417,7 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
   });
   (detach       ).view = () => {
     const { x, y } = span();
-    return { z, chosen, left: x ? scroll.scrollLeft / x : 0, top: y ? scroll.scrollTop / y : 0 };
+    return { z, chosen, whole, left: x ? scroll.scrollLeft / x : 0, top: y ? scroll.scrollTop / y : 0 };
   };
   /// Change the zoom and stay over the same part of the diagram, by where the pane is as a share of it.
   const keepPlace = (next        , at                                ) => {
@@ -432,7 +437,8 @@ function attachZoom(scroll     , svg     , baseW        , baseH        , pan = f
   (detach       ).setView = (v     ) => {
     if (!v || !(v.z > 0)) return;
     chosen = !!v.chosen;
-    keepPlace(chosen ? v.z : fitZoom(), { left: v.left || 0, top: v.top || 0 });
+    whole = !!v.whole;
+    keepPlace(chosen ? v.z : autoFit(), { left: v.left || 0, top: v.top || 0 });
   };
   /// Is the reader in the middle of moving the pane — a finger or button down, or a swipe still coasting?
   (detach       ).busy = (quietMs = 800) => pts.size > 0 || Date.now() - touchedAt < quietMs;
@@ -1257,6 +1263,8 @@ const NODE_KINDS                               = [
 ];
 /// A load is where power is used, so it feeds nothing; a circuit that feeds other nodes is a breaker.
 const feedsNothing = (kind         ) => kind === 'load';
+/// Kinds whose leftover is worth a node of its own; the bridge ticks Create untracked for them when it loads the config.
+const untrackedByDefault = (kind         ) => kind === 'panel' || kind === 'inverter' || kind === 'grid';
 const kindMeta = (kind         ) => NODE_KINDS.find(k => k[0] === (kind || 'node')) || NODE_KINDS[0];
 
 // Source binding types — mirrors [AllowedValues] on EnergyFlowSource.Type.
@@ -3414,6 +3422,119 @@ function initPalette() {
   });
 }
 
+// ── stack-tables.ts ─────────────────────────────────────────────
+/// On a phone, a table wider than the screen stacks: each row becomes a card, each cell headed by its column.
+///
+/// Decided by measurement, not per page: a table that fits stays a table, so a short numeric one keeps its
+/// columns to compare down, and only the ones that would scroll sideways change shape. A table that must keep
+/// its columns opts out with `ld-nostack`. Every page renders its own tables, often on each live update, so
+/// one observer heads the cells wherever they are drawn.
+const PHONE = '(max-width: 560px)';
+
+const headings = (table                  )           => {
+  const row = table.tHead?.rows[table.tHead.rows.length - 1];
+  const out           = [];
+  if (!row) return out;
+  for (const th of Array.from(row.cells)) {
+    const text = (th.textContent || '').trim();
+    for (let i = 0; i < (th.colSpan || 1); i++) out.push(text);
+  }
+  return out;
+};
+
+const label = (table                  ) => {
+  const names = headings(table);
+  if (!names.length) return;
+  for (const body of Array.from(table.tBodies)) for (const tr of Array.from(body.rows)) {
+    let col = 0;
+    for (const td of Array.from(tr.cells)) {
+      // A cell the page headed itself keeps its own words.
+      if (!td.dataset.label && names[col]) td.dataset.label = names[col];
+      // A card has no column to keep aligned, so a cell saying only "nothing here" is left out of it.
+      td.classList.toggle('ld-blank', !td.querySelector('input, select, button, textarea, svg, img') && /^[\s—–-]*$/.test(td.textContent || ''));
+      col += td.colSpan || 1;
+    }
+  }
+};
+
+const settle = (phone         ) => {
+  document.querySelectorAll                  ('table.ld:not(.ld-nostack)').forEach(table => {
+    const auto = table.classList.contains('ld-auto-stack');
+    if (!phone) { if (auto) table.classList.remove('ld-stack', 'ld-auto-stack'); return; }
+    if (table.classList.contains('ld-stack')) { label(table); return; }
+    // Hidden (another page, a closed panel): measured when it is shown.
+    if (!table.offsetParent) return;
+    const room = (table.parentElement?.clientWidth || 0);
+    if (room && table.scrollWidth > room + 2) {
+      table.classList.add('ld-stack', 'ld-auto-stack');
+      label(table);
+    }
+  });
+};
+
+function initStackTables() {
+  const mq = typeof window !== 'undefined' ? window.matchMedia?.(PHONE) : null;
+  if (!mq || typeof MutationObserver === 'undefined') return;
+  let queued = false;
+  const run = () => { queued = false; settle(mq.matches); };
+  const queue = () => { if (!queued) { queued = true; requestAnimationFrame(run); } };
+  new MutationObserver(queue).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden', 'open'] });
+  mq.addEventListener?.('change', queue);
+  queue();
+}
+
+// ── phone-nav.ts ────────────────────────────────────────────────
+/// Navigation on a phone: a tab bar along the bottom for the pages read most, and a drawer that opens on the
+/// group holding the page being read rather than on forty links.
+
+const NARROW = '(max-width: 860px)';
+const TABS                     = [['Overview', '⌂'], ['Live Data', '∿'], ['Flow', '⇄'], ['Energy', '⚡']];
+
+const narrow = () => { try { return !!window.matchMedia?.(NARROW).matches; } catch { return false; } };
+const link = (label        )      => document.querySelector(`#nav a[data-label="${label}"]`);
+
+/// Opens the drawer with only the active page's group expanded; the others stay a tap away.
+function openNav() {
+  if (narrow()) {
+    const active = document.querySelector('#nav a.active');
+    document.querySelectorAll('#nav .nav-group-wrap').forEach((g     ) => g.classList.toggle('collapsed', !(active && g.contains(active))));
+  }
+  document.body.classList.add('nav-open');
+  (document.querySelector('#nav a.active')       )?.scrollIntoView?.({ block: 'center' });
+}
+
+function initPhoneNav(toggle            ) {
+  if (typeof document === 'undefined' || !document.body) return;
+  const bar = el('div', { class: 'tabbar', role: 'navigation', 'aria-label': 'Main pages' });
+  const tabs = TABS.map(([label, icon]) => {
+    const b = el('button', { class: 'tab', type: 'button' }, el('span', { class: 'tab-icon', text: icon, 'aria-hidden': 'true' }), el('span', { class: 'tab-label', text: label }));
+    b.onclick = () => { document.body.classList.remove('nav-open'); link(label)?.click(); };
+    return { label, b };
+  });
+  const more = el('button', { class: 'tab', type: 'button' }, el('span', { class: 'tab-icon', text: '☰', 'aria-hidden': 'true' }), el('span', { class: 'tab-label', text: 'More' }));
+  more.onclick = toggle;
+  tabs.forEach(t => bar.appendChild(t.b));
+  bar.appendChild(more);
+  document.body.appendChild(bar);
+  const sync = () => {
+    const open = document.body.classList.contains('nav-open');
+    let any = false;
+    tabs.forEach(t => {
+      const a = link(t.label);
+      t.b.hidden = !a;
+      const on = !open && !!a?.classList.contains('active');
+      any = any || on;
+      t.b.classList.toggle('is-active', on);
+      t.b.setAttribute('aria-current', on ? 'page' : 'false');
+    });
+    // "More" is the tab lit for every page the bar does not name, and while the drawer is open.
+    more.classList.toggle('is-active', open || (!any && !!document.querySelector('#nav a.active')));
+  };
+  window.addEventListener('rpdu:activate', sync);
+  if (typeof MutationObserver !== 'undefined') new MutationObserver(sync).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  sync();
+}
+
 // ── overrides.ts ────────────────────────────────────────────────
 // Overrides editor (driven by live PDU data) + the config export/prune helpers.
 
@@ -4301,7 +4422,7 @@ function buildK8sTools(container     ) {
 // Direct outlet control (on/off/reboot) + group actions + label editing.
 
 function addControlSection(nav     , sections     ) {
-  const link = navLink(nav, "PDU Control", "⏻");
+  const link = navLink(nav, "PDU Control", "⊙");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Outlet Control'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc';
@@ -5457,6 +5578,8 @@ function addFlowSection(nav     , sections     ) {
   const drill = (id               ) => {
     drillTo = id || null;
     refit = true;
+    // A tap is also a hover on a phone; the card would describe a node that is no longer drawn.
+    hideNodeCard();
     redrawBoth();
   };
 
@@ -6289,7 +6412,9 @@ function addFlowSection(nav     , sections     ) {
     stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
     wrap.appendChild(stage);
 
-    zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
+    // On a phone, fitting the whole Sankey shrinks its 11px labels to unreadable; open at a scale that keeps
+    // them near 9px and let the reader pan. Fit still shows the whole of it.
+    zoom = attachZoom(scroll, svg, W, totalH, true, undefined, 0.8);  // container is replaced on each draw(), so no leak.
     // Back to where the reader was, at the zoom they set, rather than fitted again from scratch — unless the
     // diagram itself changed, when the old view is of something that is no longer drawn.
     if (keptView && !refit) zoom.setView(keptView);
@@ -6514,7 +6639,8 @@ function addFlowSection(nav     , sections     ) {
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, style: 'background:var(--panel2); display:block' });
     scroll.appendChild(svg); ed.appendChild(scroll);
     ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 2px 0', fontSize: '11px' }, text: 'Drag the canvas background to pan · scroll to move · Ctrl/⌘ + scroll to zoom · drag a node onto another to set its feeder · drag a node’s ● onto another to add a feed.' }));
-    const detachZoom = attachZoom(scroll, svg, W, H);
+    // Fitted whole on a phone, the node names are a few pixels tall: open where they can be read, and pan.
+    const detachZoom = attachZoom(scroll, svg, W, H, false, undefined, 0.85);
     const defs = svgEl('defs', {}); svg.appendChild(defs);
     [['fh-arrow', 'var(--faint)'], ['fh-arrow-c', '#7cc0ff']].forEach(([id, fill]) => {
       const mk = svgEl('marker', { id, viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' });
@@ -7217,7 +7343,9 @@ function renderNodeEditor(node     , links       , cand                  , reren
   grid.appendChild(field('Counts toward', roleSel, 'Site total it is summed into.'));
 
   const modeSel = el('select');
-  NODE_MODES.forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
+  // An untracked slice is asked for on its parent now; the mode stays listed only for a node already set to it.
+  NODE_MODES.filter(([v]) => v !== 'untracked' || node.Mode === 'untracked')
+    .forEach(([v, label, desc]) => { const o = el('option', { value: v, text: label }); o.title = desc; modeSel.appendChild(o); });
   modeSel.value = node.Mode || 'auto';
   modeSel.onchange = () => {
     node.Mode = modeSel.value === 'auto' ? undefined : modeSel.value;
@@ -7582,6 +7710,15 @@ function renderNodeEditor(node     , links       , cand                  , reren
   wireSec.appendChild(wireRow('Fed by', links.filter(l => l.To === node.Id).map(l => l.From), o => addLink(o, node.Id), o => removeLink(o, node.Id),
     id => !feedsNothing((cand.get(id) || {}).kind)));
   wireSec.appendChild(wireRow('Feeds', links.filter(l => l.From === node.Id).map(l => l.To), o => addLink(node.Id, o), o => removeLink(node.Id, o)));
+  // A residual or untracked node is itself a remainder, with no reading of its own to be beyond.
+  if (!feedsNothing(node.Kind) && node.Mode !== 'untracked' && node.Mode !== 'residual') {
+    // Explicit either way once touched: left blank, the bridge turns it on for panels, inverters and the grid.
+    const untrackedBox = el('input', { type: 'checkbox', checked: node.CreateUntracked ?? untrackedByDefault(node.Kind) })                    ;
+    untrackedBox.onchange = () => { node.CreateUntracked = untrackedBox.checked; };
+    wireSec.appendChild(field('Create untracked', el('span', { class: 'ne-check' }, untrackedBox,
+      el('span', { text: `add "${node.Label || node.Id}: Untracked" beneath it` })),
+      'What this node measures beyond its children, as a node of its own. Needs a reading on this node.'));
+  }
 
   // --- Filing: tags, its circuit, and where its EmonCMS feeds go. Folded until something is set. ---
   const more = el('details', { class: 'ne-more' })                      ;
@@ -8502,9 +8639,12 @@ function mountMqttExplorer(body     , close            , showing               )
   bar.append(search, expandAll, collapseAll, status);
   body.appendChild(bar);
 
-  const tbl = el('table', { class: 'ld' });
+  // A tree keeps its rows: it is read by its indentation, which a card per topic would lose. A phone shows
+  // the topic and its value, and the rest is a tap away in the payload row.
+  const tbl = el('table', { class: 'ld ld-nostack explorer-table' });
   const head = el('tr');
-  ['', 'Topic', 'Last value', 'Trend', 'Last seen', 'Messages', 'Looks like'].forEach(h => head.appendChild(el('th', { text: h })));
+  const cols = ['ex-pick', 'ex-name', 'ex-value', 'ex-trend', 'ex-seen', 'ex-count', 'ex-kind'];
+  ['', 'Topic', 'Last value', 'Trend', 'Last seen', 'Messages', 'Looks like'].forEach((h, i) => head.appendChild(el('th', { class: cols[i], text: h })));
   tbl.appendChild(el('thead', {}, head));
   const tbody = el('tbody');
   tbl.appendChild(tbody);
@@ -8584,13 +8724,15 @@ function mountMqttExplorer(body     , close            , showing               )
       footer.sync();
     };
 
-    const name = el('td', { style: { paddingLeft: `${6 + depth * 18}px`, whiteSpace: 'nowrap' } });
+    const name = el('td', { class: 'ex-name', style: { paddingLeft: `${6 + depth * 18}px`, whiteSpace: 'nowrap' } });
+    name.style.setProperty?.('--depth', String(depth));
     if (branch) {
       const toggle = el('span', { text: isOpen ? '▾' : '▸', style: { cursor: 'pointer', marginRight: '6px', color: 'var(--muted)' } });
       toggle.onclick = () => { decided.add(n.path); open.has(n.path) ? open.delete(n.path) : open.add(n.path); draw(); };
       name.appendChild(toggle);
     }
-    const code = el('code', { text: label });
+    // A topic breaks at its own separators when it has to wrap, not mid-word.
+    const code = el('code', {}, ...String(label).split(/(?<=[/_])/).flatMap((part, i) => i ? [el('wbr'), part] : [part]));
     if (branch) {
       code.style.cursor = 'pointer';
       code.onclick = () => { decided.add(n.path); open.has(n.path) ? open.delete(n.path) : open.add(n.path); draw(); };
@@ -8607,7 +8749,7 @@ function mountMqttExplorer(body     , close            , showing               )
     }
 
     const t = n.row;
-    const value = el('td', { class: 'num', text: t ? (t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48)) : '' });
+    const value = el('td', { class: 'num ex-value', text: t ? (t.value != null ? formatNum(t.value) + (t.unit ? ' ' + t.unit : '') : (t.payload || '').slice(0, 48)) : '' });
     // A truncated line of JSON tells you nothing, and there is nowhere else to read it.
     if (t && (t.payload || t.value != null)) {
       value.title = t.payload || '';
@@ -8616,22 +8758,22 @@ function mountMqttExplorer(body     , close            , showing               )
       // What it last published, in full — not the 48 characters the cell has room for.
       value.append(' ', copyButton('Copy the last value', 'value', () => t.payload || String(t.value ?? '')));
     }
-    const trend = el('td', { style: { width: '140px' } });
+    const trend = el('td', { class: 'ex-trend', style: { width: '140px' } });
     if (t && Array.isArray(t.trend) && t.trend.length > 1)
       trend.appendChild(sparkline({ values: t.trend, color: '#4f8ff7', units: t.unit || '', width: 132, height: 22, fromZero: false }));
     // A branch reports its freshest topic and the messages under it.
     const newest = topics.reduce((m        , x     ) => (x.seenUtc && x.seenUtc > m ? x.seenUtc : m), '');
-    const seen = el('td', { class: 'desc', style: { whiteSpace: 'nowrap', margin: '0' }, text: newest ? seenAgo(newest) : '' });
+    const seen = el('td', { class: 'desc ex-seen', style: { whiteSpace: 'nowrap', margin: '0' }, text: newest ? seenAgo(newest) : '' });
     if (newest) { seen.title = new Date(newest).toLocaleString(); ages.push({ cell: seen, at: newest }); }
     const count = topics.reduce((n        , x     ) => n + (Number(x.messages) || 0), 0);
     tbody.appendChild(el('tr', {},
-      el('td', {}, box),
+      el('td', { class: 'ex-pick' }, box),
       name,
       value,
       trend,
       seen,
-      el('td', { class: 'num', text: count ? formatNum(count) : '' }),
-      el('td', { text: t ? (t.isJson ? `JSON · ${fieldNames(t.fields).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—')) : '' })));
+      el('td', { class: 'num ex-count', text: count ? formatNum(count) : '' }),
+      el('td', { class: 'ex-kind', text: t ? (t.isJson ? `JSON · ${fieldNames(t.fields).length} field(s)` : (t.metric ? metricLabel(t.metric) : '—')) : '' })));
     if (t && opened.has(t.topic)) tbody.appendChild(payloadRow(t));
 
     if (branch && isOpen) [...n.children.values()].sort(byName).forEach(c => drawBranch(c, depth + 1, searching));
@@ -8902,9 +9044,10 @@ function addTagsSection(nav     , sections     ) {
     }
 
     // --- What exists, what carries it, what decides on it ----------------------------------------------
-    const t = el('table', { class: 'ld' });
+    const t = el('table', { class: 'ld ld-stack' });
     const head = el('tr');
-    ['Tag', 'What it is for', 'Carried by', 'Destinations that decide on it', ''].forEach(h =>
+    const columns = ['Tag', 'What it is for', 'Carried by', 'Destinations that decide on it', ''];
+    columns.forEach(h =>
       head.appendChild(el('th', { text: h })));
     t.appendChild(el('thead', {}, head));
     const tb = el('tbody');
@@ -8973,6 +9116,8 @@ function addTagsSection(nav     , sections     ) {
         removeTag(tag); refreshDirty(); render();
       };
       tr.appendChild(el('td', {}, del));
+      // Headings for the stacked layout a phone uses.
+      [...tr.children].forEach((td     , i) => { if (columns[i]) td.dataset.label = columns[i]; });
       tb.appendChild(tr);
     });
 
@@ -11601,23 +11746,41 @@ function addNodeTrendsSection(nav     , sections     ) {
   // Which selected nodes are drawn in their own colour, and that colour, for the current draw.
   let colours = new Map                ();
 
-  // Kinds and tags flow in one row: two rows of chips before the chart was half the page on a real install.
-  const tagRow = el('div', { style: { display: 'contents' } });
+  // What to chart sits behind one button above the chart: a real install has over a hundred nodes and dozens
+  // of kinds and tags, and laid out as chips they pushed the chart off the first screen.
+  const tagRow = el('div', { class: 'nt-chips' });
   const search = el('input', { class: 'trend-search' })                    ;
   search.type = 'search';
   search.placeholder = 'Filter nodes';
   search.title = 'Show only the nodes whose name, id or tags contain this text.';
-  const searchRow = el('div', { class: 'ld-toolbar' }, search);
-  const picker = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
-  // The node list is dozens of chips on a real install, so it folds into one line saying what is charted.
-  const nodesBar = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
-  const nodesPanel = el('div', {}, searchRow, picker);
-  const NODES_OPEN_KEY = 'rpdu-node-trends-nodes-open';
-  let nodesOpen = (() => { try { return localStorage.getItem(NODES_OPEN_KEY) === '1'; } catch { return false; } })();
-  const setNodesOpen = (on         ) => {
-    nodesOpen = on;
-    try { localStorage.setItem(NODES_OPEN_KEY, on ? '1' : '0'); } catch { /* private mode: this session only */ }
+  const listTools = el('div', { class: 'nt-tools' });
+  const searchRow = el('div', { class: 'nt-search' }, search, listTools);
+  const picker = el('div', { class: 'nt-list' });
+  const nodesPanel = el('div', { class: 'nt-nodes' }, searchRow, picker);
+  const face = el('span', { class: 'ss-face' });
+  const faceBtn = el('button', { class: 'ss-btn nt-btn', type: 'button', title: 'Choose what is charted: by kind, by tag, or node by node.' },
+    face, el('span', { class: 'ss-caret', text: '▾' }));
+  faceBtn.setAttribute('aria-haspopup', 'dialog');
+  faceBtn.setAttribute('aria-expanded', 'false');
+  const resetHolder = el('span');
+  const kindRow = el('div', { class: 'nt-chips' });
+  const kindBlock = el('div', { class: 'nt-block' }, el('div', { class: 'nt-head', text: 'Kinds' }), kindRow);
+  const tagBlock = el('div', { class: 'nt-block' }, el('div', { class: 'nt-head', text: 'Tags' }), tagRow);
+  const nodeBlock = el('div', { class: 'nt-block' }, el('div', { class: 'nt-head', text: 'Nodes' }), nodesPanel);
+  const pop = el('div', { class: 'nt-pop', role: 'dialog' }, kindBlock, tagBlock, nodeBlock);
+  pop.hidden = true;
+  const nodesBar = el('div', { class: 'nt-bar' }, el('span', { class: 'desc', style: { margin: '0' }, text: 'Charting' }),
+    el('div', { class: 'nt-anchor' }, faceBtn, pop), resetHolder);
+  const outside = (e     ) => { if (!nodesBar.contains(e.target)) setOpen(false); };
+  const setOpen = (on         ) => {
+    if (on === !pop.hidden) return;
+    pop.hidden = !on;
+    faceBtn.setAttribute('aria-expanded', String(on));
+    if (on) document.addEventListener('pointerdown', outside, true);
+    else document.removeEventListener('pointerdown', outside, true);
   };
+  faceBtn.onclick = () => setOpen(pop.hidden);
+  pop.onkeydown = (e     ) => { if (e.key === 'Escape') { e.preventDefault(); setOpen(false); faceBtn.focus?.(); } };
   const table = el('div');
   const overlaySel = el('select', { title: 'Draw one more series as a line over the chart, on the same axis.' })                     ;
 
@@ -11659,15 +11822,15 @@ function addNodeTrendsSection(nav     , sections     ) {
   const kindName = (k        ) => k === 'pdu' ? 'PDU' : k === 'outlet' ? 'Outlet' : k === 'unmeasured' ? 'Unmeasured'
     : kindMeta(k)[0] === k ? kindMeta(k)[1] : k;
 
+  const kindsOnPage = () => [...new Set(all().map(kindOf))]
+    .sort((a, b) => ((KIND_ORDER.indexOf(a) + 1 || 99) - (KIND_ORDER.indexOf(b) + 1 || 99)) || a.localeCompare(b));
+
   /// One chip per kind on the page: what a node is decides what it is sensible to chart beside it.
-  const kindRow = el('div', { style: { display: 'contents' } });
-  const filterRow = el('div', { class: 'ld-toolbar trend-filters', style: { gap: '6px' } }, kindRow, tagRow);
   const drawKinds = () => {
     kindRow.innerHTML = '';
-    const kinds = [...new Set(all().map(kindOf))]
-      .sort((a, b) => ((KIND_ORDER.indexOf(a) + 1 || 99) - (KIND_ORDER.indexOf(b) + 1 || 99)) || a.localeCompare(b));
+    const kinds = kindsOnPage();
+    kindBlock.hidden = kinds.length < 2;
     if (kinds.length < 2) return;
-    kindRow.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'Kinds:' }));
     kinds.forEach(kind => {
       const members = all().filter((s     ) => kindOf(s) === kind);
       const allOn = members.every((s     ) => !off.has(s.node));
@@ -11707,8 +11870,8 @@ function addNodeTrendsSection(nav     , sections     ) {
     tagRow.innerHTML = '';
     const tags = new Set        ();
     all().forEach((s     ) => (s.tags || []).forEach((t        ) => tags.add(t)));
+    tagBlock.hidden = !tags.size;
     if (!tags.size) return;
-    tagRow.appendChild(el('span', { class: 'desc', style: { margin: '0 0 0 10px' }, text: 'Tags:' }));
     [...tags].sort().forEach(tag => {
       const members = all().filter((s     ) => (s.tags || []).includes(tag));
       const allOn = members.every((s     ) => !off.has(s.node));
@@ -11730,7 +11893,7 @@ function addNodeTrendsSection(nav     , sections     ) {
     all().forEach((s     , i        ) => {
       if (!matches(s)) return;
       const on = !off.has(s.node);
-      const chip = btn((on ? '● ' : '○ ') + (s.label || s.node));
+      const chip = btn((on ? '● ' : '○ ') + (s.label || s.node), 'nt-node');
       chip.title = (on ? 'On the chart — click to take it off' : 'Off the chart — click to add it')
         + ((s.tags || []).length ? `\ntags: ${(s.tags || []).join(', ')}` : '');
       // Selected reads the same whether or not the node has its own colour; the colour is only its border.
@@ -11749,21 +11912,30 @@ function addNodeTrendsSection(nav     , sections     ) {
     const none = btn('None');
     none.title = filter ? 'Take every node matching the filter off the chart.' : 'Take every node off the chart.';
     none.onclick = () => { visible.forEach((s     ) => off.add(s.node)); page.draw(); };
-    const reset = btn('Reset', 'primary');
+    const reset = btn('Reset');
     reset.title = 'Back to the default: one kind that splits the total without counting it twice — circuits where there are any.';
     reset.onclick = () => {
       try { localStorage.removeItem(KINDS_KEY); } catch { /* private mode */ }
       resetSelection(false);
       page.draw();
     };
-    nodesBar.innerHTML = '';
-    const charted = all().filter((s     ) => !off.has(s.node)).length;
-    const toggle = btn(nodesOpen ? 'Hide node list ▴' : 'Choose nodes ▾');
-    toggle.title = nodesOpen ? 'Fold the node list away.' : 'Pick individual nodes, or filter them by name.';
-    toggle.onclick = () => { setNodesOpen(!nodesOpen); drawPicker(); };
-    nodesBar.append(el('span', { class: 'desc', style: { margin: '0' }, text: `Nodes: ${charted} of ${all().length} charted` }),
-      toggle, allBtn, none, reset);
-    nodesPanel.hidden = !nodesOpen;
+    listTools.innerHTML = '';
+    listTools.append(allBtn, none);
+    resetHolder.innerHTML = '';
+    resetHolder.append(reset);
+    face.textContent = describe();
+  };
+
+  /// What the button says is charted: the kinds when whole kinds are, then how many of the nodes.
+  const describe = () => {
+    const charted = shown();
+    const count = `${charted.length} of ${all().length} nodes`;
+    if (!charted.length) return 'No nodes';
+    if (charted.length === all().length) return `All ${all().length} nodes`;
+    const kinds = kindsOnPage().filter(k => charted.some((s     ) => kindOf(s) === k));
+    const whole = kinds.every(k => all().filter((s     ) => kindOf(s) === k).every((s     ) => !off.has(s.node)));
+    if (whole && kinds.length <= 2) return `${kinds.map(kindName).join(' + ')} · ${count}`;
+    return count;
   };
   search.oninput = () => { filter = search.value.trim().toLowerCase(); drawPicker(); };
 
@@ -11948,7 +12120,7 @@ function addNodeTrendsSection(nav     , sections     ) {
       }
       return lines;
     },
-    above: () => [filterRow, nodesBar, nodesPanel],
+    above: () => [nodesBar],
     below: () => [table],
     loaded: () => {
       if (pending) {
@@ -15259,6 +15431,7 @@ function discardAll() {
 // --- Wiring ----------------------------------------------------------------------------------------
 
 function initShell() {
+  initStackTables();
   const on = (id        , fn     ) => { const e      = document.getElementById(id); if (e) e.onclick = fn; };
   on('st-update', checkUpdatesNow);
   on('btn-save', saveConfigChanges);
@@ -15271,7 +15444,9 @@ function initShell() {
 
   // Narrow screens: the sidebar is a drawer; a nav click closes it.
   const closeNav = () => document.body.classList.remove('nav-open');
-  on('nav-toggle', () => document.body.classList.toggle('nav-open'));
+  const toggleNav = () => document.body.classList.contains('nav-open') ? closeNav() : openNav();
+  on('nav-toggle', toggleNav);
+  initPhoneNav(toggleNav);
   on('nav-scrim', closeNav);
   document.getElementById('nav')?.addEventListener('click', (e     ) => { if (e.target?.closest?.('a')) closeNav(); });
 

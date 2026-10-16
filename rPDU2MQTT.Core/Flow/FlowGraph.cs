@@ -71,4 +71,13 @@ public sealed record FlowGraph(
     IReadOnlyList<FlowNode> Nodes,
     IReadOnlyList<FlowLink> Links,
     string Metric,
-    string Units);
+    string Units)
+{
+    /// <summary>Every edge the topology has, drawn or not: a link carrying nothing right now is still a feed.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<FlowLink> Edges { get; init; } = [];
+
+    /// <summary>The nodes valued as their parent's untracked slice, made by hand or asked for by the parent.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlySet<string> Untracked { get; init; } = new HashSet<string>();
+}

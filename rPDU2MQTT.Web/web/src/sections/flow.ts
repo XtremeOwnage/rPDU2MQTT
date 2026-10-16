@@ -313,6 +313,8 @@ export function addFlowSection(nav: any, sections: any) {
   const drill = (id: string | null) => {
     drillTo = id || null;
     refit = true;
+    // A tap is also a hover on a phone; the card would describe a node that is no longer drawn.
+    hideNodeCard();
     redrawBoth();
   };
 
@@ -1146,7 +1148,9 @@ export function addFlowSection(nav: any, sections: any) {
     stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
     wrap.appendChild(stage);
 
-    zoom = attachZoom(scroll, svg, W, totalH, true);  // container is replaced on each draw(), so no leak.
+    // On a phone, fitting the whole Sankey shrinks its 11px labels to unreadable; open at a scale that keeps
+    // them near 9px and let the reader pan. Fit still shows the whole of it.
+    zoom = attachZoom(scroll, svg, W, totalH, true, undefined, 0.8);  // container is replaced on each draw(), so no leak.
     // Back to where the reader was, at the zoom they set, rather than fitted again from scratch — unless the
     // diagram itself changed, when the old view is of something that is no longer drawn.
     if (keptView && !refit) zoom.setView(keptView);
@@ -1371,7 +1375,8 @@ export function addFlowSection(nav: any, sections: any) {
     const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, style: 'background:var(--panel2); display:block' });
     scroll.appendChild(svg); ed.appendChild(scroll);
     ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 2px 0', fontSize: '11px' }, text: 'Drag the canvas background to pan · scroll to move · Ctrl/⌘ + scroll to zoom · drag a node onto another to set its feeder · drag a node’s ● onto another to add a feed.' }));
-    const detachZoom = attachZoom(scroll, svg, W, H);
+    // Fitted whole on a phone, the node names are a few pixels tall: open where they can be read, and pan.
+    const detachZoom = attachZoom(scroll, svg, W, H, false, undefined, 0.85);
     const defs = svgEl('defs', {}); svg.appendChild(defs);
     [['fh-arrow', 'var(--faint)'], ['fh-arrow-c', '#7cc0ff']].forEach(([id, fill]) => {
       const mk = svgEl('marker', { id, viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' });
