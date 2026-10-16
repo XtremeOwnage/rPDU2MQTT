@@ -8004,8 +8004,8 @@ function wouldLoop(links       , from        , to        ) {
 // Virtual-node manager.
 function renderNodeManager(flow     , customNodes       , links       , cand                  , editing                       , rerender                           , query = '', hideManaged = false) {
   const box = el('div', { style: { margin: '18px 0' } });
-  box.appendChild(el('h3', { text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
-  box.appendChild(el('div', { class: 'desc', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
+  box.appendChild(el('h3', { class: 'nd-h', text: 'Virtual nodes', style: { margin: '4px 0', fontSize: '15px' } }));
+  box.appendChild(el('div', { class: 'desc nd-blurb', text: 'The custom nodes you’ve added (panels, breakers, batteries, producers, a “Total”). Click Edit to set the name, kind, how it’s valued, and bind live values from your broker.' }));
 
   // The node being edited always stays.
   const q = query.trim().toLowerCase();
@@ -8027,10 +8027,11 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
 
   const tbl = el('table', { class: 'ld' });
   const head = el('tr');
-  ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Tags', 'Fed by', 'Bindings', ''].forEach(h => {
+  const cols = ['Id', 'Label', 'Kind', 'Mode', 'Value', 'Max', 'Tags', 'Fed by', 'Bindings', ''];
+  cols.forEach(h => {
     const th = el('th', { text: h });
     if (h === 'Tags') th.title = 'Free-form labels for filtering the views. A tag never changes a reading.';
-    if (h === 'Fed by') th.title = 'What supplies this node. The same wiring as dragging on the Hierarchy tab, without the dragging.';
+    if (h === 'Fed by') th.title = 'What supplies this node. Change it with Edit, or by dragging on the Flow tab.';
     if (h === 'Max') th.title = 'Full-scale value for this node’s gauge on the Energy page — a PV array’s peak output, an inverter’s rating, a breaker’s size. Blank shows the plain reading instead; no ceiling is ever guessed.';
     if (h === 'Bindings') th.title = 'Live source bindings. ⚠ = bound, but no energy (kWh) metric — the node won’t appear on Home Assistant’s Energy Dashboard until you add an Energy source.';
     head.appendChild(th);
@@ -8049,30 +8050,8 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     tr.appendChild(el('td', { text: (n.Tags || []).join(', ') || '—' }));
 
     const incoming = links.filter((l     ) => l.To === n.Id).map((l     ) => l.From);
-    const fedByCell = el('td');
-    if (incoming.length > 1) {
-      fedByCell.appendChild(el('span', { text: incoming.map((f        ) => (cand.get(f) || {}).label || f).join(', ') }));
-    } else {
-      const sel = el('select', { style: { width: 'auto' } })                     ;
-      sel.appendChild(el('option', { value: '', text: '— none —' }));
-      [...cand.keys()]
-        .filter(id => id !== n.Id && !String(id).includes('#') && (!feedsNothing((cand.get(id) || {}).kind) || id === incoming[0]))
-        .sort((a, b) => ((cand.get(a) || {}).label || a).localeCompare((cand.get(b) || {}).label || b))
-        .forEach(id => sel.appendChild(el('option', { value: id, text: (cand.get(id) || {}).label || id })));
-      sel.value = incoming[0] || '';
-      sel.onchange = () => {
-        const feeder = sel.value;
-        if (feeder && wouldLoop(links.filter((l     ) => l.To !== n.Id), feeder, n.Id)) {
-          toast('That would create a feeder loop.', false);
-          sel.value = incoming[0] || '';
-          return;
-        }
-        for (let i = links.length - 1; i >= 0; i--) if (links[i].To === n.Id) links.splice(i, 1);
-        if (feeder) links.push({ From: feeder, To: n.Id });
-        rerender();
-      };
-      fedByCell.appendChild(sel);
-    }
+    // Read-only here; Edit is where the wiring changes.
+    const fedByCell = el('td', { text: incoming.map((f        ) => (cand.get(f) || {}).label || f).join(', ') || '—' });
     tr.appendChild(fedByCell);
     // Measured but no kWh source.
     const srcs = [...(n.Sources || []), ...(n.Mqtt || [])];
@@ -8123,6 +8102,13 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     };
     actions.append(edit, ' ', rename, ' ', copy, ' ', rm);
     tr.appendChild(actions);
+    // Labels for the stacked phone layout.
+    Array.from(tr.children).forEach((td     , i        ) => {
+      if (cols[i]) td.dataset.label = cols[i];
+      if (td.textContent === '—') td.classList.add('nd-empty');
+    });
+    // No need to show the id twice when the label is the id.
+    if ((n.Label || n.Id) === n.Id) tr.children[0].classList.add('nd-same');
     body.appendChild(tr);
   });
   tbl.appendChild(body);
@@ -8137,7 +8123,7 @@ function addNodesSection(nav     , sections     ) {
   link.dataset.section = 'EnergyFlow.Nodes,EnergyFlow.Links,EnergyFlow.AutoTags';
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
   const h = document.createElement('h2'); h.textContent = 'Energy Nodes'; sec.appendChild(h);
-  const d = document.createElement('div'); d.className = 'desc';
+  const d = document.createElement('div'); d.className = 'desc nd-intro';
   d.textContent = 'Configure the virtual nodes in your energy hierarchy — panels, breakers, batteries, producers, a “Total”. Set each node’s kind, how it’s valued, its live-value bindings (MQTT / Modbus), and its feeders & children. The wiring also shows visually on the Flow tab.';
   sec.appendChild(d);
 
@@ -8158,6 +8144,8 @@ function addNodesSection(nav     , sections     ) {
   const ed      = document.createElement('div'); ed.style.marginTop = '8px'; sec.appendChild(ed);
   let lastGraph      = null;
   const editing                        = { id: null };
+  // On a phone the add form folds away so the nodes come first; it stays open on a wider screen.
+  let addOpen = (() => { try { return !window.matchMedia?.('(max-width: 560px)').matches; } catch { return true; } })();
 
   const render = () => {
     const flow = ensure(state.data, 'EnergyFlow', {});
@@ -8184,10 +8172,14 @@ function addNodesSection(nav     , sections     ) {
       customNodes.push(node); editing.id = id; render();
     };
     save.onclick = () => saveConfig(load);
-    addBar.append(idIn, labIn, kindSel, addBtn, importBtn, save); ed.appendChild(addBar);
+    addBar.append(idIn, labIn, kindSel, addBtn, importBtn, save);
+    const addBox      = el('details', { class: 'nd-add' }, el('summary', { class: 'nd-add-summary', text: 'Add or import a node' }), addBar);
+    addBox.open = addOpen;
+    addBox.addEventListener?.('toggle', () => { addOpen = addBox.open; });
+    ed.appendChild(addBox);
 
     const existingIds = new Set        ([...customNodes.map((n     ) => n.Id), ...((lastGraph?.nodes || []).map((n     ) => n.id))]);
-    const impWrap = el('div'); ed.appendChild(impWrap);
+    const impWrap = el('div'); addBox.appendChild(impWrap);
     importBtn.onclick = () => {
       if (impWrap.firstChild) { impWrap.innerHTML = ''; return; }
       impWrap.appendChild(renderImportPanel(flow, existingIds, render));
@@ -8195,7 +8187,7 @@ function addNodesSection(nav     , sections     ) {
 
     const cand = flowCandidates(lastGraph, customNodes);
     const goTo = (label        ) => (document.querySelector(`nav a[data-label="${label}"]`)       )?.click();
-    ed.appendChild(el('div', { class: 'desc', style: { margin: '4px 0 0' } },
+    ed.appendChild(el('div', { class: 'desc nd-note', style: { margin: '4px 0 0' } },
       el('span', { text: 'Groups are managed on the ' }),
       el('a', { text: 'Groups page', onclick: () => goTo('Groups') }),
       el('span', { text: ', and tags — including the rules that tag PDUs and outlets — on the ' }),

@@ -39,14 +39,10 @@ if (!sec) fail('the Nodes page did not open');
 
 const valuesOf = (sel) => (sel.children || []).map(o => o.value || (o.attrs && o.attrs.value)).filter(Boolean);
 
-// The Nodes table: each row's own Fed by dropdown.
+// The Nodes table shows what feeds a row; changing it is done in the editor.
 const row = query(sec, 'tr', true).find(r => query(r, 'td', true).some(td => td.textContent === 'rack_pdu'));
 if (!row) fail('no table row for rack_pdu');
-const tableSel = query(row, 'select', true).find(s => (s.children || []).some(o => o.textContent === '— none —'));
-if (!tableSel) fail('the table row has no Fed by dropdown');
-if (valuesOf(tableSel).includes('fridge')) fail(`the table offers a load as a feeder: ${valuesOf(tableSel).join(', ')}`);
-for (const ok of ['main_panel', 'b06'])
-  if (!valuesOf(tableSel).includes(ok)) fail(`the table does not offer ${ok} as a feeder: ${valuesOf(tableSel).join(', ')}`);
+if (query(row, 'select', true).length) fail('the table row can rewire a node without opening Edit');
 
 // The node editor.
 query(row, 'button', true).find(b => b.textContent === 'Edit')?.click();
