@@ -14,3 +14,4 @@ Read-only REST API + OpenAPI/Scalar docs
 | `Api.Enabled` | bool | `false` | Expose a read-only REST API (/api/v1/*) with OpenAPI + Scalar docs on its own port. Place it on a trusted network — it is unauthenticated, like the health endpoints. |
 | `Api.Port` | int | `8082` | Port the REST API + docs listen on. |
 | `Api.ApiKey` | string (secret) |  | Optional API key enabling the write/control endpoints (or set RPDU2MQTT_API_KEY). When unset, the API is read-only; when set, control requests must send a matching 'X-Api-Key' header. Reads stay open (trusted-network). |
+| `Api.McpEnabled` | bool | `false` | Serve a read-only MCP (Model Context Protocol) endpoint at /mcp on the API port, so AI assistants can query instances, readings, flow and history. Requires Api.ApiKey; clients send it as a Bearer token, an 'X-Api-Key' header, or a 'key' query parameter. |

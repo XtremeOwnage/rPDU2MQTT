@@ -252,6 +252,8 @@ httpRoute:
   #       type: PathPrefix
   #       service: api
   paths: []
+  # Also route /mcp to the API Service (config.Api.McpEnabled). Added ahead of `paths`; ignored with `rules`.
+  mcp: false
   # Full escape hatch: raw HTTPRoute rules, used verbatim and taking precedence over `paths`.
   rules: []
 

@@ -29,11 +29,15 @@ public sealed class ApiService : IHostedService, IAsyncDisposable
     private readonly HealthState health;
     private readonly IHiveMQClient mqtt;
     private readonly Core.Flow.IFlowValueSource? live;
+    private readonly Core.Status.StatusBoard? status;
+    private readonly Core.Flow.IMeasurementHistory? history;
     private WebApplication? app;
 
-    public ApiService(Config cfg, Core.Integrations.IPduInstances registry, ISnapshotCache snapshots, HealthState health, IHiveMQClient mqtt, Core.Flow.IFlowValueSource? live = null)
+    public ApiService(Config cfg, Core.Integrations.IPduInstances registry, ISnapshotCache snapshots, HealthState health, IHiveMQClient mqtt, Core.Flow.IFlowValueSource? live = null, Core.Status.StatusBoard? status = null, Core.Flow.IMeasurementHistory? history = null)
     {
         this.live = live;
+        this.status = status;
+        this.history = history;
         this.cfg = cfg;
         this.registry = registry;
         this.snapshots = snapshots;
@@ -53,6 +57,15 @@ public sealed class ApiService : IHostedService, IAsyncDisposable
         builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestHeadersTotalSize = 64 * 1024);
         builder.Services.AddOpenApi();
 
+        var mcp = cfg.Api.McpEnabled && !string.IsNullOrEmpty(cfg.Api.ApiKey);
+        if (cfg.Api.McpEnabled && !mcp)
+            Log.Warning("Api.McpEnabled is true but Api.ApiKey is not set; the MCP endpoint stays off until a key is configured.");
+        if (mcp)
+            builder.Services.AddMcpServer(o => o.ServerInfo = new() { Name = "rPDU2MQTT", Version = AppInfo.Version })
+                // Stateless: every request stands alone, so replicas behind a load balancer need no session affinity.
+                .WithHttpTransport(o => o.Stateless = true)
+                .WithTools(new McpTools(cfg, registry, snapshots, health, mqtt, live, status, history));
+
         app = builder.Build();
         app.MapOpenApi();                       // /openapi/v1.json
         app.MapScalarApiReference();            // /scalar/v1 (docs UI)
@@ -60,8 +73,23 @@ public sealed class ApiService : IHostedService, IAsyncDisposable
 
         MapV1(app);
 
+        if (mcp)
+        {
+            app.UseWhen(ctx => ctx.Request.Path.StartsWithSegments("/mcp"), branch => branch.Use(async (ctx, next) =>
+            {
+                if (!KeyMatches(McpKey(ctx.Request)))
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    await ctx.Response.WriteAsJsonAsync(new { ok = false, message = "Missing or invalid API key." });
+                    return;
+                }
+                await next();
+            }));
+            app.MapMcp("/mcp");
+        }
+
         await app.StartAsync(cancellationToken);
-        Log.Information($"REST API listening on http://*:{cfg.Api.Port} (docs at /scalar/v1).");
+        Log.Information($"REST API listening on http://*:{cfg.Api.Port} (docs at /scalar/v1{(mcp ? ", MCP at /mcp" : "")}).");
     }
 
     private void MapV1(WebApplication app)
@@ -170,13 +198,27 @@ public sealed class ApiService : IHostedService, IAsyncDisposable
         if (string.IsNullOrEmpty(cfg.Api.ApiKey))
             return Results.Json(new { ok = false, message = "Write endpoints are disabled. Set Api.ApiKey to enable control via the API." }, statusCode: StatusCodes.Status403Forbidden);
 
-        var provided = ctx.Request.Headers["X-Api-Key"].ToString();
-        var a = System.Text.Encoding.UTF8.GetBytes(provided);
-        var b = System.Text.Encoding.UTF8.GetBytes(cfg.Api.ApiKey);
-        if (a.Length != b.Length || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(a, b))
+        if (!KeyMatches(ctx.Request.Headers["X-Api-Key"].ToString()))
             return Results.Json(new { ok = false, message = "Missing or invalid X-Api-Key." }, statusCode: StatusCodes.Status401Unauthorized);
 
         return null;
+    }
+
+    private bool KeyMatches(string provided)
+    {
+        if (string.IsNullOrEmpty(cfg.Api.ApiKey)) return false;
+        var a = System.Text.Encoding.UTF8.GetBytes(provided);
+        var b = System.Text.Encoding.UTF8.GetBytes(cfg.Api.ApiKey);
+        return a.Length == b.Length && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(a, b);
+    }
+
+    // claude.ai custom connectors cannot send headers without OAuth, so the key may also ride in the URL.
+    private static string McpKey(HttpRequest req)
+    {
+        var auth = req.Headers.Authorization.ToString();
+        if (auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)) return auth["Bearer ".Length..].Trim();
+        var header = req.Headers["X-Api-Key"].ToString();
+        return !string.IsNullOrEmpty(header) ? header : req.Query["key"].ToString();
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)

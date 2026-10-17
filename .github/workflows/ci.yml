@@ -94,6 +94,11 @@ jobs:
           helm template rpdu2mqtt charts/rpdu2mqtt --set plugins.enabled=true --set kubernetesConfigSource.enabled=true \
             | grep -q 'mountPath: /app/plugins' 
 
+      - name: helm template (httpRoute mcp)
+        run: |
+          helm template rpdu2mqtt charts/rpdu2mqtt --set httpRoute.enabled=true --set httpRoute.mcp=true \
+            --set config.Api.Enabled=true -s templates/httproute.yaml | grep -q 'value: "/mcp"'
+
       - name: helm template (split roles)
         run: |
           out=$(helm template rpdu2mqtt charts/rpdu2mqtt --set split.enabled=true \
