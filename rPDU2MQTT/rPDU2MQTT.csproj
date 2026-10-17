@@ -3,7 +3,7 @@
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 		<TargetFramework>net10.0</TargetFramework>
-		<Version>2.0.0</Version>
+		<Version>2.1.0</Version>
 		<!-- App version shown in GUI / MQTT discovery / heartbeat; overridden via /p:InformationalVersion. -->
 		<InformationalVersion>0.0.0-local</InformationalVersion>
 		<IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
