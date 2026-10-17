@@ -11,8 +11,13 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
+  {{- /* Webhook-defaulted fields are written out so GitOps tools don't report permanent drift. */}}
+  {{- $parents := list }}
+  {{- range .Values.httpRoute.parentRefs }}
+  {{- $parents = append $parents (merge (dict) . (dict "group" "gateway.networking.k8s.io" "kind" "Gateway")) }}
+  {{- end }}
   parentRefs:
-    {{- toYaml .Values.httpRoute.parentRefs | nindent 4 }}
+    {{- toYaml $parents | nindent 4 }}
   {{- with .Values.httpRoute.hostnames }}
   hostnames:
     {{- toYaml . | nindent 4 }}
@@ -20,20 +25,29 @@ spec:
   rules:
     {{- if .Values.httpRoute.rules }}
     {{- toYaml .Values.httpRoute.rules | nindent 4 }}
-    {{- else if .Values.httpRoute.paths }}
-    {{- range .Values.httpRoute.paths }}
+    {{- else }}
+    {{- /* No paths: everything to the GUI Service, unvalidated as before. */}}
+    {{- $paths := .Values.httpRoute.paths | default (list (dict "path" "/" "default" true)) }}
+    {{- if .Values.httpRoute.mcp }}
+    {{- $paths = prepend $paths (dict "path" "/mcp" "service" "api") }}
+    {{- end }}
+    {{- range $paths }}
     {{- $backend := dict "root" $ "service" (default "gui" .service) }}
     - matches:
         - path:
             type: {{ default "PathPrefix" .type }}
             value: {{ .path | quote }}
       backendRefs:
-        - name: {{ include "rpdu2mqtt.backendService" $backend }}
+        - group: ""
+          kind: Service
+          {{- if .default }}
+          name: {{ $fullName }}-gui
+          port: {{ dig "Gui" "Port" 8080 $.Values.config }}
+          {{- else }}
+          name: {{ include "rpdu2mqtt.backendService" $backend }}
           port: {{ include "rpdu2mqtt.backendPort" $backend }}
+          {{- end }}
+          weight: 1
     {{- end }}
-    {{- else }}
-    - backendRefs:
-        - name: {{ $fullName }}-gui
-          port: {{ dig "Gui" "Port" 8080 .Values.config }}
     {{- end }}
 {{- end }}

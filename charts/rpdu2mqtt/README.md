@@ -73,6 +73,7 @@ credentials:
 | `ingress.enabled` | `false` | Expose the GUI and/or REST API via an Ingress. Each `ingress.hosts[].paths[]` entry takes an optional `service:` of `gui` (default) or `api`. |
 | `httpRoute.enabled` | `false` | Expose the GUI and/or REST API via a Gateway API `HTTPRoute` (set `httpRoute.parentRefs`/`hostnames`). Requires the Gateway API CRDs. |
 | `httpRoute.paths` | `[]` | Path-based rules mirroring `ingress`, each with an optional `service:` (`gui`/`api`). Empty routes everything to the GUI. `httpRoute.rules` overrides this with raw rules. |
+| `httpRoute.mcp` | `false` | Add a `/mcp` rule to the API Service, ahead of `httpRoute.paths`. Requires `config.Api.Enabled`; ignored when `httpRoute.rules` is set. |
 | `healthProbes.enabled` | `true` | Liveness/readiness probes against the app's health endpoints. |
 | `networkPolicy.enabled` | `false` | Restrict pod access: GUI/API/metrics ingress only from `networkPolicy.guiIngressFrom` / `apiIngressFrom` / `metricsIngressFrom`; health probes always allowed. Optionally restrict egress with `restrictEgress` + `egress`. Requires a NetworkPolicy-enforcing CNI. |
 | `serviceAccount.create` | `true` | Create a ServiceAccount. |

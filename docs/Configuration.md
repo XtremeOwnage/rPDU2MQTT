@@ -790,6 +790,7 @@ Api:
   `get_history` (needs `History.Enabled`). None of them change state.
 - The key also unlocks the control endpoints above. `/api/v1` reads stay unauthenticated, so when exposing
   `/mcp` publicly, route only `/mcp` through the reverse proxy.
+- Helm: `httpRoute.mcp: true` adds a `/mcp` rule to the API Service on the chart's HTTPRoute.
 
 Claude (claude.ai, desktop, mobile): **Settings > Connectors > Add custom connector**, URL
 `https://<your-host>/mcp?key=<key>`.
