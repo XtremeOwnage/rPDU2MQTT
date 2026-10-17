@@ -66,6 +66,15 @@ export function rangeSpan(r: SharedRange): { day: string; time: string; days: nu
   return null;
 }
 
+/// For a page that shows one moment: the time picked, or the end of the day (now, for today); null for live.
+/// `minutes` is how far back the range reaches, for a timeline around it.
+export function rangeMoment(r: SharedRange, now: number = Date.now()): { at: number; day: string; minutes: number } | null {
+  const span = rangeSpan(r);
+  if (!span) return null;
+  const end = new Date(`${span.day}T${span.time || '23:59:59'}`).getTime();
+  return { at: Math.min(now, end), day: span.day, minutes: span.days * 1440 };
+}
+
 /// How the range reads on the header button.
 export function rangeLabel(r: SharedRange): string {
   if (r.kind === 'live') return 'Live';

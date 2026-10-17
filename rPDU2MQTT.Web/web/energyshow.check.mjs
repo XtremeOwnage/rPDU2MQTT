@@ -180,8 +180,15 @@ await new Promise(r => setTimeout(r, 300));
 const ovHeads = query(getEl('sections'), 'h3', true).filter(h => query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'))?.contains(h)).map(h => h.textContent);
 if (!ovHeads.some(h => /Aug 3, 2026/.test(h)) || ovHeads.includes('Today so far'))
   fail(`the Overview does not follow the header's time: ${ovHeads.join(' | ')}`);
-// …and a data page that cannot show the past says so, rather than live readings under a header naming another day.
+// …Node Data shows its point in time, with no banner…
 query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Node Data').click();
+await new Promise(r => setTimeout(r, 100));
+const ndSec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
+if (query(ndSec, 'div', true).some(d => cn(d).includes('range-banner'))) fail('Node Data says it is live only, though it shows the past');
+const ndPast = query(ndSec, 'label', true).find(l => /Point in time/.test(l.textContent));
+if (!ndPast || !query(ndPast, 'input', true)[0]?.checked) fail('Node Data does not follow the header\'s time');
+// …and a data page that cannot show the past says so, rather than live readings under a header naming another day.
+query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Roll-up').click();
 await new Promise(r => setTimeout(r, 100));
 const activeSec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
 if (!query(activeSec, 'div', true).some(d => cn(d).includes('range-banner'))) fail('a live-only data page carries no banner while a past time is picked');

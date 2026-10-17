@@ -1558,6 +1558,15 @@ function rangeSpan(r             )                                              
   return null;
 }
 
+/// For a page that shows one moment: the time picked, or the end of the day (now, for today); null for live.
+/// `minutes` is how far back the range reaches, for a timeline around it.
+function rangeMoment(r             , now         = Date.now())                                                      {
+  const span = rangeSpan(r);
+  if (!span) return null;
+  const end = new Date(`${span.day}T${span.time || '23:59:59'}`).getTime();
+  return { at: Math.min(now, end), day: span.day, minutes: span.days * 1440 };
+}
+
 /// How the range reads on the header button.
 function rangeLabel(r             )         {
   if (r.kind === 'live') return 'Live';
@@ -10835,12 +10844,28 @@ function addNodeDataSection(nav     , sections     ) {
   filter.oninput = draw;
   onlyProblems.onchange = draw;
   tagSel.onchange = () => { tag = tagSel.value; remember(TAG_KEY, tag); draw(); };
-  pastOn.onchange = () => { at = null; syncPast(); refreshAll(); };
+  pastOn.onchange = () => {
+    at = null; syncPast();
+    // Back to live here is back to live in the header too, so the two never name different times.
+    if (!pastOn.checked && currentRange().kind !== 'live') setRange(LIVE); else refreshAll();
+  };
   windowSel.onchange = () => loadStrip();
   dayIn.onchange = () => { at = null; loadStrip(); };
   // Ages tick even when nothing new arrives — a row going stale is itself the event worth seeing.
   liveWhileActive(sec, () => 'flow:realpower', () => { if (!past()) load(); });
   setInterval(() => { if (sec.classList.contains('active') && !past() && !realtimeLive()) load(); }, 10000);
+  // The header's time: its moment on a timeline reaching back as far as the range does.
+  followRange(sec, r => {
+    const m = rangeMoment(r);
+    pastOn.checked = !!m;
+    if (m) {
+      dayIn.value = m.day;
+      windowSel.value = String((NODE_DATA_WINDOWS.find(([w]) => w >= m.minutes) || NODE_DATA_WINDOWS[NODE_DATA_WINDOWS.length - 1])[0]);
+      at = m.at;
+    } else at = null;
+    syncPast();
+    refreshAll();
+  });
   syncPast();
   link.onclick = () => { activate(link, sec); refreshAll(); };
   return link;
@@ -14052,6 +14077,7 @@ async function loadPluginPages() {
 
 const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection, timelineStrip, stepToFit,
   openSheet, closeSheet, svgEl, formatMeasure, sparkline, analyse, circuitSession, searchSelect, makeMenu,
+  followRange, rangeMoment, goLive: () => setRange(LIVE),
   temp: { unit: tempUnit, to: toTemp, from: fromTemp, fmt: fmtTemp } });
 
 function pluginPageTool(p            ) {
@@ -14074,7 +14100,15 @@ function pluginPageTool(p            ) {
         sec.append(el('h2', { text: p.title }), el('div', { class: 'desc', text: `${p.title} could not be loaded: ${e?.message || e}` }));
       }
     };
-    link.onclick = async () => { activate(link, sec); await mount(); page?.show?.(); };
+    link.onclick = async () => {
+      activate(link, sec);
+      const first = !page;
+      await mount();
+      // A page mounted just now missed the activation: let it pick up the header's time, and drop the
+      // "live only" banner if it follows that time.
+      if (first) try { window.dispatchEvent?.(new CustomEvent('rpdu:activate')); } catch { /* no CustomEvent */ }
+      page?.show?.();
+    };
     return { link, sec };
   };
 }
