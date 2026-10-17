@@ -163,6 +163,13 @@ public static class FlowGraphBuilder
                 if (!explicitlyFed.Contains(outletId))
                     AddEdge(pduId, outletId);
             }
+
+            // The PDU's own meter, for an instantaneous metric: the outlets' rounded readings and the unit's own
+            // draw fall short of it, and that shortfall is what the PDU feeds beyond its outlets. Counters stay
+            // the outlets' roll-up — the unit's lifetime counter does not share their epoch.
+            if (live is not { Exclusive: true } && label.ContainsKey(pduId) && FlowUnits.Epoch(metric) == "instant"
+                && RootMeasurement(device, metric) is { } own && own >= 0)
+                leaf[pduId] = own;
         }
 
         // Custom upstream nodes (#129).
@@ -191,6 +198,18 @@ public static class FlowGraphBuilder
                     leaf[n.Id] = n.Value.Value;
             }
 
+        // Breakers are named before the links are read, so a device wired to a breaker no channel measures
+        // (breaker:panel:number) has that breaker to hang from.
+        var breakers = PanelNodes.For(flow, new HashSet<string>(label.Keys, StringComparer.OrdinalIgnoreCase));
+        foreach (var b in breakers)
+            if (b.Derived && !label.ContainsKey(b.Id))
+            {
+                label[b.Id] = b.Label;
+                kind[b.Id] = "breaker";
+                var breakerTags = AutoTags.For(flow.AutoTags, b.Id);
+                if (breakerTags.Count > 0) tags[b.Id] = breakerTags.ToList();
+            }
+
         // Custom directed links (From feeds To) plus legacy Parents (parent feeds child).
         var wiredEdges = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         static string EdgeKey(string from, string to) => from + "␟" + to;
@@ -207,15 +226,8 @@ public static class FlowGraphBuilder
         // A breaker whose legs are not all reading is left unknown rather than summed from the legs that are —
         // half of a 240 V circuit is not the circuit.
         var breakerUnknown = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var b in PanelNodes.For(flow, new HashSet<string>(label.Keys, StringComparer.OrdinalIgnoreCase)))
+        foreach (var b in breakers)
         {
-            if (b.Derived && !label.ContainsKey(b.Id))
-            {
-                label[b.Id] = b.Label;
-                kind[b.Id] = "breaker";
-                var breakerTags = AutoTags.For(flow.AutoTags, b.Id);
-                if (breakerTags.Count > 0) tags[b.Id] = breakerTags.ToList();
-            }
             // A channel named after itself takes the name of the breaker measuring it: "n30_1_5" is an input
             // number, not a circuit. A name someone has given it is left alone.
             if (!b.Derived && !string.IsNullOrWhiteSpace(b.Chain.Breaker.Description)
@@ -679,5 +691,17 @@ public static class FlowGraphBuilder
 
         static string BaseOf(string id) => id.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal) ? id[..^FlowMetricKey.InSuffix.Length] : id;
         string KindOf(string id) => kind.TryGetValue(BaseOf(id), out var bk) ? bk : kind.TryGetValue(id, out var k2) ? k2 : "node";
+    }
+
+    /// <summary>The device's whole-unit reading for <paramref name="metric"/>: its root entity, as laid out by the PDU.</summary>
+    private static double? RootMeasurement(Models.PDU.Device device, string metric)
+    {
+        var root = device.Layout is not null && device.Layout.TryGetValue(0, out var top) && top.Length > 0
+            ? top[0].Split('/', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).LastOrDefault()
+            : null;
+        var entity = root is null ? null : device.Entity.FirstOrDefault(e => e.Key == root);
+        var m = entity?.Measurements.FirstOrDefault(x => string.Equals(x.Type, metric, StringComparison.OrdinalIgnoreCase));
+        return m is not null && double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v)
+            ? v : null;
     }
 }

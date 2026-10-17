@@ -133,6 +133,20 @@ public class PanelNodeTests
     }
 
     [Fact]
+    public void ADeviceWiredToABreakerNobodyMeasures_HangsBeneathIt()
+    {
+        var flow = Wiring();
+        flow.Panels[0].Breakers.Add(new BreakerConfig { Slot = 8, Number = "B08", Description = "Bathroom", State = BreakerState.Identified });
+        flow.Nodes.Add(new() { Id = "fan", Kind = "load" });
+        flow.Links.Add(new() { From = "breaker:main_panel:B08", To = "fan" });
+
+        var g = Build(flow, new() { ["ch5|realpower"] = 240, ["fan|realpower"] = 100 });
+
+        Assert.Contains(g.Links, l => l.Source == "breaker:main_panel:B08" && l.Target == "fan" && l.Value == 100);
+        Assert.Contains(g.Links, l => l.Source == "main" && l.Target == "breaker:main_panel:B08");
+    }
+
+    [Fact]
     public void ABreakerWhoseChannelIsNotANode_KeepsATierOfItsOwn_RatherThanVanishing()
     {
         var flow = Wiring();

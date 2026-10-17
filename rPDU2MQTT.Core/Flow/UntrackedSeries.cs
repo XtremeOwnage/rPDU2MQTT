@@ -32,18 +32,21 @@ public static class UntrackedSeries
     /// are left as recorded. Siblings come from the graph's edges, so a panel's breakers count as they do on
     /// the diagram.
     /// </summary>
-    public static IReadOnlyList<Plan> For(FlowGraph graph)
+    public static IReadOnlyList<Plan> For(FlowGraph graph) => For(graph, graph.Untracked);
+
+    /// <summary>As <see cref="For(FlowGraph)"/>, for the given slices — residual nodes take a parent's spare too.</summary>
+    public static IReadOnlyList<Plan> For(FlowGraph graph, IReadOnlySet<string> slices)
     {
         var plans = new List<Plan>();
-        foreach (var node in graph.Nodes.Select(n => n.Id).Where(graph.Untracked.Contains))
+        foreach (var node in graph.Nodes.Select(n => n.Id).Where(slices.Contains))
         {
             var feeders = graph.Edges.Where(e => Ids.Equals(e.Target, node)).Select(e => e.Source).Distinct(Ids).ToList();
             if (feeders is not [var parent]) continue;
             // A return lane or an unmetered remainder is the builder's own, not a child the parent feeds.
             var siblings = graph.Edges.Where(e => Ids.Equals(e.Source, parent) && !e.Target.Contains('#'))
                 .Select(e => e.Target).Distinct(Ids).ToList();
-            if (siblings.Count(graph.Untracked.Contains) != 1) continue;
-            plans.Add(new Plan(node, parent, siblings.Where(c => !graph.Untracked.Contains(c)).ToList()));
+            if (siblings.Count(slices.Contains) != 1) continue;
+            plans.Add(new Plan(node, parent, siblings.Where(c => !slices.Contains(c)).ToList()));
         }
         return plans;
     }

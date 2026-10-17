@@ -36,6 +36,8 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
     private readonly HashSet<string> retiredByFilter = new();
     /// <summary>What has already been published for each lifetime counter, so none of them goes backwards.</summary>
     private readonly Core.Flow.CumulativeExport cumulative;
+    /// <summary>Running totals for untracked and residual slices, whose roll-up is a difference of counters.</summary>
+    private readonly Core.Flow.UntrackedCounter untracked = new();
     /// <summary>Keys already reported as withheld, so a stuck contributor is said once and not every pass.</summary>
     private readonly HashSet<string> saidWithheld = new();
 
@@ -109,6 +111,14 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             .Select(n => n.Id)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        // Slices of a parent's spare: their energy is accumulated from the members' rises, not their difference.
+        var slices = new HashSet<string>(graph.Untracked, StringComparer.OrdinalIgnoreCase);
+        foreach (var n in flow.Nodes)
+            if (!string.IsNullOrEmpty(n.Id) && string.Equals((n.Mode ?? "").Trim(), "residual", StringComparison.OrdinalIgnoreCase))
+                slices.Add(n.Id);
+        var slicePlans = UntrackedSeries.For(graph, slices).ToDictionary(p => p.Node, StringComparer.OrdinalIgnoreCase);
+        double? EnergyOf(string id) => FlowExport.TryNodeValue(energyGraph, id, out var v) ? v : null;
+
         var tagFilter = flow.MqttExportTags;
         var published = 0;
 
@@ -146,7 +156,9 @@ public sealed class MqttIntegration : IIntegration, IMeasurementDestination, ICo
             double? energy = !periodsReady ? null
                 : live is not null && live.TryGetValue(node.Id, FlowMetricKey.OwnEnergyTotal, out var own)
                     ? cumulative.Continue($"{node.Id}|energy", own)
-                    : cumulative.Publish($"{node.Id}|energy", FlowExport.TryNodeValue(energyGraph, node.Id, out var e) ? e : null);
+                : slicePlans.TryGetValue(node.Id, out var slice)
+                    ? cumulative.Continue($"{node.Id}|energy", untracked.Advance(slice, EnergyOf))
+                    : cumulative.Publish($"{node.Id}|energy", EnergyOf(node.Id));
             // Only feeders that are themselves being exported.
             var parents = FlowExport.Parents(graph, node.Id)
                 .Where(pid => graph.Nodes.FirstOrDefault(n => string.Equals(n.Id, pid, StringComparison.OrdinalIgnoreCase)) is not { } pn

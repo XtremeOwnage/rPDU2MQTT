@@ -64,6 +64,18 @@ public class UntrackedSeriesTests
     }
 
     [Fact]
+    public void AResidualSlice_IsPlannedWhenNamedAsOne()
+    {
+        var flow = SubPanel();
+        flow.Nodes.Single(n => n.Id == "sub_untracked").Mode = "residual";
+        var graph = Graph(flow);
+
+        Assert.Empty(UntrackedSeries.For(graph));
+        var plan = Assert.Single(UntrackedSeries.For(graph, new HashSet<string>(["sub_untracked"])));
+        Assert.Equal("sub", plan.Parent);
+    }
+
+    [Fact]
     public void TwoUntrackedChildrenOfOneParentAreLeftAsRecorded()
     {
         var flow = SubPanel();

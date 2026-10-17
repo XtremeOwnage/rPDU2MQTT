@@ -39,6 +39,39 @@ public class FlowGraphTests
         Assert.All(graph.Links, l => Assert.Equal("pdu:pdu1", l.Source));
     }
 
+    private static PduData MeteredPdu(string total, params Outlet[] outlets)
+    {
+        var data = OnePdu(outlets);
+        var device = data.Devices[0];
+        device.Layout = new Dictionary<int, string[]> { [0] = ["entity/phase0"] };
+        var root = new Entity { Key = "phase0" };
+        root.Measurements.Add(new Measurement { Type = "realpower", Value = total, Units = "W" });
+        root.Measurements.Add(new Measurement { Type = "energy", Value = "8000", Units = "kWh" });
+        device.Entity.Add(root);
+        return data;
+    }
+
+    [Fact]
+    public void Build_APduReadsItsOwnMeter_AndWhatItsOutletsMissIsUnmeasured()
+    {
+        var graph = FlowGraphBuilder.Build(MeteredPdu("304",
+            Outlet(0, "Outlet 1", "realpower", "200"),
+            Outlet(1, "Outlet 2", "realpower", "70")));
+
+        Assert.Equal(304, graph.Nodes.Single(n => n.Id == "pdu:pdu1").Value);
+        Assert.Equal(304, graph.Links.Where(l => l.Source == "pdu:pdu1").Sum(l => l.Value), 3);
+    }
+
+    [Fact]
+    public void Build_APdusLifetimeCounter_IsNotMixedWithItsOutletsCounters()
+    {
+        var graph = FlowGraphBuilder.Build(MeteredPdu("304",
+            Outlet(0, "Outlet 1", "energy", "500", "kWh"),
+            Outlet(1, "Outlet 2", "energy", "250", "kWh")), metric: "energy");
+
+        Assert.Equal(750, graph.Nodes.Single(n => n.Id == "pdu:pdu1").Value);
+    }
+
     [Fact]
     public void Build_KeepsAMeasuredZero_AttachedToItsPdu()
     {
