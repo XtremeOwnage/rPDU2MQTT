@@ -734,7 +734,8 @@ the GUI. Off by default. Unauthenticated.
 Api:
   Enabled: false        # default
   Port: 8082            # default
-  ApiKey: ""            # set to enable the control endpoints
+  ApiKey: ""            # set to enable the control endpoints and /mcp
+  McpEnabled: false     # default; see "MCP endpoint" below
 ```
 
 - `ApiKey` env var: **`RPDU2MQTT_API_KEY`** or `RPDU2MQTT_API_KEY_FILE`.
@@ -769,6 +770,34 @@ Enabled only when `Api.ApiKey` is set. Requirements:
 curl -X POST -H "X-Api-Key: $KEY" -H "Content-Type: application/json" \
   -d '{"action":"reboot"}' \
   http://rpdu2mqtt:8082/api/v1/instances/default/outlets/DEVICE/0/control
+```
+
+### MCP endpoint (opt-in)
+
+A read-only [Model Context Protocol](https://modelcontextprotocol.io/) server at `/mcp` on the API port
+(streamable HTTP, stateless), so an AI assistant such as Claude can query the bridge.
+
+```yaml
+Api:
+  Enabled: true
+  ApiKey: "a-long-random-string"   # required for /mcp
+  McpEnabled: true
+```
+
+- Stays off, with a warning, until `Api.ApiKey` is set.
+- Auth: `Authorization: Bearer <key>`, `X-Api-Key: <key>`, or `?key=<key>` in the URL.
+- Tools: `list_instances`, `get_health`, `get_status`, `list_snapshots`, `get_readings`, `get_flow`,
+  `get_history` (needs `History.Enabled`). None of them change state.
+- The key also unlocks the control endpoints above. `/api/v1` reads stay unauthenticated, so when exposing
+  `/mcp` publicly, route only `/mcp` through the reverse proxy.
+
+Claude (claude.ai, desktop, mobile): **Settings > Connectors > Add custom connector**, URL
+`https://<your-host>/mcp?key=<key>`.
+
+Claude Code:
+
+```bash
+claude mcp add --transport http rpdu2mqtt https://<your-host>/mcp --header "Authorization: Bearer <key>"
 ```
 
 ### Setting labels

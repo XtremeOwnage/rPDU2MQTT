@@ -20,4 +20,8 @@ public class ApiConfig
     [DefaultValue(null)]
     [Description("Optional API key enabling the write/control endpoints (or set RPDU2MQTT_API_KEY). When unset, the API is read-only; when set, control requests must send a matching 'X-Api-Key' header. Reads stay open (trusted-network).")]
     public string? ApiKey { get; set; } = null;
+
+    [DefaultValue(false)]
+    [Description("Serve a read-only MCP (Model Context Protocol) endpoint at /mcp on the API port, so AI assistants can query instances, readings, flow and history. Requires Api.ApiKey; clients send it as a Bearer token, an 'X-Api-Key' header, or a 'key' query parameter.")]
+    public bool McpEnabled { get; set; } = false;
 }
