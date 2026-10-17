@@ -92,6 +92,11 @@ vm.runInContext("state.data.Gui = { TemperatureUnits: 'celsius' }", sandbox);
 button('Temp').onclick();
 if (!/40 °C/.test(tiles('pv_a')[0].textContent)) fail(`a temperature is not shown in °C: ${tiles('pv_a')[0].textContent}`);
 vm.runInContext('delete state.data.Gui', sandbox);
+// Deviation: each panel against its string's average (300, 310, 120 W reporting; 243.3 W).
+button('Deviation').onclick();
+if (!/\+23\.3 %/.test(tiles('pv_a')[0].textContent)) fail(`a panel's deviation from its string is not shown: ${tiles('pv_a')[0].textContent}`);
+if (!/−50\.7 %/.test(tiles('pv_a')[2].textContent)) fail(`a panel under its string is not shown negative: ${tiles('pv_a')[2].textContent}`);
+if (!tiles('pv_a')[2].classList.contains('is-low') || !tiles('pv_a')[0].classList.contains('is-high')) fail('a panel well off its string’s average is not flagged');
 button('Power').onclick();
 
 // History: the timeline picks a moment; unticking returns to live.

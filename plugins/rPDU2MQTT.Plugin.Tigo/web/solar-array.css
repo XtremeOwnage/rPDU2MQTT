@@ -48,6 +48,10 @@
 .sa-bar { margin-top:auto; height:3px; border-radius:2px; background:rgba(255,255,255,.1); overflow:hidden; }
 .sa-bar > i { display:block; height:100%; background:#f5c542; }
 .sa-panel.is-low .sa-bar > i { background:var(--warn); }
+.sa-panel.is-high { border-color:var(--accent); }
+.sa-panel.is-high .sa-bar > i { background:var(--accent); }
+.sa-bar.is-dev { position:relative; }
+.sa-bar.is-dev::before { content:''; position:absolute; left:50%; top:0; bottom:0; width:1px; background:rgba(255,255,255,.45); }
 .sa-panel.is-quiet .sa-bar { visibility:hidden; }
 .sa-panel input.sa-panel-name { position:relative; z-index:1; width:100%; min-width:0; height:26px; margin-top:4px; padding:2px 6px; font-size:12px; }
 .sa-panel-edit { display:grid; grid-template-columns:1fr 1fr; gap:4px; align-items:center; margin-top:4px; position:relative; z-index:1; }

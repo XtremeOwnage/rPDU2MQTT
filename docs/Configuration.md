@@ -1169,7 +1169,7 @@ Per connection:
 
 **Solar Array page** (Energy Flow → **Solar Array**):
 
-- Strings with their panels in wiring order. Each panel shows Power, Volts, Amps or Temp.
+- Strings with their panels in wiring order. Each panel shows Power, Volts, Amps, Temp, or Deviation: its power against its string's average, flagged at 5 % either way.
 - Marked: low panels (power under 0.75× the string median) and quiet panels.
 - Click a panel: its history.
 - **Point in time** (needs `History.Enabled`): a timeline of the strings over 1 hour to 7 days, ending today or a picked day; click or drag on it to show every panel and string as recorded then.

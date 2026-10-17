@@ -11,7 +11,12 @@ const SA_SHOWS                             = [
   ['vin', 'Volts', 'voltage'],
   ['iin', 'Amps', 'current'],
   ['temp', 'Temp', 'temperature'],
+  ['dev', 'Deviation', 'realpower'],
 ];
+/// Deviation mode: a panel this far off its string's average is flagged.
+const SA_DEV_FLAG = 5;
+/// Panel power vs the string's average, in percent.
+const deviationOf = (power        , mean        ) => mean > 0 ? (power - mean) / mean * 100 : 0;
 
 const saFlow = () => ensure(state.data, 'EnergyFlow', {});
 const saNodes = ()        => ensure(saFlow(), 'Nodes', []);
@@ -369,33 +374,41 @@ function mount(sec     , host     ) {
   const fmt = (o     , key        ) => o == null ? '—'
     : key === 'power' ? `${Math.round(o.power)} W` : key === 'vin' ? `${o.vin.toFixed(1)} V`
     : key === 'iin' ? `${o.iin.toFixed(2)} A` : temp.fmt(o.temp);
+  const fmtDev = (d        ) => `${d > 0.05 ? '+' : d < -0.05 ? '−' : ''}${Math.abs(d).toFixed(1)} %`;
   const short = (o     , key        ) => key === 'power' ? `${Math.round(o.power)}W` : key === 'vin' ? `${o.vin.toFixed(1)}V` : `${o.iin.toFixed(1)}A`;
   const stale = (o     ) => !o || o.ageSeconds > (snap?.staleSeconds ?? 180);
   const changed = () => { syncGroups(); refreshDirty(); render(); };
 
-  const tile = (panelId        , stringId        , scale                                 ) => {
+  const tile = (panelId        , stringId        , scale                                               ) => {
     const node = saNode(panelId);
     const serial = serialOf(node);
     const o = readingOf(panelId);
     const quiet = stale(o);
     const t = el('div', { class: 'sa-panel' + (quiet ? ' is-quiet' : '') });
     t.dataset.node = panelId;
-    const value = o && !quiet ? (show === 'power' ? o.power : show === 'vin' ? o.vin : show === 'iin' ? o.iin : o.temp) : 0;
+    const dev = show === 'dev' && !quiet ? deviationOf(o.power, scale.mean) : null;
+    const value = o && !quiet ? (show === 'power' || show === 'dev' ? o.power : show === 'vin' ? o.vin : show === 'iin' ? o.iin : o.temp) : 0;
     const frac = scale.max > 0 ? Math.max(0, Math.min(1, value / scale.max)) : 0;
     t.style.setProperty?.('--sa-fill', String(frac));
     if (!quiet && show === 'power' && scale.median > 20 && o.power < 0.75 * scale.median) t.classList.add('is-low');
-    const [num, unit] = quiet ? ['—', ''] : fmt(o, show).split(' ');
+    if (dev != null && scale.mean > 20 && Math.abs(dev) >= SA_DEV_FLAG) t.classList.add(dev < 0 ? 'is-low' : 'is-high');
+    const [num, unit] = quiet ? ['—', ''] : dev != null ? fmtDev(dev).split(' ') : fmt(o, show).split(' ');
     const others = quiet ? (o ? 'quiet' : 'not heard')
-      : SA_SHOWS.filter(([k]) => k !== show && k !== 'temp').slice(0, 2).map(([k]) => short(o, k)).join(' ');
+      : SA_SHOWS.filter(([k]) => k !== show && k !== 'temp' && k !== 'dev').slice(0, 2).map(([k]) => short(o, k)).join(' ');
     t.append(
       el('div', { class: 'sa-panel-label', text: node?.Label || panelId }),
       el('div', { class: 'sa-panel-value' }, num + (unit ? ' ' : ''), el('span', { class: 'sa-unit', text: unit })),
       el('div', { class: 'sa-panel-sub', text: others }));
     if (editing || !o) t.append(el('div', { class: 'sa-panel-serial', text: serial || '' }));
     // A tile never heard shows its serial where the bar would be, at the height of the others.
-    if (editing || o) t.append(el('div', { class: 'sa-bar' }, el('i', { style: { width: `${Math.round(frac * 100)}%` } })));
+    // Deviation draws from the middle: right of centre above the string's average, left below; the ends are ±20 %.
+    const bar = dev != null
+      ? el('i', { style: { width: `${Math.round(Math.min(Math.abs(dev), 20) / 20 * 50)}%`, marginLeft: `${dev < 0 ? 50 - Math.round(Math.min(-dev, 20) / 20 * 50) : 50}%` } })
+      : el('i', { style: { width: `${Math.round(frac * 100)}%` } });
+    if (editing || o) t.append(el('div', { class: 'sa-bar' + (dev != null ? ' is-dev' : '') }, bar));
     const type = saTypes().find(x => x.Id === typeOf(node));
     t.title = `${node?.Label || panelId} · optimizer ${serial}` + (type ? ` · ${saTypeName(type)}` : '')
+      + (dev != null ? ` · ${fmtDev(dev)} vs the string's average of ${Math.round(scale.mean)} W` : '')
       + (o ? ` · reported ${Math.round(o.ageSeconds)} s ago` : ' · not heard on the bus');
 
     if (editing) {
@@ -471,7 +484,7 @@ function mount(sec     , host     ) {
     array.classList.toggle('is-editing', editing);
     const strings = stringsOf();
     const all = (at ? Object.values(hist) : snap?.optimizers || []).filter((o     ) => !stale(o));
-    const valueOf = (o     ) => show === 'power' ? o.power : show === 'vin' ? o.vin : show === 'iin' ? o.iin : o.temp;
+    const valueOf = (o     ) => show === 'power' || show === 'dev' ? o.power : show === 'vin' ? o.vin : show === 'iin' ? o.iin : o.temp;
     const max = all.reduce((m        , o     ) => Math.max(m, valueOf(o)), 0);
     const placed = strings.flatMap(st => panelsOf(st.Id));
     const placedLive = placed.map(readingOf).filter((o     ) => o && !stale(o));
@@ -486,6 +499,7 @@ function mount(sec     , host     ) {
       const watts = readings.reduce((sum        , o     ) => sum + o.power, 0);
       const sorted = readings.map((o     ) => o.power).sort((a        , b        ) => a - b);
       const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+      const mean = readings.length ? watts / readings.length : 0;
       const volts = readings.some((o     ) => o.vout != null) ? readings.reduce((sum        , o     ) => sum + (o.vout || 0), 0) : null;
 
       const card = el('div', { class: 'sa-string' + (isHidden(s) ? ' is-string-hidden' : '') });
@@ -565,7 +579,7 @@ function mount(sec     , host     ) {
 
       const row = el('div', { class: 'sa-panels' });
       row.style.setProperty?.('--sa-cols', String(colsOf(s.Id)));
-      panels.forEach(id => row.appendChild(tile(id, s.Id, { max, median })));
+      panels.forEach(id => row.appendChild(tile(id, s.Id, { max, median, mean })));
       for (let i = 0; i < (extra.Panels || 0); i++)
         row.appendChild(el('div', { class: 'sa-panel is-untracked', title: 'No optimizer' },
           el('div', { class: 'sa-panel-label', text: `#${panels.length + i + 1}` }),
