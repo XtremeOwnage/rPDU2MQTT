@@ -61,7 +61,7 @@ public sealed class ApiService : IHostedService, IAsyncDisposable
         if (cfg.Api.McpEnabled && !mcp)
             Log.Warning("Api.McpEnabled is true but Api.ApiKey is not set; the MCP endpoint stays off until a key is configured.");
         if (mcp)
-            builder.Services.AddMcpServer(o => o.ServerInfo = new() { Name = "rPDU2MQTT", Version = typeof(ApiService).Assembly.GetName().Version?.ToString() ?? "0" })
+            builder.Services.AddMcpServer(o => o.ServerInfo = new() { Name = "rPDU2MQTT", Version = AppInfo.Version })
                 // Stateless: every request stands alone, so replicas behind a load balancer need no session affinity.
                 .WithHttpTransport(o => o.Stateless = true)
                 .WithTools(new McpTools(cfg, registry, snapshots, health, mqtt, live, status, history));
