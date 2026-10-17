@@ -163,6 +163,13 @@ public static class FlowGraphBuilder
                 if (!explicitlyFed.Contains(outletId))
                     AddEdge(pduId, outletId);
             }
+
+            // The PDU's own meter, for an instantaneous metric: the outlets' rounded readings and the unit's own
+            // draw fall short of it, and that shortfall is what the PDU feeds beyond its outlets. Counters stay
+            // the outlets' roll-up — the unit's lifetime counter does not share their epoch.
+            if (live is not { Exclusive: true } && label.ContainsKey(pduId) && FlowUnits.Epoch(metric) == "instant"
+                && RootMeasurement(device, metric) is { } own && own >= 0)
+                leaf[pduId] = own;
         }
 
         // Custom upstream nodes (#129).
@@ -684,5 +691,17 @@ public static class FlowGraphBuilder
 
         static string BaseOf(string id) => id.EndsWith(FlowMetricKey.InSuffix, StringComparison.Ordinal) ? id[..^FlowMetricKey.InSuffix.Length] : id;
         string KindOf(string id) => kind.TryGetValue(BaseOf(id), out var bk) ? bk : kind.TryGetValue(id, out var k2) ? k2 : "node";
+    }
+
+    /// <summary>The device's whole-unit reading for <paramref name="metric"/>: its root entity, as laid out by the PDU.</summary>
+    private static double? RootMeasurement(Models.PDU.Device device, string metric)
+    {
+        var root = device.Layout is not null && device.Layout.TryGetValue(0, out var top) && top.Length > 0
+            ? top[0].Split('/', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).LastOrDefault()
+            : null;
+        var entity = root is null ? null : device.Entity.FirstOrDefault(e => e.Key == root);
+        var m = entity?.Measurements.FirstOrDefault(x => string.Equals(x.Type, metric, StringComparison.OrdinalIgnoreCase));
+        return m is not null && double.TryParse(m.Value, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v)
+            ? v : null;
     }
 }
