@@ -3,6 +3,7 @@ import { activate, api, btn, closeSheet, el, ensure, formatMeasure, navLink, ope
 import { state } from './state.js';
 import { refreshDirty } from './dirty.js';
 import { saveConfig } from './sections/flow.js';
+import { followRange, rangeMoment, setRange, LIVE } from './history-control.js';
 import { openHistorySheet } from './history-sheet.js';
 import { busyInSection } from './realtime.js';
 import { timelineStrip } from './sections/timeline.js';
@@ -33,6 +34,7 @@ export async function loadPluginPages() {
 
 const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection, timelineStrip, stepToFit,
   openSheet, closeSheet, svgEl, formatMeasure, sparkline, analyse, circuitSession, searchSelect, makeMenu,
+  followRange, rangeMoment, goLive: () => setRange(LIVE),
   temp: { unit: tempUnit, to: toTemp, from: fromTemp, fmt: fmtTemp } });
 
 export function pluginPageTool(p: PluginPage) {
@@ -55,7 +57,15 @@ export function pluginPageTool(p: PluginPage) {
         sec.append(el('h2', { text: p.title }), el('div', { class: 'desc', text: `${p.title} could not be loaded: ${e?.message || e}` }));
       }
     };
-    link.onclick = async () => { activate(link, sec); await mount(); page?.show?.(); };
+    link.onclick = async () => {
+      activate(link, sec);
+      const first = !page;
+      await mount();
+      // A page mounted just now missed the activation: let it pick up the header's time, and drop the
+      // "live only" banner if it follows that time.
+      if (first) try { window.dispatchEvent?.(new CustomEvent('rpdu:activate')); } catch { /* no CustomEvent */ }
+      page?.show?.();
+    };
     return { link, sec };
   };
 }

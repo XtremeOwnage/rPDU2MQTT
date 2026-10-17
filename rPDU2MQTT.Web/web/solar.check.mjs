@@ -1,7 +1,7 @@
 // Solar Array page check.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { makeDom, query } from './domstub.mjs';
+import { makeDom, query, pickRange } from './domstub.mjs';
 
 const code = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
 const page = (f) => readFile(new URL('../../plugins/rPDU2MQTT.Plugin.Tigo/wwwroot/solar-array.' + f, import.meta.url), 'utf8');
@@ -107,6 +107,18 @@ pastOn.checked = false;
 pastOn.onchange({});
 await wait(30);
 if (!/300 W/.test(tiles('pv_a')[0].textContent)) fail('unticking does not return to live values');
+// The header's time is followed too, with no "live only" banner; Back to live there returns here.
+await pickRange(getEl, { day: '2026-01-01', time: '11:30' });
+if (!pastOn.checked) fail('a time picked in the header does not tick Point in time');
+if (!/112 W/.test(tiles('pv_a')[0].textContent)) fail(`the header's time does not show recorded values: ${tiles('pv_a')[0].textContent}`);
+if (query(sec, 'div', true).some(d => String(d.className || '').includes('range-banner'))) fail('the page says it is live only, though it shows the past');
+await pickRange(getEl, { live: true });
+if (pastOn.checked || !/300 W/.test(tiles('pv_a')[0].textContent)) fail('Back to live in the header does not return the page to live');
+await pickRange(getEl, { day: '2026-01-01', time: '11:30' });
+pastOn.checked = false;
+pastOn.onchange({});
+await wait(30);
+if (vm.runInContext('currentRange().kind', sandbox) !== 'live') fail('unticking Point in time leaves the header on a past time');
 
 // Adopting an optimizer.
 const loose = query(sec, '.sa-loose-row', true);

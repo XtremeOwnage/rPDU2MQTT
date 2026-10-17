@@ -304,7 +304,12 @@ export default function mount(sec: any, host: any) {
     strip?.set({ from: keep, to: keep });
     goTo(new Date(keep));
   };
-  pastOn.onchange = () => { if (pastOn.checked) loadStrip(); else goTo(null); syncTime(); };
+  pastOn.onchange = () => {
+    if (pastOn.checked) loadStrip(); else goTo(null);
+    syncTime();
+    // Back to live here is back to live in the header too, so the two never name different times.
+    if (!pastOn.checked) host.goLive?.();
+  };
   windowSel.onchange = () => loadStrip();
   dayIn.onchange = () => { at = null; loadStrip(); };
   const buses = el('div', { class: 'sa-buses' });
@@ -733,6 +738,22 @@ export default function mount(sec: any, host: any) {
     }
     render();
   };
+
+  // The header's time: its moment on a timeline reaching back as far as the range does.
+  const WINDOWS = [60, 360, 1440, 10080];
+  host.followRange?.(sec, (r: any) => {
+    const m = host.rangeMoment(r);
+    if (!m) {
+      if (pastOn.checked) { pastOn.checked = false; goTo(null); syncTime(); }
+      return;
+    }
+    pastOn.checked = true;
+    dayIn.value = m.day;
+    windowSel.value = String(WINDOWS.find(w => w >= m.minutes) || WINDOWS[WINDOWS.length - 1]);
+    at = new Date(m.at);
+    syncTime();
+    loadStrip();
+  });
 
   setInterval(() => { if (sec.classList.contains('active') && !at && !dragged && !draggedString && !busyInSection(sec)) load(); }, 5000);
   render();

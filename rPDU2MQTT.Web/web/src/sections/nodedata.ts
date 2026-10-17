@@ -15,6 +15,7 @@ import { state } from '../state.js';
 import { liveWhileActive, realtimeLive } from '../realtime.js';
 import { timelineStrip } from './timeline.js';
 import { stepToFit } from './trends-shared.js';
+import { followRange, rangeMoment, setRange, currentRange, LIVE } from '../history-control.js';
 import type { Line } from '../charts.js';
 
 // Mirrors FlowUnits.cs — the canonical unit each metric is stored in, and its display name.
@@ -306,12 +307,28 @@ export function addNodeDataSection(nav: any, sections: any) {
   filter.oninput = draw;
   onlyProblems.onchange = draw;
   tagSel.onchange = () => { tag = tagSel.value; remember(TAG_KEY, tag); draw(); };
-  pastOn.onchange = () => { at = null; syncPast(); refreshAll(); };
+  pastOn.onchange = () => {
+    at = null; syncPast();
+    // Back to live here is back to live in the header too, so the two never name different times.
+    if (!pastOn.checked && currentRange().kind !== 'live') setRange(LIVE); else refreshAll();
+  };
   windowSel.onchange = () => loadStrip();
   dayIn.onchange = () => { at = null; loadStrip(); };
   // Ages tick even when nothing new arrives — a row going stale is itself the event worth seeing.
   liveWhileActive(sec, () => 'flow:realpower', () => { if (!past()) load(); });
   setInterval(() => { if (sec.classList.contains('active') && !past() && !realtimeLive()) load(); }, 10000);
+  // The header's time: its moment on a timeline reaching back as far as the range does.
+  followRange(sec, r => {
+    const m = rangeMoment(r);
+    pastOn.checked = !!m;
+    if (m) {
+      dayIn.value = m.day;
+      windowSel.value = String((NODE_DATA_WINDOWS.find(([w]) => w >= m.minutes) || NODE_DATA_WINDOWS[NODE_DATA_WINDOWS.length - 1])[0]);
+      at = m.at;
+    } else at = null;
+    syncPast();
+    refreshAll();
+  });
   syncPast();
   link.onclick = () => { activate(link, sec); refreshAll(); };
   return link;
