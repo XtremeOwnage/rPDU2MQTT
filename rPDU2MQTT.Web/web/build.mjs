@@ -44,6 +44,7 @@ const MODULES = [
   'location-options.ts',
   'entity-extensions.ts',
   'panel-layout.ts',
+  'pdf.ts',
   'sections/paths.ts',
   'sections/diagnostics.ts',
   'sections/control.ts',

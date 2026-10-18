@@ -205,6 +205,16 @@ function copyOnClick(node     , text        , label         ) {
   return node;
 }
 
+// Hand the viewer a file to save.
+function saveFile(data     , name        , type        ) {
+  const a      = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([data], { type }));
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+
 // A URL-friendly slug for a nav label (used to put the active tab in the address bar).
 function slug(text        )         {
   return (text || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -4282,6 +4292,121 @@ function column                   (slots        , breakers     , left         ) 
     cells.push({ slot, span: spans ? 2 : 1, halves });
   }
   return cells;
+}
+
+// ── pdf.ts ──────────────────────────────────────────────────────
+// A small PDF writer for pages of text and rules (#592): the three standard Helvetica faces, so nothing is
+// embedded and nothing is downloaded. Coordinates are points from the top left of the page.
+
+/// Helvetica's advance widths for ' ' to '~', in thousandths of the font size.
+const HELVETICA = [
+  278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+  1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
+  667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+  333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+  556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
+];
+
+/// The characters WinAnsiEncoding places above Latin-1's control range; the rest of Latin-1 maps to itself.
+const WIN_ANSI                         = {
+  '€': 0x80, '…': 0x85, '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95, '–': 0x96, '—': 0x97, '™': 0x99,
+};
+
+const PDF_FACES                          = { regular: 'F1', bold: 'F2', italic: 'F3' };
+
+/// A character as the byte the page writes, or '?' where the encoding has none.
+const winAnsi = (c        ) => {
+  const code = c.charCodeAt(0);
+  if (code < 0x80 || (code >= 0xa0 && code <= 0xff)) return c;
+  return WIN_ANSI[c] ? String.fromCharCode(WIN_ANSI[c]) : '?';
+};
+
+/// How wide a run of text is set, in points. Bold is a touch wider than the regular face.
+function pdfTextWidth(text        , size        , face          = 'regular') {
+  let w = 0;
+  for (const c of text) { const code = c.charCodeAt(0); w += code >= 32 && code <= 126 ? HELVETICA[code - 32] : 556; }
+  return w * size / 1000 * (face === 'bold' ? 1.08 : 1);
+}
+
+/// Text broken into lines no wider than `width`. Nothing is cut: paper has no "read more". Lines break at spaces,
+/// or after a comma, slash or underscore, and a run with none of those is split where it has to be.
+function pdfWrap(text        , width        , size        , face          = 'regular') {
+  const fits = (s        ) => pdfTextWidth(s, size, face) <= width;
+  // Each piece remembers whether a space came before it, so a break after a comma rejoins without one.
+  const pieces                                = [];
+  text.trim().split(/\s+/).filter(Boolean).forEach(word =>
+    word.split(/(?<=[,/_])/).forEach((t, i) => pieces.push({ t, gap: i === 0 && pieces.length > 0 })));
+  const out           = [];
+  let line = '';
+  for (const { t, gap } of pieces) {
+    const next = line ? line + (gap ? ' ' : '') + t : t;
+    if (fits(next)) { line = next; continue; }
+    if (line) out.push(line);
+    line = t;
+    while (!fits(line) && line.length > 1) {
+      let cut = line.length - 1;
+      while (cut > 1 && !fits(line.slice(0, cut))) cut--;
+      out.push(line.slice(0, cut));
+      line = line.slice(cut);
+    }
+  }
+  if (line) out.push(line);
+  return out;
+}
+
+/// A page being drawn. Letter by default.
+function pdfPage(width = 612, height = 792) {
+  const ops           = [];
+  const n = (v        ) => (Math.round(v * 100) / 100).toString();
+  const esc = (s        ) => [...s].map(winAnsi).join('').replace(/[\\()]/g, m => '\\' + m);
+  return {
+    width, height, ops,
+    /// Text with its baseline at y; `align` says which end of the text x is.
+    text(x        , y        , s        , size        , opt                                                                         = {}) {
+      const face = opt.face || 'regular';
+      const w = pdfTextWidth(s, size, face);
+      const at = opt.align === 'right' ? x - w : opt.align === 'center' ? x - w / 2 : x;
+      ops.push(`${n(opt.gray ?? 0)} g BT /${PDF_FACES[face]} ${n(size)} Tf ${n(at)} ${n(height - y)} Td (${esc(s)}) Tj ET`);
+    },
+    rule(x1        , y1        , x2        , y2        , lineWidth = 0.5, gray = 0.6) {
+      ops.push(`${n(gray)} G ${n(lineWidth)} w ${n(x1)} ${n(height - y1)} m ${n(x2)} ${n(height - y2)} l S`);
+    },
+    fill(x        , y        , w        , h        , gray        ) {
+      ops.push(`${n(gray)} g ${n(x)} ${n(height - y - h)} ${n(w)} ${n(h)} re f`);
+    },
+  };
+}
+
+/// The pages as a PDF file.
+function pdfDocument(pages           , title        )             {
+  const objects           = [];
+  const add = (body        ) => { objects.push(body); return objects.length; };
+  const catalog = add('');
+  const tree = add('');
+  const fonts = (['Helvetica', 'Helvetica-Bold', 'Helvetica-Oblique']         )
+    .map(f => add(`<< /Type /Font /Subtype /Type1 /BaseFont /${f} /Encoding /WinAnsiEncoding >>`));
+  // The title is shown by the reader rather than drawn, so it is UTF-16 rather than WinAnsi.
+  const utf16 = [...title].map(c => c.charCodeAt(0).toString(16).padStart(4, '0')).join('');
+  const info = add(`<< /Title <FEFF${utf16}> /Producer (rPDU2MQTT) >>`);
+  const kids = pages.map(p => {
+    const stream = p.ops.join('\n');
+    const content = add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+    return add(`<< /Type /Page /Parent ${tree} 0 R /MediaBox [0 0 ${p.width} ${p.height}] /Contents ${content} 0 R `
+      + `/Resources << /Font << /F1 ${fonts[0]} 0 R /F2 ${fonts[1]} 0 R /F3 ${fonts[2]} 0 R >> >> >>`);
+  });
+  objects[catalog - 1] = `<< /Type /Catalog /Pages ${tree} 0 R >>`;
+  objects[tree - 1] = `<< /Type /Pages /Kids [${kids.map(k => `${k} 0 R`).join(' ')}] /Count ${kids.length} >>`;
+
+  // Every character is one byte, so string offsets are byte offsets.
+  let out = '%PDF-1.4\n';
+  const offsets = objects.map((body, i) => { const at = out.length; out += `${i + 1} 0 obj\n${body}\nendobj\n`; return at; });
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n` + offsets.map(o => `${String(o).padStart(10, '0')} 00000 n \n`).join('');
+  out += `trailer\n<< /Size ${objects.length + 1} /Root ${catalog} 0 R /Info ${info} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const bytes = new Uint8Array(out.length);
+  for (let i = 0; i < out.length; i++) bytes[i] = out.charCodeAt(i) & 0xff;
+  return bytes;
 }
 
 // ── sections/paths.ts ───────────────────────────────────────────
@@ -12649,6 +12774,8 @@ function addPanelScheduleSection(nav     , sections     ) {
   traceStart.title = 'Identify an unknown breaker: take a baseline, switch it off, and see which channel went dark.';
   const printBtn = btn('Print…');
   printBtn.title = 'Print this directory for the inside of the panel door.';
+  const exportBtn = btn('Export…');
+  exportBtn.title = 'Save this directory as a PDF for the panel door, or as text the Import reads back.';
   importBtn.title = 'Paste a directory you already keep — breaker numbers, wires, channels and what each feeds — and see what it reads as before anything is written.';
   // Watts or amps: the same reading, in the unit the question is being asked in.
   const unitSel = el('select', { class: 'ps-unit' })                     ;
@@ -12657,7 +12784,7 @@ function addPanelScheduleSection(nav     , sections     ) {
   unitSel.onchange = () => render();
   const status = el('span', { class: 'ld-count' });
   sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
-    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel), refresh, addPanel, importBtn, traceStart, printBtn, status));
+    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel), refresh, addPanel, importBtn, traceStart, printBtn, exportBtn, status));
 
   // The panel's own settings: what it is called, and how many slots it has.
   const nameIn = el('input', { type: 'text', placeholder: 'Main Panel' })                    ;
@@ -12689,18 +12816,25 @@ function addPanelScheduleSection(nav     , sections     ) {
   // The enclosure: the two columns of breakers either side of the bus bar down the middle.
   sec.appendChild(el('div', { class: 'ps-panel' }, el('div', { class: 'ps-bus' }), grid));
 
-  // The same directory laid out for the inside of the panel door (#460): shown only on paper.
-  const printable = el('div', { class: 'ps-print' });
-  sec.appendChild(printable);
   traceStart.onclick = () => {
     const p = shown();
     if (!p) { toast('Add a panel first.', false); return; }
     trace(p, null);
   };
+  // Printing prints the PDF (#592), so paper always gets the same layout whichever way it is made.
   printBtn.onclick = () => {
-    const w      = window;
-    if (typeof w.print === 'function') w.print();
-    else toast('This browser cannot print from here.', false);
+    const p = shown();
+    if (!p) { toast('Add a panel first.', false); return; }
+    const url = URL.createObjectURL(new Blob([directoryPdf(p, slotsOf(p))], { type: 'application/pdf' }));
+    const frame      = el('iframe', { class: 'ps-print-frame', title: 'Panel directory' });
+    frame.onload = () => {
+      // A browser that will not print a PDF from a frame opens it instead, to print from its own viewer.
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+      catch { window.open(url, '_blank'); }
+      setTimeout(() => { frame.remove(); URL.revokeObjectURL(url); }, 60000);
+    };
+    frame.src = url;
+    document.body.appendChild(frame);
   };
 
   let panels          = [];
@@ -13298,45 +13432,166 @@ function addPanelScheduleSection(nav     , sections     ) {
   /// a slot nobody has written down is the point of printing it.
   const printWords = (b         ) =>
     b.state === 'unused' ? 'Unused'
-      : b.state === 'unknown' ? (b.description ? `${b.description} ????` : 'Unknown — not identified')
-        : b.description || 'Unknown — not identified';
+      : b.state === 'unknown' ? (b.description ? `${b.description} ????` : 'Unknown')
+        : b.description || 'Unknown';
 
-  /// The directory laid out as the panel is, for the door: odd slots down the left, even down the right.
-  const drawPrint = (p       , slots        ) => {
-    printable.innerHTML = '';
-    const when = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-    printable.appendChild(el('div', { class: 'ps-print-head' },
-      el('h3', { text: p.name || p.id }),
-      el('span', { class: 'ps-print-when', text: `${slots} slots · ${when}` })));
-    const table = el('table', { class: 'ps-print-grid' });
-    const head = el('tr');
-    ['Circuit', 'Wire', 'A', '#', '#', 'A', 'Wire', 'Circuit'].forEach(h => head.appendChild(el('th', { text: h })));
-    table.appendChild(el('thead', {}, head));
-    const body = el('tbody');
-    const holding = (slot        ) => p.breakers.filter(b => (b.poles === 2 ? [b.slot, b.slot + 2] : [b.slot]).includes(slot));
-    const side = (slot        , tr     , mirrored         ) => {
-      const on = holding(slot);
-      const words = on.length
-        ? on.map(b => b.slot === slot ? printWords(b) : `${b.number} — the other half of the breaker above`).join(' / ')
-        : 'Empty';
-      const cells = [
-        el('td', { class: 'ps-print-desc' + (on.some(b => b.state === 'unknown') ? ' is-unknown' : on.length ? '' : ' is-empty'), text: words }),
-        el('td', { class: 'ps-print-wire', text: on.map(b => b.wire).filter(Boolean).join(' / ') }),
-        el('td', { class: 'ps-print-amps', text: on.map(b => b.amps ? String(b.amps) : '').filter(Boolean).join(' / ') }),
-        el('td', { class: 'ps-print-slot', text: String(slot) }),
-      ];
-      (mirrored ? [...cells].reverse() : cells).forEach(c => tr.appendChild(c));
+  const printedOn = () => new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  const slotsOf = (p       ) => Number(configPanel(p.id)?.Slots) || p.slots;
+
+  /// One slot as paper carries it: a paragraph per breaker, so a tandem's halves each get their own lines.
+  const paperSlot = (p       , slot        , slots        ) => {
+    const on = p.breakers.filter(b => b.slot === slot || (b.poles === 2 && b.slot + 2 === slot));
+    const own = on.filter(b => b.slot === slot);
+    const above = on.filter(b => b.slot !== slot);
+    return {
+      // A double-pole is one cell across both its slots, as it is one handle in the panel.
+      span: own.length === 1 && own[0].poles === 2 && on.length === 1 && slot + 2 <= slots,
+      below: own.length === 0 && above.length === 1,
+      words: on.length ? [...own.map(b => printWords(b)), ...above.map(b => `${b.number || b.slot} (2-pole)`)] : ['Empty'],
+      wire: own.map(b => b.wire).filter(Boolean),
+      amps: own.map(b => b.amps ? String(b.amps) : '').filter(Boolean),
+      gap: !on.length || own.some(b => b.state === 'unknown' || (b.state !== 'unused' && !b.description)),
     };
-    for (let slot = 1; slot <= slots; slot += 2) {
-      const tr = el('tr');
-      tr.dataset.slot = String(slot);
-      side(slot, tr, false);
-      if (slot + 1 <= slots) side(slot + 1, tr, true);
-      body.appendChild(tr);
-    }
-    table.appendChild(body);
-    printable.appendChild(table);
   };
+
+  /// The same directory as a PDF (#592), for the inside of the panel door. Every word is printed: cells wrap
+  /// rather than cut, and the text is set as large as still fits the page. Letter, kept inside A4's width.
+  const directoryPdf = (p       , slots        ) => {
+    const margin = 36, titleH = 30, headH = 16, pad = 4, bus = 16;
+    const left = margin, right = 612 - margin, room = 792 - 2 * margin - titleH - headH;
+    const rows = Math.ceil(slots / 2);
+    const cells = Array.from({ length: slots }, (_, i) => paperSlot(p, i + 1, slots));
+    const cell = (slot        ) => cells[slot - 1];
+    const continued = (slot        ) => slot > 2 && cell(slot - 2).span && cell(slot).below;
+
+    const lay = (size        ) => {
+      const lead = size * 1.2;
+      const wireW = Math.min(110, Math.max(36, ...cells.flatMap(c => c.wire).map(w => pdfTextWidth(w, size) + 2 * pad)));
+      const ampsW = pdfTextWidth('100', size) + 2 * pad, numW = pdfTextWidth('100', size, 'bold') + 2 * pad;
+      const descW = (right - left - bus) / 2 - wireW - ampsW - numW;
+      // Slot numbers on the outside edges, where they line up with the breakers; circuits meet in the middle.
+      const widths = [numW, ampsW, wireW, descW, descW, wireW, ampsW, numW];
+      const wrap = (paras          , w        , face                       = 'regular') => paras.flatMap(t => pdfWrap(t, w - 2 * pad, size, face));
+      const text = cells.map(c => ({ desc: wrap(c.words, descW, c.gap ? 'italic' : 'regular'), wire: wrap(c.wire, wireW), amps: wrap(c.amps, ampsW) }));
+      const need = (slot        ) => { const t = text[slot - 1]; return Math.max(t.desc.length, t.wire.length, t.amps.length, 1) * lead + 2 * pad; };
+      const heights = Array.from({ length: rows }, (_, r) => Math.max(lead + 2 * pad,
+        ...[2 * r + 1, 2 * r + 2].filter(s => s <= slots && !cell(s).span && !continued(s)).map(need)));
+      // A double-pole's two rows grow together when its cell needs more than both.
+      cells.forEach((c, i) => {
+        if (!c.span) return;
+        const r = Math.floor(i / 2), short = need(i + 1) - heights[r] - heights[r + 1];
+        if (short > 0) { heights[r] += short / 2; heights[r + 1] += short / 2; }
+      });
+      return { size, lead, widths, text, heights, total: heights.reduce((a, h) => a + h, 0) };
+    };
+    // As large as fits one page; past the smallest legible size, it runs on.
+    let L = lay(7);
+    for (let size = 11; size > 7; size -= 0.5) { const t = lay(size); if (t.total <= room) { L = t; break; } }
+    // Whatever room is left goes to the rows, as space to write in a change.
+    if (L.total < room) { const extra = Math.min((room - L.total) / rows, 3 * L.lead); L.heights = L.heights.map(h => h + extra); }
+    const { size, lead, widths, text, heights } = L;
+    // A clear gap down the middle keeps the odd and even sides apart.
+    const xs = widths.reduce((a, w, i) => [...a, a[a.length - 1] + w + (i === 3 ? bus : 0)], [left]);
+    const midL = xs[4] - bus;
+
+    // Rows to pages, never splitting a double-pole across two.
+    const pagesOf             = [[]];
+    let used = 0;
+    for (let r = 0; r < rows; r++) {
+      const joined = [2 * r + 1, 2 * r + 2].some(s => s <= slots && cell(s).span);
+      const take = joined ? heights[r] + heights[r + 1] : heights[r];
+      if (used + take > room + 0.01 && pagesOf[pagesOf.length - 1].length) { pagesOf.push([]); used = 0; }
+      pagesOf[pagesOf.length - 1].push(r);
+      used += heights[r];
+      if (joined) { pagesOf[pagesOf.length - 1].push(++r); used += heights[r]; }
+    }
+
+    const when = printedOn();
+    // Lines centred in a box, horizontally on `cx` or from the left at `x`.
+    const block = (page         , lines          , x        , w        , y        , h        , opt      = {}) => {
+      const first = y + (h - lines.length * lead) / 2 + lead * 0.78;
+      lines.forEach((l, i) => page.text(opt.center ? x + w / 2 : x + pad, first + i * lead, l, size, { ...opt, align: opt.center ? 'center' : 'left' }));
+    };
+    const pages = pagesOf.map((list, pg) => {
+      const page = pdfPage();
+      page.text(left, margin + 14, p.name || p.id, 14, { face: 'bold' });
+      page.text(right, margin + 14, `${slots} slots · ${when}` + (pagesOf.length > 1 ? ` · page ${pg + 1} of ${pagesOf.length}` : ''), 9, { gray: 0.33, align: 'right' });
+      const head = margin + titleH;
+      page.fill(left, head, midL - left, headH, 0.93);
+      page.fill(xs[4], head, right - xs[4], headH, 0.93);
+      ['#', 'A', 'Wire', 'Circuit', 'Circuit', 'Wire', 'A', '#'].forEach((h, i) => page.text(xs[i] + widths[i] / 2, head + 11, h.toUpperCase(), 7, { face: 'bold', align: 'center' }));
+      const ys           = [];
+      let y = head + headH;
+      list.forEach(r => { ys.push(y); y += heights[r]; });
+      const bottom = y;
+      list.forEach((r, k) => {
+        [0, 1].forEach(side => {
+          const slot = 2 * r + 1 + side;
+          if (slot > slots) return;
+          const [desc, wire, amps, num] = side === 0 ? [3, 2, 1, 0] : [4, 5, 6, 7];
+          page.fill(xs[num], ys[k], widths[num], heights[r], 0.95);
+          block(page, [String(slot)], xs[num], widths[num], ys[k], heights[r], { face: 'bold', center: true });
+          if (continued(slot)) return;
+          const h = cell(slot).span ? heights[r] + heights[r + 1] : heights[r];
+          const t = text[slot - 1];
+          block(page, t.amps, xs[amps], widths[amps], ys[k], h, { center: true });
+          block(page, t.wire, xs[wire], widths[wire], ys[k], h, { center: true });
+          block(page, t.desc, xs[desc], widths[desc], ys[k], h, cell(slot).gap ? { face: 'italic', gray: 0.33 } : {});
+        });
+      });
+      // Rules last, so no shading covers them. Between rows, a double-pole's cell is not crossed.
+      list.forEach((r, k) => {
+        if (k === 0) return;
+        const y0 = ys[k];
+        const spanL = cell(2 * r - 1)?.span, spanR = 2 * r <= slots && cell(2 * r).span;
+        page.rule(left, y0, spanL ? xs[1] : midL, y0);
+        page.rule(spanR ? xs[7] : xs[4], y0, right, y0);
+      });
+      [...xs, midL].forEach((x, i) => page.rule(x, head, x, bottom, i === 0 || i === 8 ? 0.75 : 0.5));
+      [head, head + headH, bottom].forEach(y0 => { page.rule(left, y0, midL, y0, 0.75); page.rule(xs[4], y0, right, y0, 0.75); });
+      return page;
+    });
+    return pdfDocument(pages, `${p.name || p.id} — panel directory`);
+  };
+
+  /// A breaker as a line of the directory Import reads (#455), so an export pastes straight back in.
+  const directoryLine = (b         ) => {
+    // The number, written so it reads back as the same slot: "1,3" for a double-pole, "26.1" for a tandem half.
+    const num = /^(?:[Bb])?(\d{1,3})(?:\s*[,/]\s*(?:[Bb])?(\d{1,3})|\.(\d))?$/.exec(b.number.trim());
+    const fits = !!num && Number(num[1]) === b.slot
+      && (b.poles === 2 ? Math.abs(Number(num[2]) - b.slot) === 2 : !num[2])
+      && (b.half ? Number(num[3]) === b.half : !num[3]);
+    const number = fits ? b.number.trim() : b.poles === 2 ? `${b.slot},${b.slot + 2}` : b.half ? `${b.slot}.${b.half}` : String(b.slot);
+    // The first leg's channel, in the form a directory writes it: n30_1_5 is "N30,1,5".
+    const ch = /^([a-z][a-z0-9]{0,15})_(\d{1,3})(?:_(\d{1,3}))?$/i.exec(b.legs?.[0]?.channel || '');
+    const channel = ch && !/^w\d/i.test(ch[1]) ? [ch[1].toUpperCase(), ch[2], ch[3]].filter(Boolean).join(',') : '';
+    const labels = [number, /^[Ww]\d{1,3}[A-Za-z]?$/.test(b.wire) ? b.wire : '', b.amps ? `${b.amps}A` : '', channel];
+    const words = (b.description || '').replace(/\s+/g, ' ').trim();
+    const feeds = b.state === 'unused' ? 'Unused' : b.state === 'unknown' || !words ? `${words} ????`.trim() : words;
+    return `${labels.filter(Boolean).join(',')}: ${feeds}`;
+  };
+  const directoryText = (p       , slots        ) => [
+    `# ${p.name || p.id}: ${slots} slots, exported ${new Date().toISOString().slice(0, 10)}`,
+    '# Breaker, wire, rating, channel: what it feeds. ???? marks one nobody has identified. Import reads this back.',
+    ...[...p.breakers].sort((a, b) => a.slot - b.slot || (a.half || 0) - (b.half || 0)).map(directoryLine),
+  ].join('\n') + '\n';
+
+  const exportSheet = () => {
+    const p = shown();
+    if (!p) { toast('Add a panel first.', false); return; }
+    const slots = slotsOf(p);
+    const stem = (slug(p.name || p.id) || 'panel') + '-directory';
+    const pdf = btn('PDF', 'primary');
+    pdf.onclick = () => { saveFile(directoryPdf(p, slots), `${stem}.pdf`, 'application/pdf'); closeSheet(); };
+    const text = btn('Directory text');
+    text.onclick = () => { saveFile(directoryText(p, slots), `${stem}.txt`, 'text/plain'); closeSheet(); };
+    openSheet({
+      title: `Export ${p.name || p.id}`,
+      body: el('div', { class: 'desc', text: 'PDF is the printed directory, for the panel door. Directory text is one line a breaker — number, wire, rating, channel and what it feeds — that Import… reads back.' }),
+      footer: [text, pdf],
+    });
+  };
+  exportBtn.onclick = () => exportSheet();
 
   const render = () => {
     grid.innerHTML = '';
@@ -13401,7 +13656,6 @@ function addPanelScheduleSection(nav     , sections     ) {
         ? `Incoming: no data${volts ? `, though ${labelOf(panelNode)} reports${volts}` : ` — ${labelOf(panelNode)} has no current reading`}.`
         : `Incoming: ${Math.round(drawn.incoming).toLocaleString('en-US')} W${volts} through ${labelOf(panelNode)}.`;
     drawChecks(drawn);
-    drawPrint(drawn, slots);
     // Every slot is one row tall, so a double-pole spanning two is twice the height of a single — with `auto`
     // the two rows it spans had nothing else in them and split its height between them instead.
     grid.style.gridTemplateRows = `repeat(${rows}, minmax(var(--ps-row), auto))`;
