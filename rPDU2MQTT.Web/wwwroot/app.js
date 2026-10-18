@@ -13506,7 +13506,8 @@ function addPanelScheduleSection(nav     , sections     ) {
       const wireW = Math.min(110, Math.max(36, ...cells.flatMap(c => c.wire).map(w => pdfTextWidth(w, size) + 2 * pad)));
       const ampsW = pdfTextWidth('100', size) + 2 * pad, numW = pdfTextWidth('100', size, 'bold') + 2 * pad;
       const descW = (right - left) / 2 - wireW - ampsW - numW;
-      const widths = [descW, wireW, ampsW, numW, numW, ampsW, wireW, descW];
+      // Slot numbers on the outside edges, where they line up with the breakers; circuits meet in the middle.
+      const widths = [numW, ampsW, wireW, descW, descW, wireW, ampsW, numW];
       const wrap = (paras          , w        , face                       = 'regular') => paras.flatMap(t => pdfWrap(t, w - 2 * pad, size, face));
       const text = cells.map(c => ({ desc: wrap(c.words, descW, c.gap ? 'italic' : 'regular'), wire: wrap(c.wire, wireW), amps: wrap(c.amps, ampsW) }));
       const need = (slot        ) => { const t = text[slot - 1]; return Math.max(t.desc.length, t.wire.length, t.amps.length, 1) * lead + 2 * pad; };
@@ -13552,7 +13553,7 @@ function addPanelScheduleSection(nav     , sections     ) {
       page.text(right, margin + 14, `${slots} slots · ${when}` + (pagesOf.length > 1 ? ` · page ${pg + 1} of ${pagesOf.length}` : ''), 9, { gray: 0.33, align: 'right' });
       const head = margin + titleH;
       page.fill(left, head, right - left, headH, 0.93);
-      ['Circuit', 'Wire', 'A', '#', '#', 'A', 'Wire', 'Circuit'].forEach((h, i) => page.text(xs[i] + widths[i] / 2, head + 11, h.toUpperCase(), 7, { face: 'bold', align: 'center' }));
+      ['#', 'A', 'Wire', 'Circuit', 'Circuit', 'Wire', 'A', '#'].forEach((h, i) => page.text(xs[i] + widths[i] / 2, head + 11, h.toUpperCase(), 7, { face: 'bold', align: 'center' }));
       const ys           = [];
       let y = head + headH;
       list.forEach(r => { ys.push(y); y += heights[r]; });
@@ -13561,7 +13562,7 @@ function addPanelScheduleSection(nav     , sections     ) {
         [0, 1].forEach(side => {
           const slot = 2 * r + 1 + side;
           if (slot > slots) return;
-          const [desc, wire, amps, num] = side === 0 ? [0, 1, 2, 3] : [7, 6, 5, 4];
+          const [desc, wire, amps, num] = side === 0 ? [3, 2, 1, 0] : [4, 5, 6, 7];
           page.fill(xs[num], ys[k], widths[num], heights[r], 0.95);
           block(page, [String(slot)], xs[num], widths[num], ys[k], heights[r], { face: 'bold', center: true });
           if (continued(slot)) return;
@@ -13577,8 +13578,8 @@ function addPanelScheduleSection(nav     , sections     ) {
         if (k === 0) return;
         const y0 = ys[k];
         const spanL = cell(2 * r - 1)?.span, spanR = 2 * r <= slots && cell(2 * r).span;
-        page.rule(spanL ? xs[3] : left, y0, xs[4], y0);
-        page.rule(xs[4], y0, spanR ? xs[5] : right, y0);
+        page.rule(left, y0, spanL ? xs[1] : xs[4], y0);
+        page.rule(spanR ? xs[7] : xs[4], y0, right, y0);
       });
       xs.forEach((x, i) => page.rule(x, head, x, bottom, i === 0 || i === 8 ? 0.75 : 0.5));
       [head, head + headH].forEach(y0 => page.rule(left, y0, right, y0, 0.75));
