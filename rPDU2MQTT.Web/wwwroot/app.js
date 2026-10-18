@@ -13494,7 +13494,7 @@ function addPanelScheduleSection(nav     , sections     ) {
   /// The same directory as a PDF (#592), for the inside of the panel door. Every word is printed: cells wrap
   /// rather than cut, and the text is set as large as still fits the page. Letter, kept inside A4's width.
   const directoryPdf = (p       , slots        ) => {
-    const margin = 36, titleH = 30, headH = 16, pad = 4, bus = 12;
+    const margin = 36, titleH = 30, headH = 16, pad = 4, bus = 16;
     const left = margin, right = 612 - margin, room = 792 - 2 * margin - titleH - headH;
     const rows = Math.ceil(slots / 2);
     const cells = Array.from({ length: slots }, (_, i) => paperSlot(p, i + 1, slots));
@@ -13527,7 +13527,7 @@ function addPanelScheduleSection(nav     , sections     ) {
     // Whatever room is left goes to the rows, as space to write in a change.
     if (L.total < room) { const extra = Math.min((room - L.total) / rows, 3 * L.lead); L.heights = L.heights.map(h => h + extra); }
     const { size, lead, widths, text, heights } = L;
-    // The two columns of breakers either side of a dark band down the middle, as the bus bar divides them.
+    // A clear gap down the middle keeps the odd and even sides apart.
     const xs = widths.reduce((a, w, i) => [...a, a[a.length - 1] + w + (i === 3 ? bus : 0)], [left]);
     const midL = xs[4] - bus;
 
@@ -13554,7 +13554,8 @@ function addPanelScheduleSection(nav     , sections     ) {
       page.text(left, margin + 14, p.name || p.id, 14, { face: 'bold' });
       page.text(right, margin + 14, `${slots} slots · ${when}` + (pagesOf.length > 1 ? ` · page ${pg + 1} of ${pagesOf.length}` : ''), 9, { gray: 0.33, align: 'right' });
       const head = margin + titleH;
-      page.fill(left, head, right - left, headH, 0.93);
+      page.fill(left, head, midL - left, headH, 0.93);
+      page.fill(xs[4], head, right - xs[4], headH, 0.93);
       ['#', 'A', 'Wire', 'Circuit', 'Circuit', 'Wire', 'A', '#'].forEach((h, i) => page.text(xs[i] + widths[i] / 2, head + 11, h.toUpperCase(), 7, { face: 'bold', align: 'center' }));
       const ys           = [];
       let y = head + headH;
@@ -13585,7 +13586,6 @@ function addPanelScheduleSection(nav     , sections     ) {
       });
       [...xs, midL].forEach((x, i) => page.rule(x, head, x, bottom, i === 0 || i === 8 ? 0.75 : 0.5));
       [head, head + headH, bottom].forEach(y0 => { page.rule(left, y0, midL, y0, 0.75); page.rule(xs[4], y0, right, y0, 0.75); });
-      page.fill(midL, head, bus, bottom - head, 0.25);
       return page;
     });
     return pdfDocument(pages, `${p.name || p.id} — panel directory`);
