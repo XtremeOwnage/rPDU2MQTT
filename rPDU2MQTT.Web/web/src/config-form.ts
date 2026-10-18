@@ -1,5 +1,5 @@
 // Schema-driven config form, nav, and build().
-import { ensure, el, btn, activate, slug, api, toast, navLink, navLabel } from './helpers.js';
+import { ensure, el, btn, activate, slug, api, toast, navLink, navLabel, navMatches } from './helpers.js';
 import { templateHelp } from './template-field.js';
 import { state } from './state.js';
 import { expectRestart } from './realtime.js';
@@ -776,7 +776,7 @@ export function build() {
 
   // Open the tab named in the URL hash, else the first.
   const wanted = decodeURIComponent((location.hash || '').slice(1));
-  const target = wanted ? ([...nav.querySelectorAll('a')] as any[]).find(a => slug(navLabel(a)) === wanted) : null;
+  const target = wanted ? ([...nav.querySelectorAll('a')] as any[]).find(a => navMatches(a, wanted)) : null;
   (target || first)?.click();
 
   // One subscription re-runs every conditional field's check.

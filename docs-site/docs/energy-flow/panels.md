@@ -4,9 +4,9 @@ title: Panels and circuits
 
 # Panels and circuits
 
-## Panel Schedule
+## Breaker Panels
 
-**Energy Flow › Panel Schedule**. One directory per panel: odd slots down the left, even down the right. Each breaker shows live power or current, wire, rating, gauge and what it feeds.
+**Energy Flow › Breaker Panels**. One directory per panel: odd slots down the left, even down the right. Each breaker shows live power or current, wire, rating, gauge and what it feeds.
 
 ![Panel schedule](../assets/screenshots/panel-schedule.webp)
 
@@ -19,7 +19,8 @@ title: Panels and circuits
 | Add panel | New panel |
 | Import… | Paste a paper directory |
 | Trace… | Identify an unknown breaker |
-| Print… | Printable schedule for the panel door (fits one Letter or A4 page at 42 slots) |
+| Print… | Print the schedule PDF for the panel door (fits one Letter or A4 page at 42 slots) |
+| Export… | Save the schedule as a PDF, or as directory text Import… reads back |
 | Name, Slots, This panel is, Fed by | Panel settings |
 | Plugin settings › Locations › Location | `Ext.locations.Location` |
 

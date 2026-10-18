@@ -127,4 +127,28 @@ public class PanelDirectoryImportTests
         // A slot already held by a differently-numbered breaker is a clash, not a silent overwrite.
         Assert.Equal("clash", PanelDirectoryImport.Effect(panel, PanelDirectoryImport.ParseLine("24: Something else")));
     }
+
+    /// <summary>The directory text the panel schedule exports (#592), as panelschedule.check.mjs writes it.</summary>
+    [Fact]
+    public void AnExportedDirectory_ReadsBackAsTheSameBreakers()
+    {
+        var rows = PanelDirectoryImport.Parse("""
+            # Main Panel: 12 slots, exported 2026-10-18
+            # Breaker, wire, rating, channel: what it feeds. ???? marks one nobody has identified. Import reads this back.
+            1,3,60A,N30,1,1: AC Heat Strips
+            5: Fridge ????
+            B06,W11,20A,N30,1,5: Kitchen lights rewritten
+            6.2: Freezer ????
+            B08: Unused
+            """);
+
+        Assert.All(rows, r => Assert.True(r.Ok, r.Note));
+        Assert.Equal(5, rows.Count);
+        Assert.Equal(("1,3", 1, 2, (int?)60, "n30_1_1", "AC Heat Strips", BreakerState.Identified),
+            (rows[0].Number, rows[0].Slot, rows[0].Poles, rows[0].Amps, rows[0].Channel, rows[0].Description, rows[0].State));
+        Assert.Equal((5, "Fridge", BreakerState.Unknown), (rows[1].Slot, rows[1].Description, rows[1].State));
+        Assert.Equal(("W11", (int?)20, "n30_1_5", "Kitchen lights rewritten"), (rows[2].Wire, rows[2].Amps, rows[2].Channel, rows[2].Description));
+        Assert.Equal((6, (int?)2, BreakerState.Unknown), (rows[3].Slot, rows[3].Half, rows[3].State));
+        Assert.Equal(BreakerState.Unused, rows[4].State);
+    }
 }

@@ -70,7 +70,7 @@ Keys: Ctrl+Z / Ctrl+Y undo / redo, Delete removes, Esc stops drawing, `+` `−` 
 - **At real size**: washer, dryer, fridge, freezer, range, dishwasher, water heater, furnace, condenser, rack, hot tub.
 - Wall items (outlets, switches) snap to the nearest wall and face the room.
 - **GFCI outlet**: everything wired from its load side is protected.
-- **Circuit**: the breaker feeding it. **Metered by**: the node measuring it.
+- **Circuit** or **Metered by**: the breaker feeding it, or, when its circuit is not known, the node measuring it. A meter it already had is placed beneath its circuit in the energy flow.
 - **Trace its circuit**: switch a load on the item on and off; the matching channel is offered.
 
 ### Wires

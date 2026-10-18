@@ -934,7 +934,7 @@ newest is drawn when focus leaves. After a minute it is drawn anyway.
 - Shows coverage of the window, peak and its time, average, latest reading.
 - Missing readings are gaps.
 - Below: what the tier feeds, busiest first, each on its own strip.
-- Panel Schedule: a double-pole breaker's chart breaks out its two legs.
+- Breaker Panels: a double-pole breaker's chart breaks out its two legs.
 - The selected window is kept for the next sheet.
 
 ### Live sources from MQTT
@@ -1346,7 +1346,7 @@ EnergyFlow:
 
 ### Panels and breakers
 
-The **Panel Schedule** page holds the panel directory: each breaker's number, rating, wire, what it feeds,
+The **Breaker Panels** page holds the panel directory: each breaker's number, rating, wire, what it feeds,
 and the CT clamp and monitor channel measuring it.
 
 **Breakers as energy-flow tiers:**
@@ -1381,7 +1381,7 @@ changed automatically):
 - a panel fed from more than one place,
 - a circuit fed from somewhere besides its panel, so it hangs off the graph twice.
 
-**One feeder per panel.** The wiring editor refuses a second feeder into a panel; the Panel Schedule **Fed by**
+**One feeder per panel.** The wiring editor refuses a second feeder into a panel; the Breaker Panels **Fed by**
 takes one. Existing extra feeders are reported, not removed.
 
 **Import…** parses a pasted panel directory:
@@ -1404,9 +1404,11 @@ takes one. Existing extra feeders are reported, not removed.
 - A circuit drawing nothing at baseline cannot be traced; switch its load on and retry.
 - A channel that stopped reporting is never offered.
 
-**Print…** lays the directory out as the panel: odd slots left, even right, numbers in the middle, with each
-breaker's wire, rating and load. Unidentified slots print as unknown; a double-pole's second slot names its
-breaker. A 42-slot panel fits one letter or A4 page.
+**Print…** prints the directory for the panel door: slot numbers on the outside edges, odd left and even right,
+with each breaker's wire, rating and load. A double-pole is one cell across its two slots, unidentified slots
+print as unknown, and nothing is cut short. A 42-slot panel fits one letter or A4 page. **Export…** saves the same
+PDF, or directory text (one line a breaker: number, wire, rating, channel, then what it feeds) that **Import…**
+reads back.
 
 ### Floor plans
 

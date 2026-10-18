@@ -32,7 +32,7 @@ for (const gone of ['Vertiv rPDU', 'Overrides', 'PDU Data', 'PDU Control', 'Path
   if (labels.includes(gone)) fail(`"${gone}" is in the nav with Vertiv not loaded`);
 if (labels.includes('EmonCMS')) fail('"EmonCMS" is in the nav with EmonCMS not loaded');
 if (labels.includes('Floor Plans')) fail('"Floor Plans" is in the nav with the floor plan plugin not loaded');
-for (const kept of ['Panel Schedule', 'Nodes', 'Node Data'])
+for (const kept of ['Breaker Panels', 'Nodes', 'Node Data'])
   if (!labels.includes(kept)) fail(`"${kept}" left the nav with the floor plan plugin not loaded`);
 
 const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Plugins');

@@ -1612,6 +1612,64 @@
 .ps-slots { max-width: 6em; }
 .ps-field { margin: 0 0 var(--sp-3); }
 .ps-label { display: block; font-weight: 600; margin-bottom: 2px; }
+/* The breaker editor has a lot to say, so it takes most of the window, and two groups sit side by side once they fit. */
+.sheet.ps-sheet { width: min(1600px, 100%); max-height: 94vh; align-self: flex-start; }
+.overlay:has(.ps-sheet) { padding-top: 3vh; }
+/* Its titled groups, each an even grid that folds to fewer columns as the dialog narrows. */
+/* Breaker, size and wiring share a row when three fit; with two, wiring takes a row of its own rather than half of one. */
+.ps-sheet .sheet-body { container-type: inline-size; }
+.ps-editor { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); padding: var(--sp-2); }
+.ps-editor > .ps-sec-full { grid-column: 1 / -1; }
+@container (min-width: 760px) {
+  .ps-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ps-editor > .ps-sec-wiring { grid-column: 1 / -1; }
+}
+@container (min-width: 1400px) {
+  .ps-editor { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ps-editor > .ps-sec-wiring { grid-column: auto; }
+}
+.ps-sec { border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: var(--sp-3); background: var(--panel2); }
+.ps-sec-title { margin: 0 0 var(--sp-2); font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.ps-sec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--sp-3); align-items: start; }
+.ps-sec-grid > .ps-wide { grid-column: 1 / -1; }
+.ps-sec-grid .ps-field, .ps-sec-grid > .ps-wide .ps-field:last-child { margin: 0; }
+.ps-sec-grid > .ps-wide > .ps-field + .ps-field { margin-top: var(--sp-3); }
+.ps-editor input, .ps-editor select { max-width: none; min-width: 0; }
+.ps-editor .ps-hunt { max-width: none; flex: 1; min-width: 0; }
+.ps-editor .ps-hunt + .desc { white-space: nowrap; }
+.ps-editor .ps-field > label.ld-inst { display: flex; align-items: center; gap: 4px; }
+/* A double pole's two legs side by side; the filter and the one-CT switch above them, across both. */
+.ps-legs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+@media (max-width: 700px) { .ps-legs { grid-template-columns: minmax(0, 1fr); } }
+.ps-legs > .ps-field { margin: 0; }
+.ps-legs > .ps-field:has(> label.ld-inst) { grid-column: 1 / -1; }
+/* The page: the panel straight after its picker; its settings folded beneath it. */
+.ps-pick, .ps-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ps-settings { margin: var(--sp-4) 0 0; border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 0 var(--sp-3); }
+.ps-settings > summary { cursor: pointer; padding: var(--sp-2) 0; font-weight: 600; }
+.ps-settings[open] { padding-bottom: var(--sp-3); }
+@media (max-width: 560px) {
+  .ps-intro { display: none; }
+  .ps-toolbar { gap: 6px !important; }
+  /* The actions on one line that scrolls sideways, not three rows above the panel. */
+  .ps-actions { flex-wrap: nowrap; overflow-x: auto; width: 100%; scrollbar-width: none; padding-bottom: 2px; }
+  .ps-actions > button { flex: none; }
+  .ps-settings .ld-toolbar > label { width: 100%; }
+}
+@media (max-width: 560px) {
+  /* The whole phone: no margin around it, no rounded card, the body scrolling between a pinned title and buttons. */
+  .overlay:has(.ps-sheet) { padding: 0; }
+  .sheet.ps-sheet { width: 100%; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
+  .ps-sheet .sheet-body { padding: 0; flex: 1; }
+  .ps-sheet .sheet-foot { padding: var(--sp-2) var(--sp-3) calc(var(--sp-2) + env(safe-area-inset-bottom)); }
+  .ps-sheet .sheet-foot button { flex: 1; min-height: 40px; }
+  .ps-editor { padding: 0; gap: 0; }
+  .ps-sec { border: 0; border-radius: 0; background: none; border-bottom: 1px solid var(--line); padding: var(--sp-3) var(--sp-4); }
+  .ps-sec:last-child { border-bottom: 0; }
+  /* Two even columns; a group's odd one out takes the row to itself rather than leaving a hole beside it. */
+  .ps-sec-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ps-sec-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
 @media (max-width: 560px) {
   /* Still the panel: two columns either side of the bus, as it is on the wall, so a slot here is the slot
      in front of you. What gives way is the detail: each breaker is its name and its reading, and the wire,
@@ -1745,27 +1803,8 @@
 @media (max-width: 560px) { .ps-row { grid-template-columns: 1fr; } .ps-row-note { grid-column: 1; } }
 .ps-row-fix { font-family: var(--mono); font-size: 12px; width: 100%; }
 
-/* The panel directory as printed for the panel door. */
-.ps-print { display: none; }
-.ps-print-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.ps-print-head h3 { margin: 0; }
-.ps-print-when { color: var(--muted); font-size: 11pt; }
-.ps-print-grid { width: 100%; border-collapse: collapse; margin-top: 6px; table-layout: fixed; }
-.ps-print-grid th, .ps-print-grid td { border: 1px solid #999; padding: 2px 4px; font-size: 9pt; line-height: 1.15; overflow: hidden; }
-.ps-print-grid th { background: #eee; font-size: 8pt; text-transform: uppercase; letter-spacing: .04em; }
-.ps-print-grid col, .ps-print-desc { width: auto; }
-.ps-print-wire, .ps-print-amps { width: 8%; text-align: center; font-variant-numeric: tabular-nums; }
-.ps-print-slot { width: 6%; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; background: #f3f3f3; }
-.ps-print-desc.is-empty, .ps-print-desc.is-unknown { color: #555; font-style: italic; }
-@media print {
-  body:has(.section.ps.active) nav, body:has(.section.ps.active) .appbar, body:has(.section.ps.active) #savebar,
-  body:has(.section.ps.active) .nav-toggle, body:has(.section.ps.active) .project-link,
-  .section.ps.active > *:not(.ps-print) { display: none !important; }
-  .section.ps.active .ps-print { display: block; color: #000; }
-  /* A 42-slot directory fits one page; never split it. */
-  .ps-print-grid tr { break-inside: avoid; }
-  @page { margin: 10mm; }
-}
+/* Print… hands the PDF to the browser from a frame nobody sees. */
+.ps-print-frame { position: fixed; right: 0; bottom: 0; width: 0; height: 0; border: 0; }
 
 /* Tracing a breaker: the baseline, and the channel that went dark with it. */
 .ps-trace { display: grid; gap: var(--sp-2); }

@@ -108,7 +108,7 @@ export function openSheet(opts: any) {
   if (!overlay) return { close() { } };
   closeSheet();
 
-  const sheet = el('div', { class: 'sheet' + (opts.wide ? ' wide' : '') });
+  const sheet = el('div', { class: 'sheet' + (opts.wide ? ' wide' : '') + (opts.class ? ' ' + opts.class : '') });
   const close = () => closeSheet();
 
   if (opts.title || opts.search) {
@@ -174,6 +174,16 @@ export function copyOnClick(node: any, text: string, label?: string) {
   return node;
 }
 
+// Hand the viewer a file to save.
+export function saveFile(data: any, name: string, type: string) {
+  const a: any = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([data], { type }));
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+
 // A URL-friendly slug for a nav label (used to put the active tab in the address bar).
 export function slug(text: string): string {
   return (text || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -194,6 +204,8 @@ export function navLink(nav: any, label: string, icon?: string) {
   return a;
 }
 export function navLabel(link: any) { return (link?.dataset?.label || link?.textContent || '') as string; }
+/// Whether a nav link is the page a URL hash names: its own slug, or the one it had before a rename, so old links still open it.
+export function navMatches(link: any, wanted: string) { return slug(navLabel(link)) === wanted || (!!wanted && link?.dataset?.was === wanted); }
 
 export function activate(link: any, sec: any) {
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
