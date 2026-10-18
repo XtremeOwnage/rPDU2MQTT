@@ -1745,27 +1745,8 @@
 @media (max-width: 560px) { .ps-row { grid-template-columns: 1fr; } .ps-row-note { grid-column: 1; } }
 .ps-row-fix { font-family: var(--mono); font-size: 12px; width: 100%; }
 
-/* The panel directory as printed for the panel door. */
-.ps-print { display: none; }
-.ps-print-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.ps-print-head h3 { margin: 0; }
-.ps-print-when { color: var(--muted); font-size: 11pt; }
-.ps-print-grid { width: 100%; border-collapse: collapse; margin-top: 6px; table-layout: fixed; }
-.ps-print-grid th, .ps-print-grid td { border: 1px solid #999; padding: 2px 4px; font-size: 9pt; line-height: 1.15; overflow: hidden; }
-.ps-print-grid th { background: #eee; font-size: 8pt; text-transform: uppercase; letter-spacing: .04em; }
-.ps-print-grid col, .ps-print-desc { width: auto; }
-.ps-print-wire, .ps-print-amps { width: 8%; text-align: center; font-variant-numeric: tabular-nums; }
-.ps-print-slot { width: 6%; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; background: #f3f3f3; }
-.ps-print-desc.is-empty, .ps-print-desc.is-unknown { color: #555; font-style: italic; }
-@media print {
-  body:has(.section.ps.active) nav, body:has(.section.ps.active) .appbar, body:has(.section.ps.active) #savebar,
-  body:has(.section.ps.active) .nav-toggle, body:has(.section.ps.active) .project-link,
-  .section.ps.active > *:not(.ps-print) { display: none !important; }
-  .section.ps.active .ps-print { display: block; color: #000; }
-  /* A 42-slot directory fits one page; never split it. */
-  .ps-print-grid tr { break-inside: avoid; }
-  @page { margin: 10mm; }
-}
+/* Print… hands the PDF to the browser from a frame nobody sees. */
+.ps-print-frame { position: fixed; right: 0; bottom: 0; width: 0; height: 0; border: 0; }
 
 /* Tracing a breaker: the baseline, and the channel that went dark with it. */
 .ps-trace { display: grid; gap: var(--sp-2); }

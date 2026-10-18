@@ -12816,18 +12816,25 @@ function addPanelScheduleSection(nav     , sections     ) {
   // The enclosure: the two columns of breakers either side of the bus bar down the middle.
   sec.appendChild(el('div', { class: 'ps-panel' }, el('div', { class: 'ps-bus' }), grid));
 
-  // The same directory laid out for the inside of the panel door (#460): shown only on paper.
-  const printable = el('div', { class: 'ps-print' });
-  sec.appendChild(printable);
   traceStart.onclick = () => {
     const p = shown();
     if (!p) { toast('Add a panel first.', false); return; }
     trace(p, null);
   };
+  // Printing prints the PDF (#592), so paper always gets the same layout whichever way it is made.
   printBtn.onclick = () => {
-    const w      = window;
-    if (typeof w.print === 'function') w.print();
-    else toast('This browser cannot print from here.', false);
+    const p = shown();
+    if (!p) { toast('Add a panel first.', false); return; }
+    const url = URL.createObjectURL(new Blob([directoryPdf(p, slotsOf(p))], { type: 'application/pdf' }));
+    const frame      = el('iframe', { class: 'ps-print-frame', title: 'Panel directory' });
+    frame.onload = () => {
+      // A browser that will not print a PDF from a frame opens it instead, to print from its own viewer.
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+      catch { window.open(url, '_blank'); }
+      setTimeout(() => { frame.remove(); URL.revokeObjectURL(url); }, 60000);
+    };
+    frame.src = url;
+    document.body.appendChild(frame);
   };
 
   let panels          = [];
@@ -13423,57 +13430,13 @@ function addPanelScheduleSection(nav     , sections     ) {
 
   /// What a breaker reads as on paper: what it feeds, or that nobody has identified it. Never blank —
   /// a slot nobody has written down is the point of printing it.
-  const printWords = (b         , unknown = 'Unknown — not identified') =>
+  const printWords = (b         ) =>
     b.state === 'unused' ? 'Unused'
-      : b.state === 'unknown' ? (b.description ? `${b.description} ????` : unknown)
-        : b.description || unknown;
+      : b.state === 'unknown' ? (b.description ? `${b.description} ????` : 'Unknown')
+        : b.description || 'Unknown';
 
-  /// One slot as the door shows it: what feeds it, its wire and rating, and whether it is a gap.
-  const printSlot = (p       , slot        ) => {
-    const on = p.breakers.filter(b => (b.poles === 2 ? [b.slot, b.slot + 2] : [b.slot]).includes(slot));
-    return {
-      words: on.length
-        ? on.map(b => b.slot === slot ? printWords(b) : `${b.number} — the other half of the breaker above`).join(' / ')
-        : 'Empty',
-      wire: on.map(b => b.wire).filter(Boolean).join(' / '),
-      amps: on.map(b => b.amps ? String(b.amps) : '').filter(Boolean).join(' / '),
-      gap: on.some(b => b.state === 'unknown') ? 'unknown' : on.length ? '' : 'empty',
-    };
-  };
   const printedOn = () => new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-
-  /// The directory laid out as the panel is, for the door: odd slots down the left, even down the right.
-  const drawPrint = (p       , slots        ) => {
-    printable.innerHTML = '';
-    const when = printedOn();
-    printable.appendChild(el('div', { class: 'ps-print-head' },
-      el('h3', { text: p.name || p.id }),
-      el('span', { class: 'ps-print-when', text: `${slots} slots · ${when}` })));
-    const table = el('table', { class: 'ps-print-grid' });
-    const head = el('tr');
-    ['Circuit', 'Wire', 'A', '#', '#', 'A', 'Wire', 'Circuit'].forEach(h => head.appendChild(el('th', { text: h })));
-    table.appendChild(el('thead', {}, head));
-    const body = el('tbody');
-    const side = (slot        , tr     , mirrored         ) => {
-      const at = printSlot(p, slot);
-      const cells = [
-        el('td', { class: 'ps-print-desc' + (at.gap ? ' is-' + at.gap : ''), text: at.words }),
-        el('td', { class: 'ps-print-wire', text: at.wire }),
-        el('td', { class: 'ps-print-amps', text: at.amps }),
-        el('td', { class: 'ps-print-slot', text: String(slot) }),
-      ];
-      (mirrored ? [...cells].reverse() : cells).forEach(c => tr.appendChild(c));
-    };
-    for (let slot = 1; slot <= slots; slot += 2) {
-      const tr = el('tr');
-      tr.dataset.slot = String(slot);
-      side(slot, tr, false);
-      if (slot + 1 <= slots) side(slot + 1, tr, true);
-      body.appendChild(tr);
-    }
-    table.appendChild(body);
-    printable.appendChild(table);
-  };
+  const slotsOf = (p       ) => Number(configPanel(p.id)?.Slots) || p.slots;
 
   /// One slot as paper carries it: a paragraph per breaker, so a tandem's halves each get their own lines.
   const paperSlot = (p       , slot        , slots        ) => {
@@ -13484,7 +13447,7 @@ function addPanelScheduleSection(nav     , sections     ) {
       // A double-pole is one cell across both its slots, as it is one handle in the panel.
       span: own.length === 1 && own[0].poles === 2 && on.length === 1 && slot + 2 <= slots,
       below: own.length === 0 && above.length === 1,
-      words: on.length ? [...own.map(b => printWords(b, 'Unknown')), ...above.map(b => `${b.number || b.slot} (2-pole)`)] : ['Empty'],
+      words: on.length ? [...own.map(b => printWords(b)), ...above.map(b => `${b.number || b.slot} (2-pole)`)] : ['Empty'],
       wire: own.map(b => b.wire).filter(Boolean),
       amps: own.map(b => b.amps ? String(b.amps) : '').filter(Boolean),
       gap: !on.length || own.some(b => b.state === 'unknown' || (b.state !== 'unused' && !b.description)),
@@ -13616,7 +13579,7 @@ function addPanelScheduleSection(nav     , sections     ) {
   const exportSheet = () => {
     const p = shown();
     if (!p) { toast('Add a panel first.', false); return; }
-    const slots = Number(configPanel(p.id)?.Slots) || p.slots;
+    const slots = slotsOf(p);
     const stem = (slug(p.name || p.id) || 'panel') + '-directory';
     const pdf = btn('PDF', 'primary');
     pdf.onclick = () => { saveFile(directoryPdf(p, slots), `${stem}.pdf`, 'application/pdf'); closeSheet(); };
@@ -13693,7 +13656,6 @@ function addPanelScheduleSection(nav     , sections     ) {
         ? `Incoming: no data${volts ? `, though ${labelOf(panelNode)} reports${volts}` : ` — ${labelOf(panelNode)} has no current reading`}.`
         : `Incoming: ${Math.round(drawn.incoming).toLocaleString('en-US')} W${volts} through ${labelOf(panelNode)}.`;
     drawChecks(drawn);
-    drawPrint(drawn, slots);
     // Every slot is one row tall, so a double-pole spanning two is twice the height of a single — with `auto`
     // the two rows it spans had nothing else in them and split its height between them instead.
     grid.style.gridTemplateRows = `repeat(${rows}, minmax(var(--ps-row), auto))`;
