@@ -2126,7 +2126,7 @@ export default function mount(sec: any, host: any) {
         side.appendChild(field('Panel', select(panels, it.Panel || '', v => act(() => { it.Panel = v; })), 'The panel in the Panel Schedule this is. Wires drawn from it can carry its circuits.'));
       }
       if (!supply || it.Kind === 'panel') {
-        side.appendChild(field(it.Kind === 'panel' ? 'Fed from' : 'Circuit', searchSelect(circuitChoices(it.Kind === 'panel', it.Circuit || ''), it.Circuit || '', v => { act(() => { it.Circuit = v; }); offerBeneath(it); }, { placeholder: 'Search by breaker, description or panel…' }),
+        side.appendChild(field(it.Kind === 'panel' ? 'Fed from' : 'Circuit', searchSelect(circuitChoices(it.Kind === 'panel', it.Circuit || ''), it.Circuit || '', v => { act(() => { it.Circuit = v; }); placeBeneath(it); }, { placeholder: 'Search by breaker, description or panel…' }),
           it.Kind === 'panel' ? 'For a subpanel: the breaker feeding it.' : 'The breaker feeding it. Unknown is fine — trace it below, or wire it to something on a known circuit.'));
       }
       if (it.Kind === 'outlet') {
@@ -2135,8 +2135,15 @@ export default function mount(sec: any, host: any) {
         g.onchange = () => act(() => { if (g.checked) it.Gfci = true; else delete it.Gfci; });
         side.appendChild(el('label', { class: 'ld-inst fp-check', title: 'Whatever is wired from its load side is protected by it.' }, g, ' GFCI outlet'));
       }
-      side.appendChild(field('Metered by', searchSelect(meterChoices(it.Node || ''), it.Node || '', v => { act(() => { it.Node = v; }); offerBeneath(it); }, { placeholder: 'Search meters by name or id…' }),
-        'A smart plug, CT, ESPHome sensor, PDU outlet or anything else reading this alone.'));
+      // One or the other: a known circuit is what meters it, and a meter it already had hangs beneath that circuit.
+      if (!it.Circuit || supply)
+        side.appendChild(field('Metered by', searchSelect(meterChoices(it.Node || ''), it.Node || '', v => { act(() => { it.Node = v; }); placeBeneath(it); }, { placeholder: 'Search meters by name or id…' }),
+          'A smart plug, CT, ESPHome sensor, PDU outlet or anything else reading this alone. Pick its circuit instead when it is known.'));
+      else if (it.Node) {
+        const detach = btn('Detach');
+        detach.onclick = () => act(() => { it.Node = ''; });
+        side.appendChild(field('Metered by', el('div', { class: 'fp-colour-row' }, el('span', { text: nodeLabel(it.Node) }), detach), 'Beneath its circuit in the energy flow.'));
+      }
       // Its real size: width and depth, which way it is turned, and whether it is round.
       const inch = 0.0254 * scale();
       const looks = select([['', isSized(it) ? '— its own size —' : '— an icon —'], ...PLAN_FOOTPRINTS.map(f => [f[0], f[1]] as [string, string])], '', v => {
@@ -2170,7 +2177,7 @@ export default function mount(sec: any, host: any) {
       side.append(row('Where', where));
       if (!supply || it.Circuit) side.append(row('Circuit', it.Circuit ? refLabel(it.Circuit) : 'not known yet'));
       if (it.Kind === 'panel' && it.Panel) side.append(row('Panel', it.Panel));
-      side.append(row('Metered by', it.Node ? nodeLabel(it.Node) : 'not metered'));
+      if (it.Node || !it.Circuit || supply) side.append(row('Metered by', it.Node ? nodeLabel(it.Node) : 'not metered'));
     }
     if (it.Node) side.appendChild(row('Reading', fmt(live?.placements[it.Id]?.value)));
 
@@ -2426,20 +2433,18 @@ export default function mount(sec: any, host: any) {
     side.appendChild(actions(...btns));
   };
 
-  /// A metered device on a known circuit belongs beneath that circuit in the energy flow; moving it is offered, never done quietly.
-  const offerBeneath = (it: any) => {
+  /// A metered device on a known circuit belongs beneath that circuit in the energy flow, so it is moved there.
+  const placeBeneath = (it: any) => {
     const c = it.Circuit ? circuitOf(it.Circuit) : null;
     if (!it.Node || !c?.node || it.Node === c.node) return;
     const links: any[] = ensure(flowIn(), 'Links', []);
     const feeders = links.filter(l => l.To === it.Node).map(l => String(l.From));
     if (feeders.length === 1 && feeders[0] === c.node) return;
-    const from = feeders.length ? `It is fed by ${feeders.map(nodeLabel).join(', ')} now; that link is replaced.` : 'Nothing feeds it in the energy flow yet.';
-    if (!confirm(`Place ${nodeLabel(it.Node)} beneath ${circuitLabel(c)} (${nodeLabel(c.node)}) in the energy flow?\n\n${from}\n\nCancel leaves the energy flow as it is.`)) return;
     act(() => {
       for (let i = links.length - 1; i >= 0; i--) if (links[i].To === it.Node) links.splice(i, 1);
       links.push({ From: c.node, To: it.Node });
     });
-    toast('Placed beneath its circuit. Press Save to keep it.', true);
+    toast(`${nodeLabel(it.Node)} placed beneath ${circuitLabel(c)}${feeders.length ? `, replacing its link from ${feeders.map(nodeLabel).join(', ')}` : ''}. Press Save to keep it.`, true);
   };
 
 
