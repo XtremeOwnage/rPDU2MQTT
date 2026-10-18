@@ -18,7 +18,7 @@ title: Plugins
 | Loaded / Not loaded / Failed | State in the running process |
 
 - Every plugin is on by default.
-- With **Vertiv rPDU** off, its pages (**Vertiv rPDU**, **Overrides**, **Live Data**, **PDU Control**, **Paths**) are hidden.
+- With **Vertiv rPDU** off, its pages (**Vertiv rPDU**, **Overrides**, **PDU Data**, **PDU Control**, **Paths**) are hidden.
 - With **EmonCMS** off, its page is hidden, nodes cannot read EmonCMS feeds, and `emoncms` is no longer a history backend. Its settings are kept.
 - **Locations** off: no Floor Plans, place pickers, place totals or area sync. Settings kept. `floorplan` reads as `locations`.
 

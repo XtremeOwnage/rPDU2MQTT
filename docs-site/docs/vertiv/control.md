@@ -1,14 +1,14 @@
 ---
-title: Live Data, PDU Control, Paths
+title: PDU Data, PDU Control, Paths
 ---
 
-# Live Data, PDU Control, Paths
+# PDU Data, PDU Control, Paths
 
-## Live Data
+## PDU Data
 
-**Sources › Live Data**. Every PDU reading. **Grouped** (by outlet) or **Flat** (one row per reading).
+**Sources › PDU Data**. Every PDU reading. **Grouped** (by outlet) or **Flat** (one row per reading).
 
-![Live Data page](../assets/screenshots/live-data.webp)
+![PDU Data page](../assets/screenshots/live-data.webp)
 
 ## PDU Control
 

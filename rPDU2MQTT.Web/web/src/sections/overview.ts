@@ -10,7 +10,7 @@ import { followRange, currentRange, rangeSpan, rangeLabel, LIVE, type SharedRang
 const JUMPS: [string, string, string][] = [
   ['Energy', '⚡', 'Totals, and where the power came from'],
   ['Flow', '⇄', 'Follow power from source to circuit'],
-  ['Live Data', '∿', 'Every outlet and reading, right now'],
+  ['PDU Data', '∿', 'Every PDU outlet and reading, right now'],
   ['Trends', '▦', 'Charts over hours, days or months'],
   ['Node Trends', '▥', 'Compare circuits over time'],
   ['Floor Plans', '⌗', 'Power and climate, room by room'],

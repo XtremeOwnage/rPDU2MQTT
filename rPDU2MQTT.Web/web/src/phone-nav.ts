@@ -3,7 +3,7 @@
 import { el } from './helpers.js';
 
 const NARROW = '(max-width: 860px)';
-const TABS: [string, string][] = [['Overview', '⌂'], ['Energy', '⚡'], ['Flow', '⇄'], ['Live Data', '∿']];
+const TABS: [string, string][] = [['Overview', '⌂'], ['Energy', '⚡'], ['Flow', '⇄'], ['PDU Data', '∿']];
 
 const narrow = () => { try { return !!window.matchMedia?.(NARROW).matches; } catch { return false; } };
 const link = (label: string): any => document.querySelector(`#nav a[data-label="${label}"]`);
