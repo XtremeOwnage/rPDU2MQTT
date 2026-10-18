@@ -1949,7 +1949,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             }
         });
 
-        // Live readings for the Live Data view.
+        // Live readings for the PDU Data view.
         app.MapGet("/api/livedata", async (HttpContext ctx) =>
         {
             return Results.Json(await BuildLiveDataAsync(ctx.Request.Query["instance"], ctx.RequestAborted), ConfigSchema.Json);

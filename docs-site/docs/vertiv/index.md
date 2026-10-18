@@ -75,6 +75,6 @@ With **Enable Write Actions** on, each outlet gets:
 | --- | --- |
 | [Overrides](overrides.md) | Names, ids, make/model, enable/disable per device, outlet and measurement |
 | [OneView](oneview.md) | Clusters of PDUs, group roll-ups and group actions |
-| [Live Data, PDU Control, Paths](control.md) | Readings, outlet control, generated topics and metric names |
+| [PDU Data, PDU Control, Paths](control.md) | Readings, outlet control, generated topics and metric names |
 
 All settings: [Pdus reference](../reference/settings/pdus.md).

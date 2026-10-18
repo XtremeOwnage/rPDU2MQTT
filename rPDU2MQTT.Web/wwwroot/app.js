@@ -3673,7 +3673,7 @@ function initStackTables() {
 /// group holding the page being read rather than on forty links.
 
 const NARROW = '(max-width: 860px)';
-const TABS                     = [['Overview', '⌂'], ['Energy', '⚡'], ['Flow', '⇄'], ['Live Data', '∿']];
+const TABS                     = [['Overview', '⌂'], ['Energy', '⚡'], ['Flow', '⇄'], ['PDU Data', '∿']];
 
 const narrow = () => { try { return !!window.matchMedia?.(NARROW).matches; } catch { return false; } };
 const link = (label        )      => document.querySelector(`#nav a[data-label="${label}"]`);
@@ -4773,9 +4773,9 @@ function addControlSection(nav     , sections     ) {
 // A read-only view of the current readings being pulled from the PDU(s).
 
 function addLiveDataSection(nav     , sections     ) {
-  const link = navLink(nav, "Live Data", "∿");
+  const link = navLink(nav, "PDU Data", "∿");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  const h = document.createElement('h2'); h.textContent = 'Live Data'; sec.appendChild(h);
+  const h = document.createElement('h2'); h.textContent = 'PDU Data'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'Current measurements pulled from the PDU(s) on each poll.'; sec.appendChild(d);
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';
@@ -9722,7 +9722,7 @@ function addEnergyOverviewSection(nav     , sections     ) {
 const JUMPS                             = [
   ['Energy', '⚡', 'Totals, and where the power came from'],
   ['Flow', '⇄', 'Follow power from source to circuit'],
-  ['Live Data', '∿', 'Every outlet and reading, right now'],
+  ['PDU Data', '∿', 'Every PDU outlet and reading, right now'],
   ['Trends', '▦', 'Charts over hours, days or months'],
   ['Node Trends', '▥', 'Compare circuits over time'],
   ['Floor Plans', '⌗', 'Power and climate, room by room'],

@@ -657,7 +657,7 @@ Gui:
 | Connection tests | MQTT: "Test MQTT connection" (broker connectivity). PDU: "Test PDU connection" (fetches live data, reports device/outlet counts). |
 | Home Assistant actions | **Republish discovery**: reloads the saved config from the source, re-reads the PDU, republishes. **Clear discovery**: removes retained discovery messages until discovery runs again. |
 | Overrides | Lists the live devices, outlets (by index), measurement types and OneView groups, each with Name/ID/Enabled. Existing overrides for undiscovered entities are also shown. |
-| Live Data | Read-only current measurements. **Grouped**: one row per outlet/entity, grouped by device, a column per measurement type plus on/off state. **Flat**: one row per reading. Filter and optional 5-second auto-refresh. |
+| PDU Data | Read-only current measurements. **Grouped**: one row per outlet/entity, grouped by device, a column per measurement type plus on/off state. **Flat**: one row per reading. Filter and optional 5-second auto-refresh. |
 | Paths | Generated **MQTT topic**, **Prometheus metric** and **EmonCMS key** per measurement, with click-to-copy. Prometheus/EmonCMS columns appear only when enabled. |
 | Export YAML | Current form state (including unsaved edits) as `config.yaml`, with Copy. |
 | Save | Writes the config file and keeps `config.yaml.bak`. Discovery-affecting edits (overrides, names, templates) apply on **Republish discovery**. MQTT/PDU host/port and GUI/Health ports need a restart. |

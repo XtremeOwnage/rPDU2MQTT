@@ -28,7 +28,7 @@ vm.runInContext(code, sandbox, { filename: 'app.js' });
 await new Promise(r => setTimeout(r, 60));
 
 const labels = query(getEl('nav'), 'a', true).map(a => a.dataset.label);
-for (const gone of ['Vertiv rPDU', 'Overrides', 'Live Data', 'PDU Control', 'Paths'])
+for (const gone of ['Vertiv rPDU', 'Overrides', 'PDU Data', 'PDU Control', 'Paths'])
   if (labels.includes(gone)) fail(`"${gone}" is in the nav with Vertiv not loaded`);
 if (labels.includes('EmonCMS')) fail('"EmonCMS" is in the nav with EmonCMS not loaded');
 if (labels.includes('Floor Plans')) fail('"Floor Plans" is in the nav with the floor plan plugin not loaded');

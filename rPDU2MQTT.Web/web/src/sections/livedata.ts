@@ -3,9 +3,9 @@ import { api, btn, activate, formatNum, instanceSelector, withInstance, navLink 
 import { liveWhileActive, realtimeLive } from '../realtime.js';
 
 export function addLiveDataSection(nav: any, sections: any) {
-  const link = navLink(nav, "Live Data", "∿");
+  const link = navLink(nav, "PDU Data", "∿");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  const h = document.createElement('h2'); h.textContent = 'Live Data'; sec.appendChild(h);
+  const h = document.createElement('h2'); h.textContent = 'PDU Data'; sec.appendChild(h);
   const d = document.createElement('div'); d.className = 'desc'; d.textContent = 'Current measurements pulled from the PDU(s) on each poll.'; sec.appendChild(d);
 
   const bar = document.createElement('div'); bar.className = 'ld-toolbar';

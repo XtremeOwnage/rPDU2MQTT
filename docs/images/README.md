@@ -8,7 +8,7 @@ Used across the README and `docs/`:
 
 | Filename | What it shows | Used in |
 | --- | --- | --- |
-| `gui-live-data.webp` | GUI **Live Data** (Grouped) — the headline shot. | README |
+| `gui-live-data.webp` | GUI **PDU Data** (Grouped) — the headline shot. | README |
 | `gui-config.webp` | GUI **configuration** form (structured form + nav). | README |
 | `gui-control.webp` | GUI **Control** tab — per-outlet actions + group actions. | README |
 | `gui-paths.webp` | GUI **Paths** tab — generated MQTT/Prometheus/EmonCMS paths. | README |
