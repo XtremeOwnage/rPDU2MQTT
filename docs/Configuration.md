@@ -1404,9 +1404,11 @@ takes one. Existing extra feeders are reported, not removed.
 - A circuit drawing nothing at baseline cannot be traced; switch its load on and retry.
 - A channel that stopped reporting is never offered.
 
-**Print…** lays the directory out as the panel: odd slots left, even right, numbers in the middle, with each
-breaker's wire, rating and load. Unidentified slots print as unknown; a double-pole's second slot names its
-breaker. A 42-slot panel fits one letter or A4 page.
+**Print…** prints the directory for the panel door: slot numbers on the outside edges, odd left and even right,
+with each breaker's wire, rating and load. A double-pole is one cell across its two slots, unidentified slots
+print as unknown, and nothing is cut short. A 42-slot panel fits one letter or A4 page. **Export…** saves the same
+PDF, or directory text (one line a breaker: number, wire, rating, channel, then what it feeds) that **Import…**
+reads back.
 
 ### Floor plans
 

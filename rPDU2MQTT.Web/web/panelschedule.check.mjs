@@ -795,39 +795,51 @@ if (hits().length) fail('a channel was named as the answer although nothing was 
 shut();
 for (const k of Object.keys(fell)) delete fell[k];
 
-// The directory prints for the inside of the panel door (#460): every slot in order, nothing that is only
-// screen furniture, and a slot nobody has written down printed as unknown rather than left blank.
-// Each printed row holds a pair of slots: the odd one on the left, the even one mirrored on the right.
-const printRow = (slot) => query(sec, '.ps-print-grid tr', true).find(r => r.dataset?.slot === String(slot % 2 ? slot : slot - 1));
-const printCells = (slot) => query(printRow(slot), 'td', true).map(c => (c.textContent || '').trim());
-if (!query(sec, '.ps-print')) fail('there is no printable directory');
-if (!/\.ps-print\s*\{[^}]*display:\s*none/.test(css)) fail('the printable directory is drawn on screen as well');
-// Twelve slots are six rows, two slots to a row: the panel as it is, not a list.
-if (query(sec, '.ps-print-grid tbody tr', true).length !== 6)
-  fail(`the printed directory has ${query(sec, '.ps-print-grid tbody tr', true).length} rows for 12 slots, not 6`);
-// Odd down the left, even down the right, with the slot numbers up the middle as a panel door label is.
-const first = printCells(1);
-if (first[0] !== 'AC Heat Strips' || first[2] !== '60' || first[3] !== '1')
-  fail(`the first slot does not print what it feeds, its rating and its number: ${JSON.stringify(first)}`);
-if (first[4] !== '2' || first[7] !== 'Empty')
-  fail(`the even column is not mirrored with its number to the middle, or an empty slot is left blank: ${JSON.stringify(first)}`);
-// The second slot of a double-pole says what holds it rather than repeating the circuit.
-if (!/other half of the breaker above/.test(printCells(3)[0])) fail(`slot 3 does not say the breaker above holds it: ${JSON.stringify(printCells(3))}`);
-// A circuit nobody has identified prints as unknown — the gaps are the reason for printing it.
-if (!/Fridge \?\?\?\?/.test(printCells(5)[0])) fail(`an unidentified breaker does not print its mark: ${JSON.stringify(printCells(5))}`);
-if (!query(printRow(5), 'td').classList.contains('is-unknown')) fail('an unidentified circuit is not marked on the printout');
-// Both halves of a tandem are printed, not just the one on top.
-if (!/Kitchen lights rewritten \/ Freezer/.test(printCells(6)[7])) fail(`a tandem prints only one of its halves: ${JSON.stringify(printCells(6))}`);
-// Printing takes the page chrome off and leaves the directory.
-const printRules = (/@media print\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g);
-const printCss = [...css.matchAll(printRules)].map(m => m[1]).join('\n');
-if (!/\.section\.ps\.active\s*>\s*\*:not\(\.ps-print\)[^}]*display:\s*none/.test(printCss))
-  fail('printing the panel schedule prints the editor as well as the directory');
-if (!/body:has\(\.section\.ps\.active\)\s+nav[^}]*display:\s*none/.test(printCss)) fail('printing keeps the navigation on the page');
-let printed = 0;
-sandbox.window.print = () => printed++;
+// The directory exports (#592): a PDF of the printed layout for the door, and text Import reads back.
+const saves = [];
+sandbox.Blob = class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; } };
+sandbox.URL = { createObjectURL: (b) => { saves.push(b); return 'blob:export'; }, revokeObjectURL() { } };
+const downloads = [];
+const made = sandbox.document.createElement;
+sandbox.document.createElement = (t) => { const e = made(t); if (t === 'a') { e.click = () => downloads.push(e.download); } return e; };
+const exportAs = (label) => {
+  query(sec, 'button', true).find(b => b.textContent === 'Export\u2026').onclick();
+  const pick = query(getEl('overlay'), 'button', true).find(b => b.textContent === label);
+  if (!pick) fail(`the export sheet has no ${label} button`);
+  pick.onclick();
+  return downloads.at(-1);
+};
+if (exportAs('Directory text') !== 'main-panel-directory.txt') fail('the directory text is not saved under the panel\u2019s name');
+const exported = String(saves.at(-1).parts[0]);
+const lineFor = (num) => exported.split('\n').find(l => l.startsWith(num + ',') || l.startsWith(num + ':'));
+if (lineFor('1,3') !== '1,3,60A,N30,1,1: AC Heat Strips') fail(`a double-pole does not export as Import reads it: ${lineFor('1,3')}`);
+// A breaker with no number of its own is written by its slot, and one nobody has identified keeps its mark.
+if (lineFor('5') !== '5: Fridge ????') fail(`an unidentified breaker exports without its mark: ${lineFor('5')}`);
+if (lineFor('B06') !== 'B06,W11,20A,N30,1,5: Kitchen lights rewritten') fail(`a breaker\u2019s wire, rating and channel do not export: ${lineFor('B06')}`);
+if (exportAs('PDF') !== 'main-panel-directory.pdf') fail('the PDF is not saved under the panel\u2019s name');
+const pdf = Buffer.from(saves.at(-1).parts[0]).toString('latin1');
+if (saves.at(-1).type !== 'application/pdf' || !pdf.startsWith('%PDF-1.4') || !pdf.trimEnd().endsWith('%%EOF')) fail('the PDF is not a PDF');
+// Every object sits where the cross-reference table says it does, or a reader has to repair the file.
+const xref = Number(/startxref\n(\d+)/.exec(pdf)[1]);
+const offsets = pdf.slice(xref).split('\n').filter(l => / 00000 n $/.test(l)).map(l => Number(l.slice(0, 10)));
+offsets.forEach((o, i) => { if (!pdf.startsWith(`${i + 1} 0 obj`, o)) fail(`PDF object ${i + 1} is not where the cross-reference says`); });
+if (!/\(Main Panel\) Tj/.test(pdf) || !/\(AC Heat Strips\) Tj/.test(pdf)) fail('the PDF does not carry the panel and its circuits');
+if (!/\(Fridge \?\?\?\?\) Tj/.test(pdf)) fail('the PDF prints an unidentified breaker without its mark');
+if (!/\(Empty\) Tj/.test(pdf)) fail('the PDF leaves an empty slot blank');
+// Paper has no "read more": nothing is cut short, and a double-pole is one cell across its two slots.
+if (pdf.includes('\x85')) fail('the PDF cuts text short with an ellipsis');
+if (/other half/.test(pdf)) fail('the PDF prints a double-pole\u2019s second slot as a note instead of spanning it');
+
+// Print… prints that same PDF, from a frame nobody sees, rather than a second layout of its own.
+const before = saves.length;
 query(sec, 'button', true).find(b => b.textContent === 'Print\u2026').onclick();
-if (printed !== 1) fail('the Print button did not print');
+const frame = query(sandbox.document.body, 'iframe', true).at(-1);
+if (!frame || saves.length !== before + 1 || saves.at(-1).type !== 'application/pdf') fail('Print\u2026 does not print the PDF');
+let printed = 0;
+frame.contentWindow = { focus() { }, print: () => printed++ };
+frame.onload();
+if (printed !== 1) fail('Print\u2026 loaded the PDF but did not print it');
+if (query(sec, '.ps-print-grid')) fail('the old printed layout is still drawn');
 
 // A phone keeps the panel's two columns: a slot on screen is the slot in front of you. What gives way is the
 // detail beside each name, not the layout.
