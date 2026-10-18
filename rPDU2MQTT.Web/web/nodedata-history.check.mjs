@@ -1,7 +1,7 @@
-// Node Data at a past moment (#514): a timeline to pick the moment on, and the table read from history then.
+// Node Data at a past moment (#514): the header's time opens a timeline to pick the moment on, and the table is read from history then.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { makeDom, query } from './domstub.mjs';
+import { makeDom, query, pickRange } from './domstub.mjs';
 
 const code = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
 const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import.meta.url), 'utf8'))
@@ -53,33 +53,23 @@ const heads = () => query(sec, 'th', true).map(t => t.textContent);
 if (heads().includes('Source')) fail('the Source column is still there');
 if (!heads().includes('Updated')) fail('the live view lost its Updated column');
 
-const toggle = query(sec, 'input', true).find(i => i.parent?.tag === 'label' && i.parent.textContent.includes('Point in time'));
-if (!toggle) fail('no "Point in time" switch while history is on');
+// The header's time is the only time control.
+if (query(sec, 'input', true).some(i => (i.attrs?.type || i.type) === 'date')) fail('the page has its own date picker beside the header\'s');
+if (query(sec, 'label', true).some(l => l.textContent.includes('Point in time'))) fail('the page has its own Point in time switch beside the header\'s');
 const strip = query(sec, '.trend-timeline', false);
 if (!strip || !strip.hidden) fail('the timeline shows before a past moment was asked for');
 
-toggle.checked = true;
-toggle.dispatch('change');
-await tick();
+// The timeline ends on the header's day.
+await pickRange(getEl, { day: '2025-04-21' });
 if (!asked.some(u => u.includes('/api/flow/series?from=') && u.includes('metric=realpower'))) fail('the timeline was not loaded');
-if (strip.hidden) fail('the timeline is hidden in point-in-time mode: ' + JSON.stringify(asked) + ' / ' + sec.textContent.slice(-300));
+if (strip.hidden) fail('the timeline is hidden at a past moment: ' + JSON.stringify(asked) + ' / ' + sec.textContent.slice(-300));
+const asked4 = asked.filter(u => u.includes('/api/flow/series?from=')).pop();
+const to4 = new Date(decodeURIComponent(/to=([^&]+)/.exec(asked4)[1]));
+if (to4.getTime() !== new Date('2025-04-21T23:59:59').getTime()) fail(`picking 2025-04-21 asked for a timeline ending ${to4.toISOString()}`);
 const last = asked.filter(u => u.includes('/api/flow/live')).pop();
 if (!last.includes('at=' + encodeURIComponent(new Date(at[2]).toISOString()))) fail(`opened on the wrong moment: ${last}`);
 if (!sec.textContent.includes('333')) fail('the value at the newest moment is not shown');
 if (heads().includes('Updated')) fail('a past moment still shows an age column');
-
-// Any day can be picked: the timeline then ends on it.
-const dayIn = query(sec, 'input', true).find(i => i.attrs?.type === 'date' || i.type === 'date');
-if (!dayIn) fail('no day picker in point-in-time mode');
-dayIn.value = '2025-04-21';
-dayIn.dispatch('change');
-await tick();
-const asked4 = asked.filter(u => u.includes('/api/flow/series?from=')).pop();
-const to4 = new Date(decodeURIComponent(/to=([^&]+)/.exec(asked4)[1]));
-if (to4.getTime() !== new Date('2025-04-21T23:59:59').getTime()) fail(`picking 2025-04-21 asked for a timeline ending ${to4.toISOString()}`);
-dayIn.value = '';
-dayIn.dispatch('change');
-await tick();
 
 // A click on the timeline's left edge picks the oldest reading.
 const svg = query(strip, 'svg', false);
@@ -94,9 +84,7 @@ later.click();
 await tick();
 if (!sec.textContent.includes('222')) fail('▶ did not step to the next reading');
 
-toggle.checked = false;
-toggle.dispatch('change');
-await tick();
+await pickRange(getEl, { live: true });
 if (asked.filter(u => u.includes('/api/flow/live')).pop().includes('at=')) fail('switching back still asks for a past moment');
 if (!strip.hidden) fail('the timeline stays after switching back to live');
 if (!heads().includes('Updated')) fail('switching back did not restore the Updated column');

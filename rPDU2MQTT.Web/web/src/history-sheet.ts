@@ -2,6 +2,7 @@ import { api, btn, closeSheet, el, openSheet } from './helpers.js';
 import { tempUnit, toTemp } from './temp-units.js';
 import { sparkline } from './charts.js';
 import { editNodeOnNextOpen } from './sections/nodes.js';
+import { currentRange, rangeLabel, rangeSpan } from './history-control.js';
 
 export const HISTORY_WINDOWS: [string, string][] = [
   ['minutes=60&step=30', 'Last hour'],
@@ -42,6 +43,17 @@ export type HistoryRequest = {
   window?: string;
 };
 
+/// The header's time as a window, while it shows the past: the days it covers, up to the end of its last one. '' for live.
+function headerWindow(): string {
+  const span = rangeSpan(currentRange());
+  if (!span) return '';
+  const from = new Date(`${span.day}T00:00:00`);
+  from.setDate(from.getDate() - (span.days - 1));
+  const to = Math.min(Date.now(), new Date(`${span.day}T23:59:59`).getTime());
+  const step = span.days <= 1 ? 900 : span.days <= 7 ? 3600 : span.days <= 31 ? 21600 : 86400;
+  return `from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(new Date(to).toISOString())}&step=${step}`;
+}
+
 export function openHistorySheet(o: HistoryRequest) {
   const nodes = o.nodes.filter(Boolean);
   const labelOf = o.labelOf || ((id: string) => id);
@@ -51,7 +63,9 @@ export function openHistorySheet(o: HistoryRequest) {
   const note = el('div', { class: 'desc' });
   const breakdown = el('div', { class: 'hs-parts' });
   const parts = (o.parts || []).filter(id => id && !(nodes.length === 1 && nodes[0] === id));
-  let window = o.window && HISTORY_WINDOWS.some(([q]) => q === o.window) ? o.window : rememberedWindow();
+  // The header's past time wins over the sheet's own windows, which look back from now.
+  const fromHeader = headerWindow();
+  let window = fromHeader || (o.window && HISTORY_WINDOWS.some(([q]) => q === o.window) ? o.window : rememberedWindow());
   let metricNow = metric;
 
   const load = async () => {
@@ -139,6 +153,10 @@ export function openHistorySheet(o: HistoryRequest) {
   });
   const markWindow = () => buttons.forEach((b, i) => b.classList.toggle('primary', HISTORY_WINDOWS[i][0] === window));
   markWindow();
+  if (fromHeader) {
+    buttons.forEach(b => { b.hidden = true; });
+    picker.insertBefore(el('span', { class: 'desc', style: { margin: '0' }, text: `${rangeLabel(currentRange())}, as picked above.` }), picker.firstChild);
+  }
   const metricSel = el('select', { class: 'hs-metric', title: 'Which measurement to chart.' }) as HTMLSelectElement;
   HISTORY_METRICS.forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t.replace('°C', tempUnit()) })));
   if (!HISTORY_METRICS.some(([v]) => v === metricNow)) metricSel.appendChild(el('option', { value: metricNow, text: metricNow }));

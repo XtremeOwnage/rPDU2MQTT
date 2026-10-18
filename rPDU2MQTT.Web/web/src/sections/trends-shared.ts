@@ -121,30 +121,20 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   let picked: Span | null = null;
   const strip = spec.timeline
     ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } }, {
-      can: () => !!spanOfRange(rangeSel.value) || !!wider(),
+      // Zooming out past the header's window would leave it.
+      can: () => !fromHeader && (!!spanOfRange(rangeSel.value) || !!wider()),
       go: () => { const r = wider(); if (r) useRange(r); },
       zoomTo: (s) => useRange(customRange(s)),
     })
     : null;
   const unpick = () => { picked = null; strip?.clear(); };
 
+  // Windows up to now. A past day or run of days is picked in the header, which this page follows.
   const rangeSel = el('select', { title: 'How far back to chart.' }) as HTMLSelectElement;
-  RANGES.forEach(r => rangeSel.appendChild(el('option', { value: r.value, text: r.text })));
-  rangeSel.appendChild(el('option', { value: 'custom', text: 'custom range…' }));
+  RANGES.filter(r => !r.value.includes('back=')).forEach(r => rangeSel.appendChild(el('option', { value: r.value, text: r.text })));
   rangeSel.value = 'days=30';
-  // A typed date range: from the start of the first day to the end of the last (or now).
-  const fromDay = el('input', { type: 'date', title: 'First day' }) as HTMLInputElement;
-  const toDay = el('input', { type: 'date', title: 'Last day' }) as HTMLInputElement;
-  const applyDays = btn('Apply');
-  const customBox = el('span', { class: 'trend-custom', hidden: true }, fromDay, el('span', { text: '–' }), toDay, applyDays);
-  applyDays.onclick = () => {
-    if (!fromDay.value || !toDay.value) return;
-    const from = new Date(`${fromDay.value}T00:00:00`).getTime();
-    const to = Math.min(Date.now(), new Date(`${toDay.value}T23:59:59`).getTime());
-    if (!(to > from)) return;
-    customBox.hidden = true;
-    useRange(customRange({ from, to }));
-  };
+  // Hidden while the header shows the past: the header decides the window then.
+  const rangeLab = el('label', { class: 'ld-inst' }, 'Show ', rangeSel);
   // Windows the period buttons add, which RANGES does not list.
   const added = new Map<string, Range>();
   const rangeOf = (): Range => RANGES.find(r => r.value === rangeSel.value) || added.get(rangeSel.value)
@@ -257,11 +247,21 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
 
   // The header's time decides the window; the dropdown is for looking closer while live.
   let fromHeader = false;
+  // Options added for the header's window, dropped again on the way back to live.
+  const headerOpts = new Set<string>();
+  const headerOption = (value: string, text: string) => {
+    if (Array.from(rangeSel.children).some((o: any) => o.value === value)) return;
+    rangeSel.appendChild(el('option', { value, text }));
+    headerOpts.add(value);
+  };
   followRange(sec, r => {
     const span = rangeSpan(r);
+    rangeLab.hidden = !!span;
     if (!span) {
       if (!fromHeader) return;
       fromHeader = false;
+      Array.from(rangeSel.children).forEach((o: any) => { if (headerOpts.has(o.value)) { added.delete(o.value); o.remove(); } });
+      headerOpts.clear();
       rangeSel.value = 'days=30';
       rangeSel.onchange!({} as any);
       return;
@@ -279,15 +279,14 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
         useRange(customRange({ from: new Date(`${day}T00:00:00`).getTime(), to: new Date(`${day}T23:59:59`).getTime() }));
         return;
       }
-      text = '';
+      text = range === 'today=1' ? '' : 'yesterday';
     } else {
       range = day === today ? `days=${days}` : `days=${days}&at=${end}`;
       text = day === today ? `last ${days} days` : `${days} days to ${day}`;
     }
-    if (text && !RANGES.some(x => x.value === range) && !added.has(range)) {
+    if (text && !RANGES.some(x => x.value === range) && !added.has(range))
       added.set(range, { value: range, text, wants: 'energy', seconds: days * 86_400 });
-      rangeSel.appendChild(el('option', { value: range, text }));
-    }
+    if (text) headerOption(range, text);
     rangeSel.value = range;
     unpick();
     syncIntervals();
@@ -296,15 +295,6 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
     load();
   });
   rangeSel.onchange = () => {
-    if (rangeSel.value === 'custom') {
-      const day = (t: number) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-      toDay.max = fromDay.max = day(Date.now());
-      if (!toDay.value) toDay.value = day(Date.now());
-      if (!fromDay.value) fromDay.value = day(Date.now() - 7 * 86_400_000);
-      customBox.hidden = false;
-      return;
-    }
-    customBox.hidden = true;
     unpick(); syncIntervals(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
 
   // A counter's readings are not a per-bar quantity; the differences between them are.
@@ -400,7 +390,8 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
 
   const showRange = (value: string) => {
     const clean = value.replace(/&step=\d+/g, '');
-    if (!RANGES.some(r => r.value === clean)) return;
+    // While the header shows the past, its window is the one charted.
+    if (fromHeader || !Array.from(rangeSel.children).some((o: any) => o.value === clean)) return;
     rangeSel.value = clean;
     unpick();
     syncIntervals();
@@ -506,7 +497,7 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   opts.onclick = () => { bar.classList.toggle('opts-open'); summarise(); };
   refresh.classList.add('trend-refresh');
   bar.append(opts, refresh,
-    el('label', { class: 'ld-inst' }, 'Show ', rangeSel), customBox,
+    rangeLab,
     el('label', { class: 'ld-inst' }, 'every ', intervalSel),
     el('label', { class: 'ld-inst' }, 'of ', metricSel),
     el('label', { class: 'ld-inst' }, 'as ', chartSel),

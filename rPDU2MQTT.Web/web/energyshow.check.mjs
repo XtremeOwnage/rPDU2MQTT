@@ -185,8 +185,7 @@ query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Node Data').click(
 await new Promise(r => setTimeout(r, 100));
 const ndSec = query(getEl('sections'), '.section', true).find(x => x.classList.contains('active'));
 if (query(ndSec, 'div', true).some(d => cn(d).includes('range-banner'))) fail('Node Data says it is live only, though it shows the past');
-const ndPast = query(ndSec, 'label', true).find(l => /Point in time/.test(l.textContent));
-if (!ndPast || !query(ndPast, 'input', true)[0]?.checked) fail('Node Data does not follow the header\'s time');
+if (query(ndSec, 'th', true).some(t => t.textContent === 'Updated')) fail('Node Data does not follow the header\'s time');
 // …and a data page that cannot show the past says so, rather than live readings under a header naming another day.
 query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Roll-up').click();
 await new Promise(r => setTimeout(r, 100));
