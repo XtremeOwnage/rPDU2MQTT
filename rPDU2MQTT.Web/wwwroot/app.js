@@ -13494,7 +13494,7 @@ function addPanelScheduleSection(nav     , sections     ) {
   /// The same directory as a PDF (#592), for the inside of the panel door. Every word is printed: cells wrap
   /// rather than cut, and the text is set as large as still fits the page. Letter, kept inside A4's width.
   const directoryPdf = (p       , slots        ) => {
-    const margin = 36, titleH = 30, headH = 16, pad = 4;
+    const margin = 36, titleH = 30, headH = 16, pad = 4, bus = 12;
     const left = margin, right = 612 - margin, room = 792 - 2 * margin - titleH - headH;
     const rows = Math.ceil(slots / 2);
     const cells = Array.from({ length: slots }, (_, i) => paperSlot(p, i + 1, slots));
@@ -13505,7 +13505,7 @@ function addPanelScheduleSection(nav     , sections     ) {
       const lead = size * 1.2;
       const wireW = Math.min(110, Math.max(36, ...cells.flatMap(c => c.wire).map(w => pdfTextWidth(w, size) + 2 * pad)));
       const ampsW = pdfTextWidth('100', size) + 2 * pad, numW = pdfTextWidth('100', size, 'bold') + 2 * pad;
-      const descW = (right - left) / 2 - wireW - ampsW - numW;
+      const descW = (right - left - bus) / 2 - wireW - ampsW - numW;
       // Slot numbers on the outside edges, where they line up with the breakers; circuits meet in the middle.
       const widths = [numW, ampsW, wireW, descW, descW, wireW, ampsW, numW];
       const wrap = (paras          , w        , face                       = 'regular') => paras.flatMap(t => pdfWrap(t, w - 2 * pad, size, face));
@@ -13527,7 +13527,9 @@ function addPanelScheduleSection(nav     , sections     ) {
     // Whatever room is left goes to the rows, as space to write in a change.
     if (L.total < room) { const extra = Math.min((room - L.total) / rows, 3 * L.lead); L.heights = L.heights.map(h => h + extra); }
     const { size, lead, widths, text, heights } = L;
-    const xs = widths.reduce((a, w) => [...a, a[a.length - 1] + w], [left]);
+    // The two columns of breakers either side of a dark band down the middle, as the bus bar divides them.
+    const xs = widths.reduce((a, w, i) => [...a, a[a.length - 1] + w + (i === 3 ? bus : 0)], [left]);
+    const midL = xs[4] - bus;
 
     // Rows to pages, never splitting a double-pole across two.
     const pagesOf             = [[]];
@@ -13578,12 +13580,12 @@ function addPanelScheduleSection(nav     , sections     ) {
         if (k === 0) return;
         const y0 = ys[k];
         const spanL = cell(2 * r - 1)?.span, spanR = 2 * r <= slots && cell(2 * r).span;
-        page.rule(left, y0, spanL ? xs[1] : xs[4], y0);
+        page.rule(left, y0, spanL ? xs[1] : midL, y0);
         page.rule(spanR ? xs[7] : xs[4], y0, right, y0);
       });
-      xs.forEach((x, i) => page.rule(x, head, x, bottom, i === 0 || i === 8 ? 0.75 : 0.5));
-      [head, head + headH].forEach(y0 => page.rule(left, y0, right, y0, 0.75));
-      page.rule(left, bottom, right, bottom, 0.75);
+      [...xs, midL].forEach((x, i) => page.rule(x, head, x, bottom, i === 0 || i === 8 ? 0.75 : 0.5));
+      [head, head + headH, bottom].forEach(y0 => { page.rule(left, y0, midL, y0, 0.75); page.rule(xs[4], y0, right, y0, 0.75); });
+      page.fill(midL, head, bus, bottom - head, 0.25);
       return page;
     });
     return pdfDocument(pages, `${p.name || p.id} — panel directory`);
