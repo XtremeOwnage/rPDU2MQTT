@@ -5,7 +5,7 @@ import { setBaseline, refreshDirty } from '../dirty.js';
 import { state } from '../state.js';
 import { exportData } from '../overrides.js';
 import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.js';
-import { historyControl, historyQuery, historyNote, followRange, rangeSpan } from '../history-control.js';
+import { historyControl, historyQuery, historyNote, followRange, rangeSpan, currentRange } from '../history-control.js';
 import { withheldBanner, contradictionBanner, contradictionShare } from '../flow-banners.js';
 import { focusPath, clearFocus, focusedNode, focusTag, tagToggles, activeTag, showNodeCard, moveNodeCard, hideNodeCard, updateNodeCard } from '../flow-focus.js';
 import { applyHideEmptyPref, applyHideNoDataPref, applyHideSmallPref, groupChips, viewSwitches, applyUnmeasuredPref, collapseGraph, ensureGroupState, hideHiddenNodes, explodeExpandedGroups, nestExpandedGroups, toggleGroup, drawnMembers, expandMode, foldedInto, flowGroups, groupToggles, ribbonStyle } from '../flow-view.js';
@@ -784,7 +784,8 @@ export function addFlowSection(nav: any, sections: any) {
       menu.open(e, [
         { label: named, head: true },
         { label: 'Trace its supply', run: () => focusPath(svg, incoming, n.id) },
-        { label: 'Last 7 days…', run: () => nodeHistory(n, 'days=7&step=3600') },
+        // A week back from now; while the header shows the past, History charts the header's time instead.
+        ...(rangeSpan(currentRange()) ? [] : [{ label: 'Last 7 days…', run: () => nodeHistory(n, 'days=7&step=3600') }]),
         { label: 'History…', run: () => nodeHistory(n) },
         {
           label: 'Drill into this',

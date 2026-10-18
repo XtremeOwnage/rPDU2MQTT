@@ -3,7 +3,7 @@
 // leading nowhere. The history is one line summed from the node asked for, with a gap where it has no reading.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { makeDom, query } from './domstub.mjs';
+import { makeDom, query, pickRange } from './domstub.mjs';
 
 const code = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
 const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import.meta.url), 'utf8'))
@@ -342,6 +342,19 @@ if (!menu().hidden) fail('Escape left the menu open');
 // The menu is drawn over the diagram, inside the box it was aimed at.
 if (!/\.ctx-menu\s*\{[^}]*position:\s*absolute/.test(await readFile(new URL('../wwwroot/styles.css', import.meta.url), 'utf8')))
   fail('the menu is not positioned over the diagram');
+
+// While the header shows the past, the history charts the header's days, not a window back from now.
+await pickRange(getEl, { day: '2026-01-05', days: '7' });
+asked.length = 0;
+rightClick('n30_1_5');
+if (itemSaying('Last 7 days…')) fail('the menu offers a week back from now while the header shows the past');
+itemSaying('History…').onclick();
+await wait(120);
+if (!asked.length || !asked.every(u => /from=2025-12-(29|30)/.test(decodeURIComponent(u)) && /to=2026-01-0[56]/.test(decodeURIComponent(u))))
+  fail(`the history did not chart the header's days: ${asked.join(' | ')}`);
+if (query(sheet(), 'button', true).some(b => b.textContent === 'Last hour' && !b.hidden)) fail('the sheet offers windows back from now beside the header\'s');
+shut();
+await pickRange(getEl, { live: true });
 
 console.log('flow menu: a right-click on a node of the diagram offers its history, a trace of its supply and its editor — '
   + 'disabled for a node the bridge derives — and the history draws one line over a window picked in the sheet, a gap '

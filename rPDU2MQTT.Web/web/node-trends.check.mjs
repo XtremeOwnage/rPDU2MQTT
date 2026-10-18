@@ -2,7 +2,7 @@
 // slot, counted and left out of the totals, and the totals say how many days they actually cover.
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { makeDom, query } from './domstub.mjs';
+import { makeDom, query, pickRange } from './domstub.mjs';
 
 const code = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
 const schema = JSON.parse(await readFile(new URL('./schema.fixture.json', import.meta.url), 'utf8'))
@@ -285,10 +285,8 @@ query(sec, 'th', true).find(h => h.textContent.startsWith('Node')).onclick();
 await new Promise(r => setTimeout(r, 50));
 if (order().join() !== [...byName].reverse().join()) fail('clicking the same column again did not reverse it');
 
-// Yesterday is the period before this one; a whole day fits on screen and opens at its start.
-rangeSel.value = 'today=1&back=1';
-rangeSel.onchange({});
-await new Promise(r => setTimeout(r, 300));
+// Yesterday, picked in the header, is the period before this one; a whole day fits on screen and opens at its start.
+await pickRange(getEl, { period: 'Yesterday' });
 if (!/back=1/.test(decodeURIComponent(asked.at(-1)))) fail(`yesterday was not asked for as the previous period: ${asked.at(-1)}`);
 const dayChart = query(chartsOf(sec), 'svg', true).find(x => (x.attrs.class || '') === 'trend-chart');
 if (!(Number(dayChart.attrs.width) > 0 && Number(dayChart.attrs.width) <= 1200)) fail(`a day of samples was drawn ${dayChart.attrs.width}px wide`);

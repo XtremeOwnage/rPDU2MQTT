@@ -87,10 +87,6 @@
 .sa-untracked-edit select.sa-type { width:auto; max-width:16em; }
 .sa-hide { display:inline-flex; align-items:center; gap:4px; font-size:12.5px; color:var(--muted); white-space:nowrap; }
 .sa-string.is-string-hidden { opacity:.6; border-style:dashed; }
-.sa-time { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:-4px 0 var(--sp-2); }
-.sa-time-label { font-size:12.5px; color:var(--muted); }
-.sa-time input.sa-when { width:auto; flex:none; }
-.sa-time select.sa-step { width:auto; flex:none; }
 .sa-issue { font-size:12.5px; margin:2px 0 var(--sp-2); }
 .sa-issue.is-bad { color:var(--bad); }
 .sa-issue.is-warn { color:var(--warn); }

@@ -99,31 +99,20 @@ if (!/−50\.7 %/.test(tiles('pv_a')[2].textContent)) fail(`a panel under its st
 if (!tiles('pv_a')[2].classList.contains('is-low') || !tiles('pv_a')[0].classList.contains('is-high')) fail('a panel well off its string’s average is not flagged');
 button('Power').onclick();
 
-// History: the timeline picks a moment; unticking returns to live.
-const pastOn = query(query(sec, '.sa-time'), 'input');
-pastOn.checked = true;
-pastOn.onchange({});
-await wait(40);
-if (!/112 W/.test(tiles('pv_a')[0].textContent)) fail(`the timeline's moment does not show recorded values: ${tiles('pv_a')[0].textContent}`);
+// History: the header's time is the only time control; the timeline moves within it, Back to live returns here.
+if (query(sec, 'input', true).some(i => (i.attrs?.type || i.type) === 'date')) fail('the page has its own date picker beside the header\'s');
+if (query(sec, '.sa-time')) fail('the page has its own Point in time control beside the header\'s');
+if (!query(sec, '.trend-timeline').hidden) fail('the timeline shows while live');
+await pickRange(getEl, { day: '2026-01-01', time: '11:30' });
+if (!/112 W/.test(tiles('pv_a')[0].textContent)) fail(`the header's time does not show recorded values: ${tiles('pv_a')[0].textContent}`);
 if (!/Showing/.test(query(sec, '.sa-buses').textContent)) fail('the page does not say it is showing a past time');
 if (query(sec, '.trend-timeline').hidden) fail('the timeline is not shown');
 if (!/nodes=pv_a%2Cpv_b|nodes=pv_a,pv_b/.test(seriesAsked.at(-1) || '')) fail(`the timeline asks for every node, not the strings: ${seriesAsked.at(-1)}`);
-pastOn.checked = false;
-pastOn.onchange({});
-await wait(30);
-if (!/300 W/.test(tiles('pv_a')[0].textContent)) fail('unticking does not return to live values');
-// The header's time is followed too, with no "live only" banner; Back to live there returns here.
-await pickRange(getEl, { day: '2026-01-01', time: '11:30' });
-if (!pastOn.checked) fail('a time picked in the header does not tick Point in time');
-if (!/112 W/.test(tiles('pv_a')[0].textContent)) fail(`the header's time does not show recorded values: ${tiles('pv_a')[0].textContent}`);
+if (!/to=2026-01-0[12]/.test(decodeURIComponent(seriesAsked.at(-1) || ''))) fail(`the timeline does not end on the header's day: ${seriesAsked.at(-1)}`);
 if (query(sec, 'div', true).some(d => String(d.className || '').includes('range-banner'))) fail('the page says it is live only, though it shows the past');
 await pickRange(getEl, { live: true });
-if (pastOn.checked || !/300 W/.test(tiles('pv_a')[0].textContent)) fail('Back to live in the header does not return the page to live');
-await pickRange(getEl, { day: '2026-01-01', time: '11:30' });
-pastOn.checked = false;
-pastOn.onchange({});
-await wait(30);
-if (vm.runInContext('currentRange().kind', sandbox) !== 'live') fail('unticking Point in time leaves the header on a past time');
+if (!/300 W/.test(tiles('pv_a')[0].textContent)) fail('Back to live in the header does not return the page to live');
+if (!query(sec, '.trend-timeline').hidden) fail('the timeline stays after Back to live');
 
 // Adopting an optimizer.
 const loose = query(sec, '.sa-loose-row', true);

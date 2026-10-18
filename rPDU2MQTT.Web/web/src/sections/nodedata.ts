@@ -15,7 +15,7 @@ import { state } from '../state.js';
 import { liveWhileActive, realtimeLive } from '../realtime.js';
 import { timelineStrip } from './timeline.js';
 import { stepToFit } from './trends-shared.js';
-import { followRange, rangeMoment, setRange, currentRange, LIVE } from '../history-control.js';
+import { followRange, rangeMoment } from '../history-control.js';
 import type { Line } from '../charts.js';
 
 // Mirrors FlowUnits.cs — the canonical unit each metric is stored in, and its display name.
@@ -29,8 +29,6 @@ const metricName = (m: string) => (UNITS[m] || [m, ''])[0];
 const metricUnit = (m: string) => (m === 'temperature' ? tempUnit() : (UNITS[m] || [m, ''])[1]);
 const shownAs = (m: string, v: number) => (m === 'temperature' ? toTemp(v) : v);
 
-/// How far back the timeline reaches.
-const NODE_DATA_WINDOWS: [number, string][] = [[60, '1 hour'], [360, '6 hours'], [1440, '24 hours'], [10080, '7 days']];
 /// Samples drawn across the timeline.
 const STRIP_POINTS = 300;
 const STRIP_COLOURS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)'];
@@ -58,17 +56,8 @@ export function addNodeDataSection(nav: any, sections: any) {
   const problemsLab = el('label', { title: 'Show only rows with no reading, or one that has gone stale.' },
     onlyProblems, ' Problems only');
   const count = el('span', { class: 'ld-count' });
-  const pastOn = el('input', { type: 'checkbox', class: 'switch' });
-  const pastLab = el('label', { title: 'Show what each reading was at a moment picked on a timeline, from history.' },
-    pastOn, ' Point in time');
-  const windowSel = el('select', { title: 'How far back the timeline reaches.' }) as HTMLSelectElement;
-  NODE_DATA_WINDOWS.forEach(([m, t]) => windowSel.appendChild(el('option', { value: String(m), text: t })));
-  windowSel.value = '1440';
-  // The day the timeline ends on; blank is now.
-  const dayIn = el('input', { type: 'date', title: 'The day the timeline ends on. Blank for now.' }) as HTMLInputElement;
-  const pastTools = el('span', { style: { display: 'contents' } }, windowSel, el('span', { class: 'desc', style: { margin: '0' }, text: 'ending' }), dayIn);
   const tagSel = el('select', { title: 'Show only the nodes carrying this tag.' }) as HTMLSelectElement;
-  bar.append(refresh, filter, tagSel, problemsLab, pastLab, pastTools, count);
+  bar.append(refresh, filter, tagSel, problemsLab, count);
   sec.appendChild(bar);
   const metricBar = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
   sec.appendChild(metricBar);
@@ -76,13 +65,12 @@ export function addNodeDataSection(nav: any, sections: any) {
   sec.appendChild(strip.el);
   const wrap = el('div'); sec.appendChild(wrap);
 
-  // The moment shown, in epoch ms, or null for now.
+  // The moment shown, in epoch ms, or null for now. The header's time sets it; the timeline moves it within that range.
   let at: number | null = null;
+  let range: { at: number; day: string; minutes: number } | null = null;
   const historyOn = () => !!(state.data?.History || {}).Enabled;
-  const past = () => historyOn() && pastOn.checked;
+  const past = () => historyOn() && !!range;
   const syncPast = () => {
-    pastLab.classList[historyOn() ? 'remove' : 'add']('is-hidden');
-    pastTools.classList[past() ? 'remove' : 'add']('is-hidden');
     strip.el.hidden = !past();
     problemsLab.classList[past() ? 'add' : 'remove']('is-hidden');
   };
@@ -275,12 +263,15 @@ export function addNodeDataSection(nav: any, sections: any) {
 
   /// The timeline: the busiest few nodes' power over the window, so the moment can be picked by its shape.
   const loadStrip = async () => {
-    const minutes = Number(windowSel.value) || 1440;
+    const asked = range;
+    if (!asked) return;
+    const minutes = asked.minutes;
     const step = stepToFit(minutes * 60, STRIP_POINTS);
-    const now = Date.now();
-    const end = dayIn.value ? Math.min(now, new Date(`${dayIn.value}T23:59:59`).getTime()) : now;
+    const end = Math.min(Date.now(), new Date(`${asked.day}T23:59:59`).getTime());
     const r = await api(`/api/flow/series?from=${encodeURIComponent(new Date(end - minutes * 60_000).toISOString())}`
       + `&to=${encodeURIComponent(new Date(end).toISOString())}&step=${step}&metric=realpower`);
+    // The header moved on while this was loading.
+    if (range !== asked) return;
     const b = r.body;
     const points = ((b?.at || []) as string[]).map(iso => new Date(iso).getTime());
     if (!b?.ok || points.length < 2) {
@@ -307,25 +298,13 @@ export function addNodeDataSection(nav: any, sections: any) {
   filter.oninput = draw;
   onlyProblems.onchange = draw;
   tagSel.onchange = () => { tag = tagSel.value; remember(TAG_KEY, tag); draw(); };
-  pastOn.onchange = () => {
-    at = null; syncPast();
-    // Back to live here is back to live in the header too, so the two never name different times.
-    if (!pastOn.checked && currentRange().kind !== 'live') setRange(LIVE); else refreshAll();
-  };
-  windowSel.onchange = () => loadStrip();
-  dayIn.onchange = () => { at = null; loadStrip(); };
   // Ages tick even when nothing new arrives — a row going stale is itself the event worth seeing.
   liveWhileActive(sec, () => 'flow:realpower', () => { if (!past()) load(); });
   setInterval(() => { if (sec.classList.contains('active') && !past() && !realtimeLive()) load(); }, 10000);
   // The header's time: its moment on a timeline reaching back as far as the range does.
   followRange(sec, r => {
-    const m = rangeMoment(r);
-    pastOn.checked = !!m;
-    if (m) {
-      dayIn.value = m.day;
-      windowSel.value = String((NODE_DATA_WINDOWS.find(([w]) => w >= m.minutes) || NODE_DATA_WINDOWS[NODE_DATA_WINDOWS.length - 1])[0]);
-      at = m.at;
-    } else at = null;
+    range = rangeMoment(r);
+    at = range ? range.at : null;
     syncPast();
     refreshAll();
   });

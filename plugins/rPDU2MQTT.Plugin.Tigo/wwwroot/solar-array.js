@@ -253,20 +253,14 @@ function mount(sec     , host     ) {
   };
   head.append(showSel, groupLabel, editBtn, save);
   sec.appendChild(head);
-  const pastOn = el('input', { type: 'checkbox', class: 'switch' })                    ;
-  const windowSel = el('select', { class: 'sa-step', title: 'How far back the timeline reaches' })                     ;
-  [['60', '1 hour'], ['360', '6 hours'], ['1440', '24 hours'], ['10080', '7 days']].forEach(([v, t]) => windowSel.appendChild(el('option', { value: v, text: t })));
-  windowSel.value = '1440';
-  const dayIn = el('input', { type: 'date', class: 'sa-when', title: 'The day the timeline ends on. Blank for now.' })                    ;
-  const pastTools = el('span', { class: 'sa-time-tools' }, windowSel, el('span', { class: 'sa-time-label', text: 'ending' }), dayIn);
-  sec.appendChild(el('div', { class: 'sa-time' }, el('label', { class: 'sa-hide', title: 'Show the array at a moment picked on a timeline' }, pastOn, ' Point in time'), pastTools));
+  // The moment shown is the header's time; the timeline moves it within the range picked there.
+  let range                                                      = null;
   const strip = timelineStrip ? timelineStrip((span     ) => { if (span) goTo(new Date(span.from)); }, undefined, { moment: true }) : null;
   if (strip) sec.appendChild(strip.el);
   const stripWait = el('div', { class: 'sa-note', text: 'Loading the timeline…', hidden: true });
   sec.appendChild(stripWait);
   const syncTime = () => {
-    const on = pastOn.checked;
-    pastTools.hidden = !on;
+    const on = !!range;
     if (strip) strip.el.hidden = !on || !stripLoaded;
     stripWait.hidden = !on || stripLoaded || !stripLoading;
   };
@@ -277,10 +271,11 @@ function mount(sec     , host     ) {
     if (at) loadAt(); else { hist = {}; histFailed = null; load(); }
   };
   const loadStrip = async () => {
-    const minutes = Number(windowSel.value) || 1440;
+    const asked = range;
+    if (!asked) return;
+    const minutes = asked.minutes;
     const step = stepToFit ? stepToFit(minutes * 60, 300) : 300;
-    const now = Date.now();
-    const end = dayIn.value ? Math.min(now, new Date(`${dayIn.value}T23:59:59`).getTime()) : now;
+    const end = Math.min(Date.now(), new Date(`${asked.day}T23:59:59`).getTime());
     let r     ;
     stripLoading = true; syncTime();
     const only = stringsOf().map(st => st.Id).join(',');
@@ -289,6 +284,8 @@ function mount(sec     , host     ) {
         + `&to=${encodeURIComponent(new Date(end).toISOString())}&step=${step}&metric=realpower&nodes=${encodeURIComponent(only)}`);
     } catch (e     ) { r = { body: { ok: false, message: String(e?.message || e) } }; }
     stripLoading = false;
+    // The header moved on while this was loading.
+    if (range !== asked) return;
     const b = r?.body;
     const points = ((b?.at || [])            ).map(iso => new Date(iso).getTime());
     if (!b?.ok || points.length < 2) {
@@ -309,14 +306,6 @@ function mount(sec     , host     ) {
     strip?.set({ from: keep, to: keep });
     goTo(new Date(keep));
   };
-  pastOn.onchange = () => {
-    if (pastOn.checked) loadStrip(); else goTo(null);
-    syncTime();
-    // Back to live here is back to live in the header too, so the two never name different times.
-    if (!pastOn.checked) host.goLive?.();
-  };
-  windowSel.onchange = () => loadStrip();
-  dayIn.onchange = () => { at = null; loadStrip(); };
   const buses = el('div', { class: 'sa-buses' });
   const array = el('div', { class: 'sa-array' });
   const loose = el('div', { class: 'sa-loose' });
@@ -466,7 +455,7 @@ function mount(sec     , host     ) {
 
     buses.innerHTML = '';
     syncTime();
-    if (at) buses.appendChild(el('div', { class: 'sa-note', text: histFailed || `Showing ${at.toLocaleString()}. Untick Point in time to return to live.` }));
+    if (at) buses.appendChild(el('div', { class: 'sa-note', text: histFailed || `Showing ${at.toLocaleString()}. Back to live in the header returns to now.` }));
     if (failed) buses.appendChild(el('div', { class: 'sa-note is-bad', text: failed }));
     (at ? [] : snap?.connections || []).forEach((c     ) => {
       const st = c.state || { level: 'warn', summary: c.connected ? 'connected' : 'not connected', detail: c.error || '' };
@@ -754,17 +743,10 @@ function mount(sec     , host     ) {
   };
 
   // The header's time: its moment on a timeline reaching back as far as the range does.
-  const WINDOWS = [60, 360, 1440, 10080];
   host.followRange?.(sec, (r     ) => {
-    const m = host.rangeMoment(r);
-    if (!m) {
-      if (pastOn.checked) { pastOn.checked = false; goTo(null); syncTime(); }
-      return;
-    }
-    pastOn.checked = true;
-    dayIn.value = m.day;
-    windowSel.value = String(WINDOWS.find(w => w >= m.minutes) || WINDOWS[WINDOWS.length - 1]);
-    at = new Date(m.at);
+    range = host.rangeMoment(r);
+    if (!range) { goTo(null); syncTime(); return; }
+    at = new Date(range.at);
     syncTime();
     loadStrip();
   });

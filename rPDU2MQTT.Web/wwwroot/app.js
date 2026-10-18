@@ -2459,6 +2459,17 @@ const rememberedWindow = () => {
   catch { return HISTORY_DEFAULT; }
 };
 
+/// The header's time as a window, while it shows the past: the days it covers, up to the end of its last one. '' for live.
+function headerWindow()         {
+  const span = rangeSpan(currentRange());
+  if (!span) return '';
+  const from = new Date(`${span.day}T00:00:00`);
+  from.setDate(from.getDate() - (span.days - 1));
+  const to = Math.min(Date.now(), new Date(`${span.day}T23:59:59`).getTime());
+  const step = span.days <= 1 ? 900 : span.days <= 7 ? 3600 : span.days <= 31 ? 21600 : 86400;
+  return `from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(new Date(to).toISOString())}&step=${step}`;
+}
+
 function openHistorySheet(o                ) {
   const nodes = o.nodes.filter(Boolean);
   const labelOf = o.labelOf || ((id        ) => id);
@@ -2468,7 +2479,9 @@ function openHistorySheet(o                ) {
   const note = el('div', { class: 'desc' });
   const breakdown = el('div', { class: 'hs-parts' });
   const parts = (o.parts || []).filter(id => id && !(nodes.length === 1 && nodes[0] === id));
-  let window = o.window && HISTORY_WINDOWS.some(([q]) => q === o.window) ? o.window : rememberedWindow();
+  // The header's past time wins over the sheet's own windows, which look back from now.
+  const fromHeader = headerWindow();
+  let window = fromHeader || (o.window && HISTORY_WINDOWS.some(([q]) => q === o.window) ? o.window : rememberedWindow());
   let metricNow = metric;
 
   const load = async () => {
@@ -2556,6 +2569,10 @@ function openHistorySheet(o                ) {
   });
   const markWindow = () => buttons.forEach((b, i) => b.classList.toggle('primary', HISTORY_WINDOWS[i][0] === window));
   markWindow();
+  if (fromHeader) {
+    buttons.forEach(b => { b.hidden = true; });
+    picker.insertBefore(el('span', { class: 'desc', style: { margin: '0' }, text: `${rangeLabel(currentRange())}, as picked above.` }), picker.firstChild);
+  }
   const metricSel = el('select', { class: 'hs-metric', title: 'Which measurement to chart.' })                     ;
   HISTORY_METRICS.forEach(([v, t]) => metricSel.appendChild(el('option', { value: v, text: t.replace('°C', tempUnit()) })));
   if (!HISTORY_METRICS.some(([v]) => v === metricNow)) metricSel.appendChild(el('option', { value: metricNow, text: metricNow }));
@@ -6360,7 +6377,8 @@ function addFlowSection(nav     , sections     ) {
       menu.open(e, [
         { label: named, head: true },
         { label: 'Trace its supply', run: () => focusPath(svg, incoming, n.id) },
-        { label: 'Last 7 days…', run: () => nodeHistory(n, 'days=7&step=3600') },
+        // A week back from now; while the header shows the past, History charts the header's time instead.
+        ...(rangeSpan(currentRange()) ? [] : [{ label: 'Last 7 days…', run: () => nodeHistory(n, 'days=7&step=3600') }]),
         { label: 'History…', run: () => nodeHistory(n) },
         {
           label: 'Drill into this',
@@ -10693,8 +10711,6 @@ const metricName = (m        ) => (UNITS[m] || [m, ''])[0];
 const metricUnit = (m        ) => (m === 'temperature' ? tempUnit() : (UNITS[m] || [m, ''])[1]);
 const shownAs = (m        , v        ) => (m === 'temperature' ? toTemp(v) : v);
 
-/// How far back the timeline reaches.
-const NODE_DATA_WINDOWS                     = [[60, '1 hour'], [360, '6 hours'], [1440, '24 hours'], [10080, '7 days']];
 /// Samples drawn across the timeline.
 const STRIP_POINTS = 300;
 const STRIP_COLOURS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)'];
@@ -10722,17 +10738,8 @@ function addNodeDataSection(nav     , sections     ) {
   const problemsLab = el('label', { title: 'Show only rows with no reading, or one that has gone stale.' },
     onlyProblems, ' Problems only');
   const count = el('span', { class: 'ld-count' });
-  const pastOn = el('input', { type: 'checkbox', class: 'switch' });
-  const pastLab = el('label', { title: 'Show what each reading was at a moment picked on a timeline, from history.' },
-    pastOn, ' Point in time');
-  const windowSel = el('select', { title: 'How far back the timeline reaches.' })                     ;
-  NODE_DATA_WINDOWS.forEach(([m, t]) => windowSel.appendChild(el('option', { value: String(m), text: t })));
-  windowSel.value = '1440';
-  // The day the timeline ends on; blank is now.
-  const dayIn = el('input', { type: 'date', title: 'The day the timeline ends on. Blank for now.' })                    ;
-  const pastTools = el('span', { style: { display: 'contents' } }, windowSel, el('span', { class: 'desc', style: { margin: '0' }, text: 'ending' }), dayIn);
   const tagSel = el('select', { title: 'Show only the nodes carrying this tag.' })                     ;
-  bar.append(refresh, filter, tagSel, problemsLab, pastLab, pastTools, count);
+  bar.append(refresh, filter, tagSel, problemsLab, count);
   sec.appendChild(bar);
   const metricBar = el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '6px' } });
   sec.appendChild(metricBar);
@@ -10740,13 +10747,12 @@ function addNodeDataSection(nav     , sections     ) {
   sec.appendChild(strip.el);
   const wrap = el('div'); sec.appendChild(wrap);
 
-  // The moment shown, in epoch ms, or null for now.
+  // The moment shown, in epoch ms, or null for now. The header's time sets it; the timeline moves it within that range.
   let at                = null;
+  let range                                                      = null;
   const historyOn = () => !!(state.data?.History || {}).Enabled;
-  const past = () => historyOn() && pastOn.checked;
+  const past = () => historyOn() && !!range;
   const syncPast = () => {
-    pastLab.classList[historyOn() ? 'remove' : 'add']('is-hidden');
-    pastTools.classList[past() ? 'remove' : 'add']('is-hidden');
     strip.el.hidden = !past();
     problemsLab.classList[past() ? 'add' : 'remove']('is-hidden');
   };
@@ -10939,12 +10945,15 @@ function addNodeDataSection(nav     , sections     ) {
 
   /// The timeline: the busiest few nodes' power over the window, so the moment can be picked by its shape.
   const loadStrip = async () => {
-    const minutes = Number(windowSel.value) || 1440;
+    const asked = range;
+    if (!asked) return;
+    const minutes = asked.minutes;
     const step = stepToFit(minutes * 60, STRIP_POINTS);
-    const now = Date.now();
-    const end = dayIn.value ? Math.min(now, new Date(`${dayIn.value}T23:59:59`).getTime()) : now;
+    const end = Math.min(Date.now(), new Date(`${asked.day}T23:59:59`).getTime());
     const r = await api(`/api/flow/series?from=${encodeURIComponent(new Date(end - minutes * 60_000).toISOString())}`
       + `&to=${encodeURIComponent(new Date(end).toISOString())}&step=${step}&metric=realpower`);
+    // The header moved on while this was loading.
+    if (range !== asked) return;
     const b = r.body;
     const points = ((b?.at || [])            ).map(iso => new Date(iso).getTime());
     if (!b?.ok || points.length < 2) {
@@ -10971,25 +10980,13 @@ function addNodeDataSection(nav     , sections     ) {
   filter.oninput = draw;
   onlyProblems.onchange = draw;
   tagSel.onchange = () => { tag = tagSel.value; remember(TAG_KEY, tag); draw(); };
-  pastOn.onchange = () => {
-    at = null; syncPast();
-    // Back to live here is back to live in the header too, so the two never name different times.
-    if (!pastOn.checked && currentRange().kind !== 'live') setRange(LIVE); else refreshAll();
-  };
-  windowSel.onchange = () => loadStrip();
-  dayIn.onchange = () => { at = null; loadStrip(); };
   // Ages tick even when nothing new arrives — a row going stale is itself the event worth seeing.
   liveWhileActive(sec, () => 'flow:realpower', () => { if (!past()) load(); });
   setInterval(() => { if (sec.classList.contains('active') && !past() && !realtimeLive()) load(); }, 10000);
   // The header's time: its moment on a timeline reaching back as far as the range does.
   followRange(sec, r => {
-    const m = rangeMoment(r);
-    pastOn.checked = !!m;
-    if (m) {
-      dayIn.value = m.day;
-      windowSel.value = String((NODE_DATA_WINDOWS.find(([w]) => w >= m.minutes) || NODE_DATA_WINDOWS[NODE_DATA_WINDOWS.length - 1])[0]);
-      at = m.at;
-    } else at = null;
+    range = rangeMoment(r);
+    at = range ? range.at : null;
     syncPast();
     refreshAll();
   });
@@ -11495,30 +11492,20 @@ function trendsPage(nav     , sections     , spec            ) {
   let picked              = null;
   const strip = spec.timeline
     ? timelineStrip(span => { picked = span; if (span) loadPicked(); else { body = whole; draw(); } }, {
-      can: () => !!spanOfRange(rangeSel.value) || !!wider(),
+      // Zooming out past the header's window would leave it.
+      can: () => !fromHeader && (!!spanOfRange(rangeSel.value) || !!wider()),
       go: () => { const r = wider(); if (r) useRange(r); },
       zoomTo: (s) => useRange(customRange(s)),
     })
     : null;
   const unpick = () => { picked = null; strip?.clear(); };
 
+  // Windows up to now. A past day or run of days is picked in the header, which this page follows.
   const rangeSel = el('select', { title: 'How far back to chart.' })                     ;
-  RANGES.forEach(r => rangeSel.appendChild(el('option', { value: r.value, text: r.text })));
-  rangeSel.appendChild(el('option', { value: 'custom', text: 'custom range…' }));
+  RANGES.filter(r => !r.value.includes('back=')).forEach(r => rangeSel.appendChild(el('option', { value: r.value, text: r.text })));
   rangeSel.value = 'days=30';
-  // A typed date range: from the start of the first day to the end of the last (or now).
-  const fromDay = el('input', { type: 'date', title: 'First day' })                    ;
-  const toDay = el('input', { type: 'date', title: 'Last day' })                    ;
-  const applyDays = btn('Apply');
-  const customBox = el('span', { class: 'trend-custom', hidden: true }, fromDay, el('span', { text: '–' }), toDay, applyDays);
-  applyDays.onclick = () => {
-    if (!fromDay.value || !toDay.value) return;
-    const from = new Date(`${fromDay.value}T00:00:00`).getTime();
-    const to = Math.min(Date.now(), new Date(`${toDay.value}T23:59:59`).getTime());
-    if (!(to > from)) return;
-    customBox.hidden = true;
-    useRange(customRange({ from, to }));
-  };
+  // Hidden while the header shows the past: the header decides the window then.
+  const rangeLab = el('label', { class: 'ld-inst' }, 'Show ', rangeSel);
   // Windows the period buttons add, which RANGES does not list.
   const added = new Map               ();
   const rangeOf = ()        => RANGES.find(r => r.value === rangeSel.value) || added.get(rangeSel.value)
@@ -11631,11 +11618,21 @@ function trendsPage(nav     , sections     , spec            ) {
 
   // The header's time decides the window; the dropdown is for looking closer while live.
   let fromHeader = false;
+  // Options added for the header's window, dropped again on the way back to live.
+  const headerOpts = new Set        ();
+  const headerOption = (value        , text        ) => {
+    if (Array.from(rangeSel.children).some((o     ) => o.value === value)) return;
+    rangeSel.appendChild(el('option', { value, text }));
+    headerOpts.add(value);
+  };
   followRange(sec, r => {
     const span = rangeSpan(r);
+    rangeLab.hidden = !!span;
     if (!span) {
       if (!fromHeader) return;
       fromHeader = false;
+      Array.from(rangeSel.children).forEach((o     ) => { if (headerOpts.has(o.value)) { added.delete(o.value); o.remove(); } });
+      headerOpts.clear();
       rangeSel.value = 'days=30';
       rangeSel.onchange ({}       );
       return;
@@ -11653,15 +11650,14 @@ function trendsPage(nav     , sections     , spec            ) {
         useRange(customRange({ from: new Date(`${day}T00:00:00`).getTime(), to: new Date(`${day}T23:59:59`).getTime() }));
         return;
       }
-      text = '';
+      text = range === 'today=1' ? '' : 'yesterday';
     } else {
       range = day === today ? `days=${days}` : `days=${days}&at=${end}`;
       text = day === today ? `last ${days} days` : `${days} days to ${day}`;
     }
-    if (text && !RANGES.some(x => x.value === range) && !added.has(range)) {
+    if (text && !RANGES.some(x => x.value === range) && !added.has(range))
       added.set(range, { value: range, text, wants: 'energy', seconds: days * 86_400 });
-      rangeSel.appendChild(el('option', { value: range, text }));
-    }
+    if (text) headerOption(range, text);
     rangeSel.value = range;
     unpick();
     syncIntervals();
@@ -11670,15 +11666,6 @@ function trendsPage(nav     , sections     , spec            ) {
     load();
   });
   rangeSel.onchange = () => {
-    if (rangeSel.value === 'custom') {
-      const day = (t        ) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-      toDay.max = fromDay.max = day(Date.now());
-      if (!toDay.value) toDay.value = day(Date.now());
-      if (!fromDay.value) fromDay.value = day(Date.now() - 7 * 86_400_000);
-      customBox.hidden = false;
-      return;
-    }
-    customBox.hidden = true;
     unpick(); syncIntervals(); if (!metricChosen) metricSel.value = impliedMetric(); load(); };
 
   // A counter's readings are not a per-bar quantity; the differences between them are.
@@ -11774,7 +11761,8 @@ function trendsPage(nav     , sections     , spec            ) {
 
   const showRange = (value        ) => {
     const clean = value.replace(/&step=\d+/g, '');
-    if (!RANGES.some(r => r.value === clean)) return;
+    // While the header shows the past, its window is the one charted.
+    if (fromHeader || !Array.from(rangeSel.children).some((o     ) => o.value === clean)) return;
     rangeSel.value = clean;
     unpick();
     syncIntervals();
@@ -11880,7 +11868,7 @@ function trendsPage(nav     , sections     , spec            ) {
   opts.onclick = () => { bar.classList.toggle('opts-open'); summarise(); };
   refresh.classList.add('trend-refresh');
   bar.append(opts, refresh,
-    el('label', { class: 'ld-inst' }, 'Show ', rangeSel), customBox,
+    rangeLab,
     el('label', { class: 'ld-inst' }, 'every ', intervalSel),
     el('label', { class: 'ld-inst' }, 'of ', metricSel),
     el('label', { class: 'ld-inst' }, 'as ', chartSel),
