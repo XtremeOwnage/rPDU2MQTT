@@ -174,6 +174,16 @@ export function copyOnClick(node: any, text: string, label?: string) {
   return node;
 }
 
+// Hand the viewer a file to save.
+export function saveFile(data: any, name: string, type: string) {
+  const a: any = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([data], { type }));
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+
 // A URL-friendly slug for a nav label (used to put the active tab in the address bar).
 export function slug(text: string): string {
   return (text || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');

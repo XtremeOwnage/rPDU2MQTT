@@ -829,6 +829,38 @@ sandbox.window.print = () => printed++;
 query(sec, 'button', true).find(b => b.textContent === 'Print\u2026').onclick();
 if (printed !== 1) fail('the Print button did not print');
 
+// The directory exports (#592): a PDF of the printed layout for the door, and text Import reads back.
+const saves = [];
+sandbox.Blob = class { constructor(parts, opts) { this.parts = parts; this.type = opts?.type; } };
+sandbox.URL = { createObjectURL: (b) => { saves.push(b); return 'blob:export'; }, revokeObjectURL() { } };
+const downloads = [];
+const made = sandbox.document.createElement;
+sandbox.document.createElement = (t) => { const e = made(t); if (t === 'a') { e.click = () => downloads.push(e.download); } return e; };
+const exportAs = (label) => {
+  query(sec, 'button', true).find(b => b.textContent === 'Export\u2026').onclick();
+  const pick = query(getEl('overlay'), 'button', true).find(b => b.textContent === label);
+  if (!pick) fail(`the export sheet has no ${label} button`);
+  pick.onclick();
+  return downloads.at(-1);
+};
+if (exportAs('Directory text') !== 'main-panel-directory.txt') fail('the directory text is not saved under the panel\u2019s name');
+const exported = String(saves.at(-1).parts[0]);
+const lineFor = (num) => exported.split('\n').find(l => l.startsWith(num + ',') || l.startsWith(num + ':'));
+if (lineFor('1,3') !== '1,3,60A,N30,1,1: AC Heat Strips') fail(`a double-pole does not export as Import reads it: ${lineFor('1,3')}`);
+// A breaker with no number of its own is written by its slot, and one nobody has identified keeps its mark.
+if (lineFor('5') !== '5: Fridge ????') fail(`an unidentified breaker exports without its mark: ${lineFor('5')}`);
+if (lineFor('B06') !== 'B06,W11,20A,N30,1,5: Kitchen lights rewritten') fail(`a breaker\u2019s wire, rating and channel do not export: ${lineFor('B06')}`);
+if (exportAs('PDF') !== 'main-panel-directory.pdf') fail('the PDF is not saved under the panel\u2019s name');
+const pdf = Buffer.from(saves.at(-1).parts[0]).toString('latin1');
+if (saves.at(-1).type !== 'application/pdf' || !pdf.startsWith('%PDF-1.4') || !pdf.trimEnd().endsWith('%%EOF')) fail('the PDF is not a PDF');
+// Every object sits where the cross-reference table says it does, or a reader has to repair the file.
+const xref = Number(/startxref\n(\d+)/.exec(pdf)[1]);
+const offsets = pdf.slice(xref).split('\n').filter(l => / 00000 n $/.test(l)).map(l => Number(l.slice(0, 10)));
+offsets.forEach((o, i) => { if (!pdf.startsWith(`${i + 1} 0 obj`, o)) fail(`PDF object ${i + 1} is not where the cross-reference says`); });
+if (!/\(Main Panel\) Tj/.test(pdf) || !/\(AC Heat Strips\) Tj/.test(pdf)) fail('the PDF does not carry the panel and its circuits');
+if (!/\(Fridge \?\?\?\?\) Tj/.test(pdf)) fail('the PDF prints an unidentified breaker without its mark');
+if (!/\(Empty\) Tj/.test(pdf)) fail('the PDF leaves an empty slot blank');
+
 // A phone keeps the panel's two columns: a slot on screen is the slot in front of you. What gives way is the
 // detail beside each name, not the layout.
 const rules = [...css.matchAll(/@media \(max-width: *560px\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)].map(m => m[1]).join('\n');

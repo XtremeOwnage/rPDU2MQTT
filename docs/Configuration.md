@@ -1408,6 +1408,9 @@ takes one. Existing extra feeders are reported, not removed.
 breaker's wire, rating and load. Unidentified slots print as unknown; a double-pole's second slot names its
 breaker. A 42-slot panel fits one letter or A4 page.
 
+**Export…** saves the same directory as a PDF, or as directory text (one line a breaker: number, wire, rating,
+channel, then what it feeds) that **Import…** reads back.
+
 ### Floor plans
 
 The **Floor Plans** page (under Energy Flow) draws each floor at real size: rooms and outdoor zones, doors and
