@@ -13120,7 +13120,7 @@ function addPanelScheduleSection(nav     , sections     ) {
     const amps = el('input', { type: 'number', min: '1', placeholder: 'e.g. 20' })                    ;
     amps.value = b?.amps == null ? '' : String(b.amps);
     const poles = el('select', {})                     ;
-    [['1', 'single pole'], ['2', 'double pole (spans the next slot down)']].forEach(([v, t]) => poles.appendChild(el('option', { value: v, text: t })));
+    [['1', 'single pole'], ['2', 'double pole']].forEach(([v, t]) => poles.appendChild(el('option', { value: v, text: t })));
     poles.value = String(b?.poles || 1);
     const half = el('select', {})                     ;
     [['', 'the whole slot'], ['1', 'tandem, upper half'], ['2', 'tandem, lower half']].forEach(([v, t]) => half.appendChild(el('option', { value: v, text: t })));
@@ -13258,14 +13258,21 @@ function addPanelScheduleSection(nav     , sections     ) {
       load();
     };
 
+    // Grouped the way it is read off the panel: what it is, its size, its wire, then what measures it.
+    const section = (title        , ...children       ) =>
+      el('section', { class: 'ps-sec' }, el('h4', { class: 'ps-sec-title', text: title }), el('div', { class: 'ps-sec-grid' }, ...children.filter(Boolean)));
+    const wide = (f             ) => { f.classList.add('ps-wide'); return f; };
+    const hasExt = extensionsFor('breaker').length > 0;
     openSheet({
       title: `Slot ${slot}${b ? ` — ${b.number}` : ''}`,
-      body: el('div', {}, field('Breaker number', number), field('What it feeds', description),
-        field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor),
-        field('Rating (A)', amps), field('Poles', poles),
-        field('Tandem', half, 'A tandem breaker is two half-height breakers sharing one slot.'),
-        field('State', stateSel), pickerRows, placedField, extBox,
-        ...(b?.node ? [field('On the energy flow', el('div', {
+      body: el('div', { class: 'ps-editor' },
+        section('Breaker', field('Breaker number', number), field('State', stateSel), wide(field('What it feeds', description))),
+        section('Size', field('Rating (A)', amps), field('Poles', poles, 'Double pole spans the next slot down.'),
+          field('Tandem', half, 'Two half-height breakers sharing one slot.')),
+        section('Wiring', field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor)),
+        section('Metering', wide(pickerRows)),
+        ...(placedField || b?.node ? [section('Linked to', placedField && wide(placedField),
+        ...(b?.node ? [wide(field('On the energy flow', el('div', {
           class: 'desc',
           style: { margin: '0' },
           // A breaker measured by one channel is that channel: a tier above it would carry the same reading twice.
@@ -13274,7 +13281,8 @@ function addPanelScheduleSection(nav     , sections     ) {
             : `${b.derived ? 'This breaker is a tier of its own, ' : 'It is '}${b.node} — beneath ${panel.name || panel.id}, valued from `
               + `${b.legs.map(l => l.channel).filter(Boolean).join(' + ') || 'nothing measuring it yet'}.`)
             + ' It reaches Home Assistant, EmonCMS and Prometheus like any other node.',
-        }))] : [])),
+        })))] : []))] : []),
+        hasExt ? section('More', wide(extBox)) : null),
       footer: [save, traceBtn, remove],
     });
   };

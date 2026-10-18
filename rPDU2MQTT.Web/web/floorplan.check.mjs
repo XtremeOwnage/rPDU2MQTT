@@ -416,6 +416,11 @@ tap(itemEl(wallOutlet.Id), 50, 290);
 const pickers = query(side(), '.ss', true);
 if (pickers.length < 2) fail('the item panel has no searchable pickers');
 const [circuitPick, meterPick] = pickers;
+// With no circuit known, the meter is picked on its own.
+query(meterPick, 'button', false).onclick();
+const meters = query(meterPick, '.ss-opt', true).map(textOf);
+if (meters.some(t => /N30 1-5/.test(t))) fail(`a breaker's channel is offered as the meter for an outlet: ${meters.join(' | ')}`);
+if (!meters.some(t => /Fridge plug/.test(t))) fail(`a smart plug is not offered as a meter: ${meters.join(' | ')}`);
 query(circuitPick, 'button', false).onclick();
 const search = query(circuitPick, 'input', false);
 if (!search || !search.classList.contains('ss-search')) fail('opening the circuit picker shows no search box');
@@ -424,10 +429,8 @@ const offered = query(circuitPick, '.ss-opt', true);
 if (offered.length !== 1 || !/B06/.test(textOf(offered[0]))) fail(`searching the circuits did not narrow them: ${offered.map(textOf).join(' | ')}`);
 offered[0].onclick();
 if (loc().Placements.find(p => p.Id === wallOutlet.Id).Circuit !== 'main/B06') fail('picking from the searched list did not set the circuit');
-query(query(side(), '.ss', true)[1], 'button', false).onclick();
-const meters = query(query(side(), '.ss', true)[1], '.ss-opt', true).map(textOf);
-if (meters.some(t => /N30 1-5/.test(t))) fail(`a breaker's channel is offered as the meter for an outlet: ${meters.join(' | ')}`);
-if (!meters.some(t => /Fridge plug/.test(t))) fail(`a smart plug is not offered as a meter: ${meters.join(' | ')}`);
+// Once its circuit is known, that is what meters it: no second picker beside it (#593).
+if (query(side(), '.ss', true).length !== 1) fail('an item on a known circuit still offers a separate meter');
 key('Escape');
 
 // A wire from the fridge to the outlet: the outlet, on no circuit, takes the fridge's.

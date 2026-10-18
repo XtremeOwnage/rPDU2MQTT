@@ -1612,6 +1612,26 @@
 .ps-slots { max-width: 6em; }
 .ps-field { margin: 0 0 var(--sp-3); }
 .ps-label { display: block; font-weight: 600; margin-bottom: 2px; }
+/* The breaker editor: titled groups, each an even grid that folds to fewer columns as the dialog narrows. */
+.ps-editor { display: grid; gap: var(--sp-2); padding: var(--sp-2); }
+.ps-sec { border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: var(--sp-3); background: var(--panel2); }
+.ps-sec-title { margin: 0 0 var(--sp-2); font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.ps-sec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); align-items: start; }
+.ps-sec-grid > .ps-wide { grid-column: 1 / -1; }
+.ps-sec-grid .ps-field, .ps-sec-grid > .ps-wide .ps-field:last-child { margin: 0; }
+.ps-sec-grid > .ps-wide > .ps-field + .ps-field { margin-top: var(--sp-3); }
+.ps-editor input, .ps-editor select { max-width: none; min-width: 0; }
+.ps-editor .ps-hunt { max-width: none; flex: 1; min-width: 0; }
+.ps-editor .ps-hunt + .desc { white-space: nowrap; }
+.ps-editor .ps-field > label.ld-inst { display: flex; align-items: center; gap: 4px; }
+@media (max-width: 560px) {
+  .ps-editor { padding: 0; gap: 0; }
+  .ps-sec { border: 0; border-radius: 0; background: none; border-bottom: 1px solid var(--line); padding: var(--sp-3) var(--sp-2); }
+  .ps-sec:last-child { border-bottom: 0; }
+  /* Two even columns; a group's odd one out takes the row to itself rather than leaving a hole beside it. */
+  .ps-sec-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ps-sec-grid > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
 @media (max-width: 560px) {
   /* Still the panel: two columns either side of the bus, as it is on the wall, so a slot here is the slot
      in front of you. What gives way is the detail: each breaker is its name and its reading, and the wire,
