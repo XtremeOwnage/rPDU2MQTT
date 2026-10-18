@@ -235,6 +235,8 @@ function navLink(nav     , label        , icon         ) {
   return a;
 }
 function navLabel(link     ) { return (link?.dataset?.label || link?.textContent || '')          ; }
+/// Whether a nav link is the page a URL hash names: its own slug, or the one it had before a rename, so old links still open it.
+function navMatches(link     , wanted        ) { return slug(navLabel(link)) === wanted || (!!wanted && link?.dataset?.was === wanted); }
 
 function activate(link     , sec     ) {
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
@@ -9851,7 +9853,7 @@ const JUMPS                             = [
   ['Trends', '▦', 'Charts over hours, days or months'],
   ['Node Trends', '▥', 'Compare circuits over time'],
   ['Floor Plans', '⌗', 'Power and climate, room by room'],
-  ['Panel Schedule', '🗂', 'Your breaker panel'],
+  ['Breaker Panels', '🗂', 'Your breaker panel'],
 ];
 
 function addOverviewSection(nav     , sections     ) {
@@ -12756,12 +12758,14 @@ const GAPS                         = {
 const PANEL_CIRCUIT_KINDS = ['breaker', 'outlet', 'load', 'node', 'panel'];
 
 function addPanelScheduleSection(nav     , sections     ) {
-  const link = navLink(nav, 'Panel Schedule', '🗂');
+  const link = navLink(nav, 'Breaker Panels', '🗂');
+  // Its name until #593: links and bookmarks to #panel-schedule still open it.
+  link.dataset.was = 'panel-schedule';
   link.dataset.section = 'EnergyFlow.Panels,EnergyFlow.Clamps,EnergyFlow.Links';
   const sec = el('div', { class: 'section ps' });
   sections.appendChild(sec);
-  sec.appendChild(el('h2', { text: 'Panel Schedule' }));
-  sec.appendChild(el('div', { class: 'desc' },
+  sec.appendChild(el('h2', { text: 'Breaker Panels' }));
+  sec.appendChild(el('div', { class: 'desc ps-intro' },
     'Each panel as its own directory: the slots laid out as they are in the panel, odd down the left and even '
     + 'down the right, with what each breaker feeds and the power of the node measuring it. A breaker with '
     + 'nothing mapped to it reads no data rather than zero. Tap a breaker to edit it, or an empty slot to fill it in.'));
@@ -12783,8 +12787,9 @@ function addPanelScheduleSection(nav     , sections     ) {
   unitSel.title = 'Show what each breaker is drawing in watts, or in amps against its rating.';
   unitSel.onchange = () => render();
   const status = el('span', { class: 'ld-count' });
-  sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
-    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel), refresh, addPanel, importBtn, traceStart, printBtn, exportBtn, status));
+  sec.appendChild(el('div', { class: 'ld-toolbar ps-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
+    el('div', { class: 'ps-pick' }, el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel)),
+    el('div', { class: 'ps-actions' }, refresh, addPanel, importBtn, traceStart, printBtn, exportBtn), status));
 
   // The panel's own settings: what it is called, and how many slots it has.
   const nameIn = el('input', { type: 'text', placeholder: 'Main Panel' })                    ;
@@ -12801,10 +12806,11 @@ function addPanelScheduleSection(nav     , sections     ) {
     el('label', { class: 'ld-inst' }, 'Slots ', slotsIn),
     el('label', { class: 'ld-inst' }, 'This panel is ', nodeSel),
     el('label', { class: 'ld-inst' }, 'Fed by ', feeders, feedAdd));
-  sec.appendChild(settings);
   // Settings plugins keep on the panel.
   const panelExt = el('div', { class: 'ps-ext' });
-  sec.appendChild(panelExt);
+  // The panel is what the page is for, so its settings sit beneath it, folded away on a phone.
+  const settingsBox = el('details', { class: 'ps-settings' }, el('summary', { text: 'Panel settings' }), settings, panelExt);
+  settingsBox.open = !(window.matchMedia?.('(max-width: 560px)').matches);
   const incoming = el('div', { class: 'desc ps-incoming' });
   sec.appendChild(incoming);
 
@@ -12815,6 +12821,7 @@ function addPanelScheduleSection(nav     , sections     ) {
   const grid = el('div', { class: 'ps-grid' });
   // The enclosure: the two columns of breakers either side of the bus bar down the middle.
   sec.appendChild(el('div', { class: 'ps-panel' }, el('div', { class: 'ps-bus' }), grid));
+  sec.appendChild(settingsBox);
 
   traceStart.onclick = () => {
     const p = shown();
@@ -13264,6 +13271,7 @@ function addPanelScheduleSection(nav     , sections     ) {
     const wide = (f             ) => { f.classList.add('ps-wide'); return f; };
     // A group with a long list in it takes the dialog's whole width once two groups fit side by side.
     const full = (s             ) => { s.classList.add('ps-sec-full'); return s; };
+    const wiring = (s             ) => { s.classList.add('ps-sec-wiring'); return s; };
     const hasExt = extensionsFor('breaker').length > 0;
     openSheet({
       title: `Slot ${slot}${b ? ` — ${b.number}` : ''}`,
@@ -13272,7 +13280,7 @@ function addPanelScheduleSection(nav     , sections     ) {
         section('Breaker', field('Breaker number', number), field('State', stateSel), wide(field('What it feeds', description))),
         section('Size', field('Rating (A)', amps), field('Poles', poles, 'Double pole spans the next slot down.'),
           field('Tandem', half, 'Two half-height breakers sharing one slot.')),
-        full(section('Wiring', field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor))),
+        wiring(section('Wiring', field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor))),
         full(section('Metering', wide(pickerRows))),
         ...(placedField || b?.node ? [full(section('Linked to', placedField && wide(placedField),
         ...(b?.node ? [wide(field('On the energy flow', el('div', {
@@ -13662,7 +13670,7 @@ function addPanelScheduleSection(nav     , sections     ) {
     // The mains figure: power, and the voltage beside it when whatever measures the panel reports one.
     const volts = drawn.volts == null ? '' : ` at ${drawn.volts.toFixed(1)} V`;
     incoming.textContent = !panelNode
-      ? 'No node is mapped to this panel, so there is no incoming power to draw. Pick one above.'
+      ? 'No node is mapped to this panel, so there is no incoming power to draw. Pick one under Panel settings.'
       : drawn.incoming == null
         ? `Incoming: no data${volts ? `, though ${labelOf(panelNode)} reports${volts}` : ` — ${labelOf(panelNode)} has no current reading`}.`
         : `Incoming: ${Math.round(drawn.incoming).toLocaleString('en-US')} W${volts} through ${labelOf(panelNode)}.`;
@@ -15124,7 +15132,7 @@ function build() {
 
   // Open the tab named in the URL hash, else the first.
   const wanted = decodeURIComponent((location.hash || '').slice(1));
-  const target = wanted ? ([...nav.querySelectorAll('a')]         ).find(a => slug(navLabel(a)) === wanted) : null;
+  const target = wanted ? ([...nav.querySelectorAll('a')]         ).find(a => navMatches(a, wanted)) : null;
   (target || first)?.click();
 
   // One subscription re-runs every conditional field's check.
@@ -15605,7 +15613,7 @@ async function showEmonCmsPlan() {
 window.addEventListener('hashchange', () => {
   const wanted = decodeURIComponent((location.hash || '').slice(1));
   if (!wanted) return;
-  const link = ([...document.querySelectorAll('nav a')]         ).find(a => slug(a.dataset?.label || a.textContent) === wanted);
+  const link = ([...document.querySelectorAll('nav a')]         ).find(a => navMatches(a, wanted));
   if (link && !link.classList.contains('active')) link.click();
 });
 

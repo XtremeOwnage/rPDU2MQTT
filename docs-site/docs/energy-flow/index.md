@@ -17,7 +17,7 @@ A hierarchy of nodes: grid, solar, battery, inverter, panels, breakers, loads. P
 | **Tags** | Tags for filters and exports. [Tags](nodes.md#tags) |
 | **Flow**, **Roll-up**, **Hierarchy**, **Settings** | Diagrams and the roll-up. [Flow](flow.md) |
 | **Trends**, **Node Trends**, **Node Data** | History. [Trends](trends.md) |
-| **Circuit Finder**, **Panel Schedule** | Breaker panels. [Panels and circuits](panels.md) |
+| **Circuit Finder**, **Breaker Panels** | Breaker panels. [Panels and circuits](panels.md) |
 | **Floor Plans** | Rooms, items and wiring. [Floor plans](floor-plans.md) |
 
 ## Energy

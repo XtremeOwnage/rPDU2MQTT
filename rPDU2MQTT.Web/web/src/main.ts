@@ -1,5 +1,5 @@
 // Shell bootstrap: app bar, live indicator, theme, palette and save bar.
-import { api, toast, slug, el, openSheet, closeSheet, sheetIsOpen } from './helpers.js';
+import { api, toast, slug, navMatches, el, openSheet, closeSheet, sheetIsOpen } from './helpers.js';
 import { state } from './state.js';
 import { build } from './config-form.js';
 import { exportData } from './overrides.js';
@@ -16,7 +16,7 @@ import { rangeBar, refreshRangeBar } from './history-control.js';
 window.addEventListener('hashchange', () => {
   const wanted = decodeURIComponent((location.hash || '').slice(1));
   if (!wanted) return;
-  const link = ([...document.querySelectorAll('nav a')] as any[]).find(a => slug(a.dataset?.label || a.textContent) === wanted);
+  const link = ([...document.querySelectorAll('nav a')] as any[]).find(a => navMatches(a, wanted));
   if (link && !link.classList.contains('active')) link.click();
 });
 

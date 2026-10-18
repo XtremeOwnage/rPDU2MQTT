@@ -2911,7 +2911,7 @@ function mount(sec     , host     ) {
           field('Where', select(rooms, it.Room || '', v => act(() => { it.Room = v; it.Floor = floorNow() .floor.Id; })))));
       if (it.Kind === 'panel') {
         const panels                     = [['', '— which panel? —'], ...ensure(flowIn(), 'Panels', []).map((p     ) => [p.Id, p.Name || p.Id]                    )];
-        side.appendChild(field('Panel', select(panels, it.Panel || '', v => act(() => { it.Panel = v; })), 'The panel in the Panel Schedule this is. Wires drawn from it can carry its circuits.'));
+        side.appendChild(field('Panel', select(panels, it.Panel || '', v => act(() => { it.Panel = v; })), 'The panel in Breaker Panels this is. Wires drawn from it can carry its circuits.'));
       }
       if (!supply || it.Kind === 'panel') {
         side.appendChild(field(it.Kind === 'panel' ? 'Fed from' : 'Circuit', searchSelect(circuitChoices(it.Kind === 'panel', it.Circuit || ''), it.Circuit || '', v => { act(() => { it.Circuit = v; }); placeBeneath(it); }, { placeholder: 'Search by breaker, description or panel…' }),
@@ -3002,7 +3002,7 @@ function mount(sec     , host     ) {
 
     if (it.Kind === 'panel' && it.Panel) {
       const open = btn('Open its panel schedule');
-      open.onclick = () => (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Panel Schedule')?.click();
+      open.onclick = () => (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Breaker Panels')?.click();
       side.appendChild(actions(open));
     }
     const wired = runsIn().filter((r     ) => r.From === it.Id || r.To === it.Id);
@@ -3284,8 +3284,8 @@ function mount(sec     , host     ) {
       }));
       body.appendChild(box.children.length ? box : el('div', { class: 'desc', text: 'No rooms yet.' }));
     }
-    const toPanel = btn('Open in Panel Schedule');
-    toPanel.onclick = () => { closeSheet(); (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Panel Schedule')?.click(); };
+    const toPanel = btn('Open in Breaker Panels');
+    toPanel.onclick = () => { closeSheet(); (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Breaker Panels')?.click(); };
     openSheet({ title: circuitLabel(c), body, footer: [toPanel] });
   };
 
@@ -3314,7 +3314,7 @@ function mount(sec     , host     ) {
       const channels = found.found.map(f => f.node);
       const matches = (live?.circuits || []).filter(c => channels.some(ch => c.channels.includes(ch) || c.node === ch));
       if (!matches.length) {
-        offer.appendChild(el('div', { class: 'desc', text: `${channels.map(ch => session.labels[ch] || ch).join(' and ')} is not mapped to a breaker yet. Map it in the Panel Schedule, then link this outlet.` }));
+        offer.appendChild(el('div', { class: 'desc', text: `${channels.map(ch => session.labels[ch] || ch).join(' and ')} is not mapped to a breaker yet. Map it in Breaker Panels, then link this outlet.` }));
         return;
       }
       matches.forEach(c => {

@@ -4,9 +4,9 @@ title: Panels and circuits
 
 # Panels and circuits
 
-## Panel Schedule
+## Breaker Panels
 
-**Energy Flow › Panel Schedule**. One directory per panel: odd slots down the left, even down the right. Each breaker shows live power or current, wire, rating, gauge and what it feeds.
+**Energy Flow › Breaker Panels**. One directory per panel: odd slots down the left, even down the right. Each breaker shows live power or current, wire, rating, gauge and what it feeds.
 
 ![Panel schedule](../assets/screenshots/panel-schedule.webp)
 

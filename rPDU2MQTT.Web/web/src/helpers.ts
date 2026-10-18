@@ -204,6 +204,8 @@ export function navLink(nav: any, label: string, icon?: string) {
   return a;
 }
 export function navLabel(link: any) { return (link?.dataset?.label || link?.textContent || '') as string; }
+/// Whether a nav link is the page a URL hash names: its own slug, or the one it had before a rename, so old links still open it.
+export function navMatches(link: any, wanted: string) { return slug(navLabel(link)) === wanted || (!!wanted && link?.dataset?.was === wanted); }
 
 export function activate(link: any, sec: any) {
   document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));

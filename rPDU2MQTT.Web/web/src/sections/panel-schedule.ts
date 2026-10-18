@@ -44,12 +44,14 @@ const GAPS: Record<string, string> = {
 const PANEL_CIRCUIT_KINDS = ['breaker', 'outlet', 'load', 'node', 'panel'];
 
 export function addPanelScheduleSection(nav: any, sections: any) {
-  const link = navLink(nav, 'Panel Schedule', '🗂');
+  const link = navLink(nav, 'Breaker Panels', '🗂');
+  // Its name until #593: links and bookmarks to #panel-schedule still open it.
+  link.dataset.was = 'panel-schedule';
   link.dataset.section = 'EnergyFlow.Panels,EnergyFlow.Clamps,EnergyFlow.Links';
   const sec = el('div', { class: 'section ps' });
   sections.appendChild(sec);
-  sec.appendChild(el('h2', { text: 'Panel Schedule' }));
-  sec.appendChild(el('div', { class: 'desc' },
+  sec.appendChild(el('h2', { text: 'Breaker Panels' }));
+  sec.appendChild(el('div', { class: 'desc ps-intro' },
     'Each panel as its own directory: the slots laid out as they are in the panel, odd down the left and even '
     + 'down the right, with what each breaker feeds and the power of the node measuring it. A breaker with '
     + 'nothing mapped to it reads no data rather than zero. Tap a breaker to edit it, or an empty slot to fill it in.'));
@@ -71,8 +73,9 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   unitSel.title = 'Show what each breaker is drawing in watts, or in amps against its rating.';
   unitSel.onchange = () => render();
   const status = el('span', { class: 'ld-count' });
-  sec.appendChild(el('div', { class: 'ld-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
-    el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel), refresh, addPanel, importBtn, traceStart, printBtn, exportBtn, status));
+  sec.appendChild(el('div', { class: 'ld-toolbar ps-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
+    el('div', { class: 'ps-pick' }, el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel)),
+    el('div', { class: 'ps-actions' }, refresh, addPanel, importBtn, traceStart, printBtn, exportBtn), status));
 
   // The panel's own settings: what it is called, and how many slots it has.
   const nameIn = el('input', { type: 'text', placeholder: 'Main Panel' }) as HTMLInputElement;
@@ -89,10 +92,11 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     el('label', { class: 'ld-inst' }, 'Slots ', slotsIn),
     el('label', { class: 'ld-inst' }, 'This panel is ', nodeSel),
     el('label', { class: 'ld-inst' }, 'Fed by ', feeders, feedAdd));
-  sec.appendChild(settings);
   // Settings plugins keep on the panel.
   const panelExt = el('div', { class: 'ps-ext' });
-  sec.appendChild(panelExt);
+  // The panel is what the page is for, so its settings sit beneath it, folded away on a phone.
+  const settingsBox = el('details', { class: 'ps-settings' }, el('summary', { text: 'Panel settings' }), settings, panelExt);
+  settingsBox.open = !(window.matchMedia?.('(max-width: 560px)').matches);
   const incoming = el('div', { class: 'desc ps-incoming' });
   sec.appendChild(incoming);
 
@@ -103,6 +107,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   const grid = el('div', { class: 'ps-grid' });
   // The enclosure: the two columns of breakers either side of the bus bar down the middle.
   sec.appendChild(el('div', { class: 'ps-panel' }, el('div', { class: 'ps-bus' }), grid));
+  sec.appendChild(settingsBox);
 
   traceStart.onclick = () => {
     const p = shown();
@@ -552,6 +557,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     const wide = (f: HTMLElement) => { f.classList.add('ps-wide'); return f; };
     // A group with a long list in it takes the dialog's whole width once two groups fit side by side.
     const full = (s: HTMLElement) => { s.classList.add('ps-sec-full'); return s; };
+    const wiring = (s: HTMLElement) => { s.classList.add('ps-sec-wiring'); return s; };
     const hasExt = extensionsFor('breaker').length > 0;
     openSheet({
       title: `Slot ${slot}${b ? ` — ${b.number}` : ''}`,
@@ -560,7 +566,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
         section('Breaker', field('Breaker number', number), field('State', stateSel), wide(field('What it feeds', description))),
         section('Size', field('Rating (A)', amps), field('Poles', poles, 'Double pole spans the next slot down.'),
           field('Tandem', half, 'Two half-height breakers sharing one slot.')),
-        full(section('Wiring', field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor))),
+        wiring(section('Wiring', field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor))),
         full(section('Metering', wide(pickerRows))),
         ...(placedField || b?.node ? [full(section('Linked to', placedField && wide(placedField),
         ...(b?.node ? [wide(field('On the energy flow', el('div', {
@@ -950,7 +956,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     // The mains figure: power, and the voltage beside it when whatever measures the panel reports one.
     const volts = drawn.volts == null ? '' : ` at ${drawn.volts.toFixed(1)} V`;
     incoming.textContent = !panelNode
-      ? 'No node is mapped to this panel, so there is no incoming power to draw. Pick one above.'
+      ? 'No node is mapped to this panel, so there is no incoming power to draw. Pick one under Panel settings.'
       : drawn.incoming == null
         ? `Incoming: no data${volts ? `, though ${labelOf(panelNode)} reports${volts}` : ` — ${labelOf(panelNode)} has no current reading`}.`
         : `Incoming: ${Math.round(drawn.incoming).toLocaleString('en-US')} W${volts} through ${labelOf(panelNode)}.`;
