@@ -108,7 +108,7 @@ export function openSheet(opts: any) {
   if (!overlay) return { close() { } };
   closeSheet();
 
-  const sheet = el('div', { class: 'sheet' + (opts.wide ? ' wide' : '') });
+  const sheet = el('div', { class: 'sheet' + (opts.wide ? ' wide' : '') + (opts.class ? ' ' + opts.class : '') });
   const close = () => closeSheet();
 
   if (opts.title || opts.search) {

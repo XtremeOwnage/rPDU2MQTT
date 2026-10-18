@@ -423,7 +423,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     const wholeBox = el('input', { type: 'checkbox', class: 'ps-whole' }) as HTMLInputElement;
     wholeBox.checked = !!clampFor(panel.id, wasNumber, 1)?.Whole;
     const pickers: HTMLSelectElement[] = [];
-    const pickerRows = el('div', {});
+    const pickerRows = el('div', { class: 'ps-legs' });
     // A house has more channels than anyone wants to scroll: type to narrow them.
     const hunt = el('input', { type: 'search', class: 'ps-hunt', placeholder: 'filter channels by name or id…' }) as HTMLInputElement;
     const huntCount = el('span', { class: 'desc', style: { margin: '0 0 0 8px' } });
@@ -550,16 +550,19 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     const section = (title: string, ...children: any[]) =>
       el('section', { class: 'ps-sec' }, el('h4', { class: 'ps-sec-title', text: title }), el('div', { class: 'ps-sec-grid' }, ...children.filter(Boolean)));
     const wide = (f: HTMLElement) => { f.classList.add('ps-wide'); return f; };
+    // A group with a long list in it takes the dialog's whole width once two groups fit side by side.
+    const full = (s: HTMLElement) => { s.classList.add('ps-sec-full'); return s; };
     const hasExt = extensionsFor('breaker').length > 0;
     openSheet({
       title: `Slot ${slot}${b ? ` — ${b.number}` : ''}`,
+      class: 'ps-sheet',
       body: el('div', { class: 'ps-editor' },
         section('Breaker', field('Breaker number', number), field('State', stateSel), wide(field('What it feeds', description))),
         section('Size', field('Rating (A)', amps), field('Poles', poles, 'Double pole spans the next slot down.'),
           field('Tandem', half, 'Two half-height breakers sharing one slot.')),
-        section('Wiring', field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor)),
-        section('Metering', wide(pickerRows)),
-        ...(placedField || b?.node ? [section('Linked to', placedField && wide(placedField),
+        full(section('Wiring', field('Wire label', wire), field('Wire gauge', gauge), field('Conductor', conductor))),
+        full(section('Metering', wide(pickerRows))),
+        ...(placedField || b?.node ? [full(section('Linked to', placedField && wide(placedField),
         ...(b?.node ? [wide(field('On the energy flow', el('div', {
           class: 'desc',
           style: { margin: '0' },
@@ -569,8 +572,8 @@ export function addPanelScheduleSection(nav: any, sections: any) {
             : `${b.derived ? 'This breaker is a tier of its own, ' : 'It is '}${b.node} — beneath ${panel.name || panel.id}, valued from `
               + `${b.legs.map(l => l.channel).filter(Boolean).join(' + ') || 'nothing measuring it yet'}.`)
             + ' It reaches Home Assistant, EmonCMS and Prometheus like any other node.',
-        })))] : []))] : []),
-        hasExt ? section('More', wide(extBox)) : null),
+        })))] : [])))] : []),
+        hasExt ? full(section('More', wide(extBox))) : null),
       footer: [save, traceBtn, remove],
     });
   };

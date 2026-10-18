@@ -1612,8 +1612,12 @@
 .ps-slots { max-width: 6em; }
 .ps-field { margin: 0 0 var(--sp-3); }
 .ps-label { display: block; font-weight: 600; margin-bottom: 2px; }
-/* The breaker editor: titled groups, each an even grid that folds to fewer columns as the dialog narrows. */
-.ps-editor { display: grid; gap: var(--sp-2); padding: var(--sp-2); }
+/* The breaker editor has a lot to say, so it takes most of the window, and two groups sit side by side once they fit. */
+.sheet.ps-sheet { width: min(1100px, 100%); max-height: 88vh; }
+.overlay:has(.ps-sheet) { padding-top: 6vh; }
+/* Its titled groups, each an even grid that folds to fewer columns as the dialog narrows. */
+.ps-editor { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: var(--sp-2); padding: var(--sp-2); }
+.ps-editor > .ps-sec-full { grid-column: 1 / -1; }
 .ps-sec { border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: var(--sp-3); background: var(--panel2); }
 .ps-sec-title { margin: 0 0 var(--sp-2); font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .ps-sec-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); align-items: start; }
@@ -1624,9 +1628,20 @@
 .ps-editor .ps-hunt { max-width: none; flex: 1; min-width: 0; }
 .ps-editor .ps-hunt + .desc { white-space: nowrap; }
 .ps-editor .ps-field > label.ld-inst { display: flex; align-items: center; gap: 4px; }
+/* A double pole's two legs side by side; the filter and the one-CT switch above them, across both. */
+.ps-legs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+@media (max-width: 700px) { .ps-legs { grid-template-columns: minmax(0, 1fr); } }
+.ps-legs > .ps-field { margin: 0; }
+.ps-legs > .ps-field:has(> label.ld-inst) { grid-column: 1 / -1; }
 @media (max-width: 560px) {
+  /* The whole phone: no margin around it, no rounded card, the body scrolling between a pinned title and buttons. */
+  .overlay:has(.ps-sheet) { padding: 0; }
+  .sheet.ps-sheet { width: 100%; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
+  .ps-sheet .sheet-body { padding: 0; flex: 1; }
+  .ps-sheet .sheet-foot { padding: var(--sp-2) var(--sp-3) calc(var(--sp-2) + env(safe-area-inset-bottom)); }
+  .ps-sheet .sheet-foot button { flex: 1; min-height: 40px; }
   .ps-editor { padding: 0; gap: 0; }
-  .ps-sec { border: 0; border-radius: 0; background: none; border-bottom: 1px solid var(--line); padding: var(--sp-3) var(--sp-2); }
+  .ps-sec { border: 0; border-radius: 0; background: none; border-bottom: 1px solid var(--line); padding: var(--sp-3) var(--sp-4); }
   .ps-sec:last-child { border-bottom: 0; }
   /* Two even columns; a group's odd one out takes the row to itself rather than leaving a hole beside it. */
   .ps-sec-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
