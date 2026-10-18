@@ -33,26 +33,30 @@ export function pdfTextWidth(text: string, size: number, face: PdfFace = 'regula
   return w * size / 1000 * (face === 'bold' ? 1.08 : 1);
 }
 
-/// Text broken into lines no wider than `width`, at most `lines` of them; what does not fit ends in an ellipsis.
-export function pdfWrap(text: string, width: number, size: number, lines = 1, face: PdfFace = 'regular') {
+/// Text broken into lines no wider than `width`. Nothing is cut: paper has no "read more". Lines break at spaces,
+/// or after a comma, slash or underscore, and a run with none of those is split where it has to be.
+export function pdfWrap(text: string, width: number, size: number, face: PdfFace = 'regular') {
+  const fits = (s: string) => pdfTextWidth(s, size, face) <= width;
+  // Each piece remembers whether a space came before it, so a break after a comma rejoins without one.
+  const pieces: { t: string; gap: boolean }[] = [];
+  text.trim().split(/\s+/).filter(Boolean).forEach(word =>
+    word.split(/(?<=[,/_])/).forEach((t, i) => pieces.push({ t, gap: i === 0 && pieces.length > 0 })));
   const out: string[] = [];
-  const words = text.split(/\s+/).filter(Boolean);
   let line = '';
-  while (words.length && out.length < lines) {
-    const next = line ? `${line} ${words[0]}` : words[0];
-    if (pdfTextWidth(next, size, face) <= width) { line = next; words.shift(); continue; }
-    if (!line) { line = words.shift()!; }
-    out.push(line); line = '';
+  for (const { t, gap } of pieces) {
+    const next = line ? line + (gap ? ' ' : '') + t : t;
+    if (fits(next)) { line = next; continue; }
+    if (line) out.push(line);
+    line = t;
+    while (!fits(line) && line.length > 1) {
+      let cut = line.length - 1;
+      while (cut > 1 && !fits(line.slice(0, cut))) cut--;
+      out.push(line.slice(0, cut));
+      line = line.slice(cut);
+    }
   }
-  if (line && out.length < lines) out.push(line);
-  else if (line) words.unshift(line);
-  if (words.length && out.length) {
-    let last = out[out.length - 1];
-    while (last && pdfTextWidth(last + '…', size, face) > width) last = last.slice(0, -1);
-    out[out.length - 1] = last.trimEnd() + '…';
-  }
-  // A single word wider than the cell is cut to fit.
-  return out.map(l => { while (l.length > 1 && pdfTextWidth(l, size, face) > width) l = l.slice(0, -2) + '…'; return l; });
+  if (line) out.push(line);
+  return out;
 }
 
 /// A page being drawn. Letter by default.

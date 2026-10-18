@@ -2,7 +2,7 @@
 // each breaker's number, wire, rating, what it feeds and the live power of the channel measuring it (#454).
 // Slots, breakers, tandem halves and the node measuring each leg are all edited here.
 import { activate, api, btn, closeSheet, el, ensure, navLink, openSheet, saveFile, slug, toast } from '../helpers.js';
-import { pdfDocument, pdfPage, pdfWrap, type PdfPage } from '../pdf.js';
+import { pdfDocument, pdfPage, pdfTextWidth, pdfWrap, type PdfPage } from '../pdf.js';
 import { openHistorySheet } from '../history-sheet.js';
 import { state } from '../state.js';
 import { refreshDirty } from '../dirty.js';
@@ -711,10 +711,10 @@ export function addPanelScheduleSection(nav: any, sections: any) {
 
   /// What a breaker reads as on paper: what it feeds, or that nobody has identified it. Never blank —
   /// a slot nobody has written down is the point of printing it.
-  const printWords = (b: Breaker) =>
+  const printWords = (b: Breaker, unknown = 'Unknown — not identified') =>
     b.state === 'unused' ? 'Unused'
-      : b.state === 'unknown' ? (b.description ? `${b.description} ????` : 'Unknown — not identified')
-        : b.description || 'Unknown — not identified';
+      : b.state === 'unknown' ? (b.description ? `${b.description} ????` : unknown)
+        : b.description || unknown;
 
   /// One slot as the door shows it: what feeds it, its wire and rating, and whether it is a gap.
   const printSlot = (p: Panel, slot: number) => {
@@ -763,57 +763,116 @@ export function addPanelScheduleSection(nav: any, sections: any) {
     printable.appendChild(table);
   };
 
-  /// The same directory as a PDF (#592): the print layout on Letter, kept inside A4's width so it prints on either.
+  /// One slot as paper carries it: a paragraph per breaker, so a tandem's halves each get their own lines.
+  const paperSlot = (p: Panel, slot: number, slots: number) => {
+    const on = p.breakers.filter(b => b.slot === slot || (b.poles === 2 && b.slot + 2 === slot));
+    const own = on.filter(b => b.slot === slot);
+    const above = on.filter(b => b.slot !== slot);
+    return {
+      // A double-pole is one cell across both its slots, as it is one handle in the panel.
+      span: own.length === 1 && own[0].poles === 2 && on.length === 1 && slot + 2 <= slots,
+      below: own.length === 0 && above.length === 1,
+      words: on.length ? [...own.map(b => printWords(b, 'Unknown')), ...above.map(b => `${b.number || b.slot} (2-pole)`)] : ['Empty'],
+      wire: own.map(b => b.wire).filter(Boolean),
+      amps: own.map(b => b.amps ? String(b.amps) : '').filter(Boolean),
+      gap: !on.length || own.some(b => b.state === 'unknown' || (b.state !== 'unused' && !b.description)),
+    };
+  };
+
+  /// The same directory as a PDF (#592), for the inside of the panel door. Every word is printed: cells wrap
+  /// rather than cut, and the text is set as large as still fits the page. Letter, kept inside A4's width.
   const directoryPdf = (p: Panel, slots: number) => {
-    const margin = 36, top = 36, titleH = 30, headH = 16;
-    const widths = [192, 34, 22, 22, 22, 22, 34, 192];
-    const heads = ['Circuit', 'Wire', 'A', '#', '#', 'A', 'Wire', 'Circuit'];
+    const margin = 36, titleH = 30, headH = 16, pad = 4;
+    const left = margin, right = 612 - margin, room = 792 - 2 * margin - titleH - headH;
     const rows = Math.ceil(slots / 2);
-    const room = 792 - top - margin - titleH - headH;
-    // A 42-slot panel fits one page with room for two lines a slot; a bigger one runs on.
-    const rowH = Math.max(18, Math.min(32, room / rows));
-    const perPage = Math.floor(room / rowH);
-    const pageCount = Math.ceil(rows / perPage);
-    const xs = widths.reduce((a, w) => [...a, a[a.length - 1] + w], [margin]);
-    const size = 8.5, lead = 10;
-    const pages: PdfPage[] = [];
-    const when = printedOn();
-    for (let pg = 0; pg < pageCount; pg++) {
-      const page = pdfPage();
-      page.text(margin, top + 14, p.name || p.id, 14, { face: 'bold' });
-      page.text(xs[8], top + 14, `${slots} slots · ${when}` + (pageCount > 1 ? ` · page ${pg + 1} of ${pageCount}` : ''), 9, { gray: 0.33, align: 'right' });
-      let y = top + titleH;
-      page.fill(margin, y, xs[8] - margin, headH, 0.93);
-      heads.forEach((h, i) => page.text(xs[i] + widths[i] / 2, y + 11, h.toUpperCase(), 7, { face: 'bold', align: 'center' }));
-      y += headH;
-      const first = pg * perPage, count = Math.min(perPage, rows - first);
-      for (let r = 0; r < count; r++) {
-        const odd = (first + r) * 2 + 1;
-        [odd, odd + 1].forEach((slot, s) => {
-          if (slot > slots) return;
-          const at = printSlot(p, slot);
-          // Left: circuit, wire, rating, slot. Right mirrored, so the numbers meet in the middle.
-          const [desc, wire, amps, num] = s === 0 ? [0, 1, 2, 3] : [7, 6, 5, 4];
-          page.fill(xs[num], y, widths[num], rowH, 0.95);
-          const mid = y + rowH / 2 + 3;
-          page.text(xs[num] + widths[num] / 2, mid, String(slot), size, { face: 'bold', align: 'center' });
-          if (at.amps) page.text(xs[amps] + widths[amps] / 2, mid, at.amps, size, { align: 'center' });
-          if (at.wire) page.text(xs[wire] + widths[wire] / 2, mid, pdfWrap(at.wire, widths[wire] - 4, size)[0], size, { align: 'center' });
-          const face = at.gap ? 'italic' : 'regular';
-          const lines = pdfWrap(at.words, widths[desc] - 8, size, rowH >= 2 * lead + 6 ? 2 : 1, face);
-          lines.forEach((l, i) => page.text(xs[desc] + 4, mid + (i - (lines.length - 1) / 2) * lead, l, size, { face, gray: at.gap ? 0.33 : 0 }));
-        });
-        y += rowH;
-      }
-      // Rules last, so no cell's shading covers them.
-      const bottom = top + titleH + headH + count * rowH;
-      for (let r = 1; r < count; r++) page.rule(margin, top + titleH + headH + r * rowH, xs[8], top + titleH + headH + r * rowH);
-      xs.forEach((x, i) => page.rule(x, top + titleH, x, bottom, i === 0 || i === 8 ? 0.75 : 0.5));
-      page.rule(margin, top + titleH, xs[8], top + titleH, 0.75);
-      page.rule(margin, top + titleH + headH, xs[8], top + titleH + headH);
-      page.rule(margin, bottom, xs[8], bottom, 0.75);
-      pages.push(page);
+    const cells = Array.from({ length: slots }, (_, i) => paperSlot(p, i + 1, slots));
+    const cell = (slot: number) => cells[slot - 1];
+    const continued = (slot: number) => slot > 2 && cell(slot - 2).span && cell(slot).below;
+
+    const lay = (size: number) => {
+      const lead = size * 1.2;
+      const wireW = Math.min(110, Math.max(36, ...cells.flatMap(c => c.wire).map(w => pdfTextWidth(w, size) + 2 * pad)));
+      const ampsW = pdfTextWidth('100', size) + 2 * pad, numW = pdfTextWidth('100', size, 'bold') + 2 * pad;
+      const descW = (right - left) / 2 - wireW - ampsW - numW;
+      const widths = [descW, wireW, ampsW, numW, numW, ampsW, wireW, descW];
+      const wrap = (paras: string[], w: number, face: 'regular' | 'italic' = 'regular') => paras.flatMap(t => pdfWrap(t, w - 2 * pad, size, face));
+      const text = cells.map(c => ({ desc: wrap(c.words, descW, c.gap ? 'italic' : 'regular'), wire: wrap(c.wire, wireW), amps: wrap(c.amps, ampsW) }));
+      const need = (slot: number) => { const t = text[slot - 1]; return Math.max(t.desc.length, t.wire.length, t.amps.length, 1) * lead + 2 * pad; };
+      const heights = Array.from({ length: rows }, (_, r) => Math.max(lead + 2 * pad,
+        ...[2 * r + 1, 2 * r + 2].filter(s => s <= slots && !cell(s).span && !continued(s)).map(need)));
+      // A double-pole's two rows grow together when its cell needs more than both.
+      cells.forEach((c, i) => {
+        if (!c.span) return;
+        const r = Math.floor(i / 2), short = need(i + 1) - heights[r] - heights[r + 1];
+        if (short > 0) { heights[r] += short / 2; heights[r + 1] += short / 2; }
+      });
+      return { size, lead, widths, text, heights, total: heights.reduce((a, h) => a + h, 0) };
+    };
+    // As large as fits one page; past the smallest legible size, it runs on.
+    let L = lay(7);
+    for (let size = 11; size > 7; size -= 0.5) { const t = lay(size); if (t.total <= room) { L = t; break; } }
+    // Whatever room is left goes to the rows, as space to write in a change.
+    if (L.total < room) { const extra = Math.min((room - L.total) / rows, 3 * L.lead); L.heights = L.heights.map(h => h + extra); }
+    const { size, lead, widths, text, heights } = L;
+    const xs = widths.reduce((a, w) => [...a, a[a.length - 1] + w], [left]);
+
+    // Rows to pages, never splitting a double-pole across two.
+    const pagesOf: number[][] = [[]];
+    let used = 0;
+    for (let r = 0; r < rows; r++) {
+      const joined = [2 * r + 1, 2 * r + 2].some(s => s <= slots && cell(s).span);
+      const take = joined ? heights[r] + heights[r + 1] : heights[r];
+      if (used + take > room + 0.01 && pagesOf[pagesOf.length - 1].length) { pagesOf.push([]); used = 0; }
+      pagesOf[pagesOf.length - 1].push(r);
+      used += heights[r];
+      if (joined) { pagesOf[pagesOf.length - 1].push(++r); used += heights[r]; }
     }
+
+    const when = printedOn();
+    // Lines centred in a box, horizontally on `cx` or from the left at `x`.
+    const block = (page: PdfPage, lines: string[], x: number, w: number, y: number, h: number, opt: any = {}) => {
+      const first = y + (h - lines.length * lead) / 2 + lead * 0.78;
+      lines.forEach((l, i) => page.text(opt.center ? x + w / 2 : x + pad, first + i * lead, l, size, { ...opt, align: opt.center ? 'center' : 'left' }));
+    };
+    const pages = pagesOf.map((list, pg) => {
+      const page = pdfPage();
+      page.text(left, margin + 14, p.name || p.id, 14, { face: 'bold' });
+      page.text(right, margin + 14, `${slots} slots · ${when}` + (pagesOf.length > 1 ? ` · page ${pg + 1} of ${pagesOf.length}` : ''), 9, { gray: 0.33, align: 'right' });
+      const head = margin + titleH;
+      page.fill(left, head, right - left, headH, 0.93);
+      ['Circuit', 'Wire', 'A', '#', '#', 'A', 'Wire', 'Circuit'].forEach((h, i) => page.text(xs[i] + widths[i] / 2, head + 11, h.toUpperCase(), 7, { face: 'bold', align: 'center' }));
+      const ys: number[] = [];
+      let y = head + headH;
+      list.forEach(r => { ys.push(y); y += heights[r]; });
+      const bottom = y;
+      list.forEach((r, k) => {
+        [0, 1].forEach(side => {
+          const slot = 2 * r + 1 + side;
+          if (slot > slots) return;
+          const [desc, wire, amps, num] = side === 0 ? [0, 1, 2, 3] : [7, 6, 5, 4];
+          page.fill(xs[num], ys[k], widths[num], heights[r], 0.95);
+          block(page, [String(slot)], xs[num], widths[num], ys[k], heights[r], { face: 'bold', center: true });
+          if (continued(slot)) return;
+          const h = cell(slot).span ? heights[r] + heights[r + 1] : heights[r];
+          const t = text[slot - 1];
+          block(page, t.amps, xs[amps], widths[amps], ys[k], h, { center: true });
+          block(page, t.wire, xs[wire], widths[wire], ys[k], h, { center: true });
+          block(page, t.desc, xs[desc], widths[desc], ys[k], h, cell(slot).gap ? { face: 'italic', gray: 0.33 } : {});
+        });
+      });
+      // Rules last, so no shading covers them. Between rows, a double-pole's cell is not crossed.
+      list.forEach((r, k) => {
+        if (k === 0) return;
+        const y0 = ys[k];
+        const spanL = cell(2 * r - 1)?.span, spanR = 2 * r <= slots && cell(2 * r).span;
+        page.rule(spanL ? xs[3] : left, y0, xs[4], y0);
+        page.rule(xs[4], y0, spanR ? xs[5] : right, y0);
+      });
+      xs.forEach((x, i) => page.rule(x, head, x, bottom, i === 0 || i === 8 ? 0.75 : 0.5));
+      [head, head + headH].forEach(y0 => page.rule(left, y0, right, y0, 0.75));
+      page.rule(left, bottom, right, bottom, 0.75);
+      return page;
+    });
     return pdfDocument(pages, `${p.name || p.id} — panel directory`);
   };
 

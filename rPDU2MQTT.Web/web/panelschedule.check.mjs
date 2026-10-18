@@ -860,6 +860,9 @@ offsets.forEach((o, i) => { if (!pdf.startsWith(`${i + 1} 0 obj`, o)) fail(`PDF 
 if (!/\(Main Panel\) Tj/.test(pdf) || !/\(AC Heat Strips\) Tj/.test(pdf)) fail('the PDF does not carry the panel and its circuits');
 if (!/\(Fridge \?\?\?\?\) Tj/.test(pdf)) fail('the PDF prints an unidentified breaker without its mark');
 if (!/\(Empty\) Tj/.test(pdf)) fail('the PDF leaves an empty slot blank');
+// Paper has no "read more": nothing is cut short, and a double-pole is one cell across its two slots.
+if (pdf.includes('\x85')) fail('the PDF cuts text short with an ellipsis');
+if (/other half/.test(pdf)) fail('the PDF prints a double-pole\u2019s second slot as a note instead of spanning it');
 
 // A phone keeps the panel's two columns: a slot on screen is the slot in front of you. What gives way is the
 // detail beside each name, not the layout.
