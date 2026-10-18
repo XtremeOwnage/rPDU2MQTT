@@ -178,12 +178,12 @@ vm.createContext(sandbox);
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 await wait(50);
 
-const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Panel Schedule');
-if (!link) fail('no Panel Schedule page');
+const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Breaker Panels');
+if (!link) fail('no Breaker Panels page');
 link.click();
 await wait(200);
 const sec = query(getEl('sections'), '.section', true).find(s => s.classList.contains('active'));
-if (!sec) fail('clicking Panel Schedule activated no section');
+if (!sec) fail('clicking Breaker Panels activated no section');
 
 const cells = () => query(sec, '.ps-cell', true);
 const cellAt = (slot) => cells().find(c => c.dataset?.slot === String(slot));

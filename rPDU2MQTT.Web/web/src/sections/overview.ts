@@ -14,7 +14,7 @@ const JUMPS: [string, string, string][] = [
   ['Trends', '▦', 'Charts over hours, days or months'],
   ['Node Trends', '▥', 'Compare circuits over time'],
   ['Floor Plans', '⌗', 'Power and climate, room by room'],
-  ['Panel Schedule', '🗂', 'Your breaker panel'],
+  ['Breaker Panels', '🗂', 'Your breaker panel'],
 ];
 
 export function addOverviewSection(nav: any, sections: any) {
