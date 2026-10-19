@@ -1643,6 +1643,9 @@
 @media (max-width: 700px) { .ps-legs { grid-template-columns: minmax(0, 1fr); } }
 .ps-legs > .ps-field { margin: 0; }
 .ps-legs > .ps-field:has(> label.ld-inst) { grid-column: 1 / -1; }
+/* The picker with its node's editor button to its right. */
+.ps-node-row { display: flex; gap: 8px; align-items: center; }
+.ps-node-row > select { flex: 1; }
 /* The page: the panel straight after its picker; its settings folded beneath it. */
 .ps-pick, .ps-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .ps-settings { margin: var(--sp-4) 0 0; border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 0 var(--sp-3); }

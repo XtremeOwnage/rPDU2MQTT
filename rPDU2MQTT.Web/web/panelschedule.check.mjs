@@ -378,6 +378,18 @@ hunt().oninput({});
 await wait(30);
 if (nodeSel().value !== 'n30_1_8') fail('narrowing the list unpicked the channel that was already chosen');
 if (!optionsOf().includes('n30_1_8')) fail('the chosen channel was filtered out from under the person looking at it');
+// The picked node opens in its editor from beside the picker; with nothing picked, or a channel the config holds no
+// node for, there is nothing to open.
+const pickedEditor = () => query(sheet(), 'button', true).find(b => b.textContent === 'Edit node');
+if (!pickedEditor()) fail('the picker has no button to open the picked node');
+if (!pickedEditor().hidden) fail('a channel with no node in the config offers to open its editor');
+nodeSel().value = 'n30_1_7';
+nodeSel().onchange({});
+if (pickedEditor().hidden) fail('a picked node of the config does not offer to open its editor');
+nodeSel().value = '';
+nodeSel().onchange({});
+if (!pickedEditor().hidden) fail('with nothing picked the editor button still shows');
+nodeSel().value = 'n30_1_8';
 // Clearing it brings the rest back.
 hunt().value = '';
 hunt().oninput({});

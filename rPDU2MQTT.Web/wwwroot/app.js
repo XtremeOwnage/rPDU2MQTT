@@ -13175,10 +13175,23 @@ function addPanelScheduleSection(nav     , sections     ) {
           sel.value = keep;
           huntCount.textContent = `${shown.length} of ${candidates().length} channels`;
         };
-        fill(chosen);
-        (sel       )._fill = fill;
+        // Straight to the picked node's editor. Only a node of the config has one; a channel the bridge derives has none.
+        const toNode = btn('Edit node');
+        const syncToNode = () => {
+          toNode.hidden = !(state.data?.EnergyFlow?.Nodes || []).some((x     ) => x.Id === sel.value);
+          toNode.title = toNode.hidden ? '' : `Open ${sel.value} in the node editor.`;
+        };
+        toNode.onclick = () => {
+          closeSheet();
+          editNodeOnNextOpen(sel.value);
+          (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Nodes')?.click();
+        };
+        const fillAndSync = (keep        ) => { fill(keep); syncToNode(); };
+        sel.onchange = syncToNode;
+        fillAndSync(chosen);
+        (sel       )._fill = fillAndSync;
         pickers.push(sel);
-        pickerRows.appendChild(field(legs.length > 1 ? `Measured by (leg ${leg})` : 'Measured by', sel,
+        pickerRows.appendChild(field(legs.length > 1 ? `Measured by (leg ${leg})` : 'Measured by', el('div', { class: 'ps-node-row' }, sel, toNode),
           legs.length > 1 ? 'Both legs need a node before this breaker reports its power.' : ''));
       });
       // Filtering keeps whatever is picked, so narrowing the list never quietly unpicks it.
