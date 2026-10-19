@@ -27,6 +27,7 @@ export function flowCardRows(n: any, place: TreePlace, ctx: { units: string; met
   const rows: any[] = [];
   rows.push(el('div', { class: 'nh-title', text: n.label || n.id }));
   rows.push(el('div', { class: 'nh-sub', text: `${n.kind || 'node'} · ${n.id}` }));
+  if (n.description) rows.push(el('div', { class: 'nh-description', text: n.description }));
   rows.push(el('div', { class: 'nh-value' }, fmt(n.value ?? place.value),
     el('span', { class: 'nh-metric', text: ' ' + metricLabel(ctx.metric).toLowerCase() })));
   if (n.value != null && Math.abs(place.value - n.value) > 1e-6)

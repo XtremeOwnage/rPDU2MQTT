@@ -5175,6 +5175,7 @@ function flowCardRows(n     , place           , ctx                             
   const rows        = [];
   rows.push(el('div', { class: 'nh-title', text: n.label || n.id }));
   rows.push(el('div', { class: 'nh-sub', text: `${n.kind || 'node'} · ${n.id}` }));
+  if (n.description) rows.push(el('div', { class: 'nh-description', text: n.description }));
   rows.push(el('div', { class: 'nh-value' }, fmt(n.value ?? place.value),
     el('span', { class: 'nh-metric', text: ' ' + metricLabel(ctx.metric).toLowerCase() })));
   if (n.value != null && Math.abs(place.value - n.value) > 1e-6)
@@ -6623,6 +6624,7 @@ function addFlowSection(nav     , sections     ) {
         const rows        = [];
         rows.push(el('div', { class: 'nh-title', text: n.label }));
         rows.push(el('div', { class: 'nh-sub', text: `${n.kind || 'node'} · ${n.id}` }));
+        if (n.description) rows.push(el('div', { class: 'nh-description', text: n.description }));
         rows.push(el('div', { class: 'nh-value' + (unknownNode ? ' nh-unknown' : '') },
           unknownNode ? 'no data' : formatMeasure(nodeValue(n.id), units),
           el('span', { class: 'nh-metric', text: ' ' + metricLabel(metricSel.value).toLowerCase() })));
@@ -7686,6 +7688,13 @@ function renderNodeEditor(node     , links       , cand                  , reren
     stoIn.onchange = () => { const v = +stoIn.value; node.StorageKwh = (stoIn.value !== '' && !isNaN(v)) ? v : undefined; };
     grid.appendChild(field('Storage (kWh)', stoIn));
   }
+
+  const descIn = el('textarea', { class: 'ne-description', rows: '3', placeholder: 'Optional notes: what it is, where it is.' })                       ;
+  descIn.value = node.Description || '';
+  descIn.onchange = () => { node.Description = descIn.value.trim() ? descIn.value : undefined; };
+  const descField = field('Description', descIn);
+  descField.classList.add('ne-full');
+  grid.appendChild(descField);
   basics.appendChild(grid);
 
   // --- Where its readings come from: one card per binding ---
@@ -8358,7 +8367,7 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
   // The node being edited always stays.
   const q = query.trim().toLowerCase();
   const all = customNodes;
-  const hit = (n     ) => !q || [n.Id, n.Label, n.Kind || 'node', kindMeta(n.Kind)[1], ...(n.Tags || [])]
+  const hit = (n     ) => !q || [n.Id, n.Label, n.Description, n.Kind || 'node', kindMeta(n.Kind)[1], ...(n.Tags || [])]
     .some((v     ) => String(v || '').toLowerCase().includes(q));
   const managed = hideManaged ? all.filter((n     ) => managedBy(n) && n.Id !== editing.id).length : 0;
   if (q || managed) {
@@ -8390,7 +8399,12 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     const tr = el('tr');
     if (editing.id === n.Id) tr.style.outline = '2px solid var(--accent, #4f8cff)';
     tr.appendChild(el('td', {}, el('code', { text: n.Id, style: { color: 'var(--muted)' } })));
-    tr.appendChild(el('td', { text: n.Label || n.Id }));
+    const labCell = el('td', { text: n.Label || n.Id });
+    if (n.Description) {
+      labCell.appendChild(el('div', { class: 'desc nd-description', text: n.Description }));
+      labCell.title = n.Description;
+    }
+    tr.appendChild(labCell);
     tr.appendChild(el('td', { text: kindMeta(n.Kind)[1] }));
     tr.appendChild(el('td', { text: n.Mode || 'auto' }));
     tr.appendChild(el('td', { class: 'num', text: n.Value ?? '—' }));

@@ -21,6 +21,7 @@ Virtual upstream nodes (breakers, transfer switches, a “Total”) and their fe
 | `EnergyFlow.Nodes` | list |  | Custom upstream flow nodes (breakers, transfer-switch outputs, Total, ...), keyed by a stable id. |
 | `EnergyFlow.Nodes[].Id` | string |  | Stable unique id used to wire parents/children. |
 | `EnergyFlow.Nodes[].Label` | string |  | Human-readable label shown in the flow diagram. |
+| `EnergyFlow.Nodes[].Description` | string |  | Optional free-text notes about this node: what it is, where it is, anything worth knowing. Shown in the editor and on the diagrams' hover cards; never affects a reading. |
 | `EnergyFlow.Nodes[].Kind` | one of `node`, `panel`, `breaker`, `inverter`, `battery`, `solar`, `grid`, `load` | `node` | What this node represents: 'node' (generic), 'panel', 'breaker' (a circuit that feeds other nodes), 'inverter', 'battery', 'solar', 'grid', or 'load' (where power is used, so it feeds nothing). Drives styling and the fields the editor offers. |
 | `EnergyFlow.Nodes[].Value` | double |  | Optional fixed value for a leaf node. Used only when no live source has reported for it. |
 | `EnergyFlow.Nodes[].Max` | double |  | Full-scale value for this node's gauge, in the metric's canonical unit (W for power). For example a PV array's peak output. Leave blank to show the plain reading instead — no ceiling is ever guessed. |
