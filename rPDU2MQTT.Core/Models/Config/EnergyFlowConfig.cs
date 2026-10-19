@@ -244,6 +244,9 @@ public class EnergyFlowNode : IExtensible
     [Description("Human-readable label shown in the flow diagram.")]
     public string Label { get; set; } = "";
 
+    [Description("Optional free-text notes about this node: what it is, where it is, anything worth knowing. Shown in the editor and on the diagrams' hover cards; never affects a reading.")]
+    public string? Description { get; set; }
+
     /// <summary>
     /// What this node represents (#129). Purely descriptive today — it drives the diagram's styling and
     /// which fields/metrics the editor offers (a battery has storage but no frequency, etc.) — but leaves

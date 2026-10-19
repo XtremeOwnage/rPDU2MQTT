@@ -267,7 +267,7 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
   // The node being edited always stays.
   const q = query.trim().toLowerCase();
   const all = customNodes;
-  const hit = (n: any) => !q || [n.Id, n.Label, n.Kind || 'node', kindMeta(n.Kind)[1], ...(n.Tags || [])]
+  const hit = (n: any) => !q || [n.Id, n.Label, n.Description, n.Kind || 'node', kindMeta(n.Kind)[1], ...(n.Tags || [])]
     .some((v: any) => String(v || '').toLowerCase().includes(q));
   const managed = hideManaged ? all.filter((n: any) => managedBy(n) && n.Id !== editing.id).length : 0;
   if (q || managed) {
@@ -299,7 +299,12 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     const tr = el('tr');
     if (editing.id === n.Id) tr.style.outline = '2px solid var(--accent, #4f8cff)';
     tr.appendChild(el('td', {}, el('code', { text: n.Id, style: { color: 'var(--muted)' } })));
-    tr.appendChild(el('td', { text: n.Label || n.Id }));
+    const labCell = el('td', { text: n.Label || n.Id });
+    if (n.Description) {
+      labCell.appendChild(el('div', { class: 'desc nd-description', text: n.Description }));
+      labCell.title = n.Description;
+    }
+    tr.appendChild(labCell);
     tr.appendChild(el('td', { text: kindMeta(n.Kind)[1] }));
     tr.appendChild(el('td', { text: n.Mode || 'auto' }));
     tr.appendChild(el('td', { class: 'num', text: n.Value ?? '—' }));

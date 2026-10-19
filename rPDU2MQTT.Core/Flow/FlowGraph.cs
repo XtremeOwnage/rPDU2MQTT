@@ -46,6 +46,10 @@ public sealed record FlowNode(
     /// <c>home</c> — or null. See <see cref="EnergyBalance"/>; a page sums by this, never by kind.</summary>
     public string? Balance { get; init; }
 
+    /// <summary>The operator's notes on this node, from its config. Null when it has none.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; init; }
+
     /// <summary>A node the builder invented: a return lane (<c>…#in</c>) or unmetered remainder (<c>…#unmeasured</c>).</summary>
     public bool Synthetic => Id.Contains('#');
 

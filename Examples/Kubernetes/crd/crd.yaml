@@ -959,6 +959,9 @@ spec:
                         Label:
                           type: string
                           description: Human-readable label shown in the flow diagram.
+                        Description:
+                          type: string
+                          description: "Optional free-text notes about this node: what it is, where it is, anything worth knowing. Shown in the editor and on the diagrams' hover cards; never affects a reading."
                         Kind:
                           type: string
                           enum:

@@ -509,6 +509,13 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     stoIn.onchange = () => { const v = +stoIn.value; node.StorageKwh = (stoIn.value !== '' && !isNaN(v)) ? v : undefined; };
     grid.appendChild(field('Storage (kWh)', stoIn));
   }
+
+  const descIn = el('textarea', { class: 'ne-description', rows: '3', placeholder: 'Optional notes: what it is, where it is.' }) as HTMLTextAreaElement;
+  descIn.value = node.Description || '';
+  descIn.onchange = () => { node.Description = descIn.value.trim() ? descIn.value : undefined; };
+  const descField = field('Description', descIn);
+  descField.classList.add('ne-full');
+  grid.appendChild(descField);
   basics.appendChild(grid);
 
   // --- Where its readings come from: one card per binding ---

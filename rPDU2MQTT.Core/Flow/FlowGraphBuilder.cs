@@ -675,6 +675,9 @@ public static class FlowGraphBuilder
         // What already counts each of them, so a total by kind adds the same energy once (#491).
         var topology = FlowTopology.For(data, flow);
         var within = shown.ToDictionary(id => id, id => CountOnce.CountedBy(flow, id, shown, topology), StringComparer.OrdinalIgnoreCase);
+        var notes = (flow?.Nodes ?? []).Where(n => !string.IsNullOrWhiteSpace(n.Description) && !string.IsNullOrWhiteSpace(n.Id))
+            .GroupBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Description!.Trim(), StringComparer.OrdinalIgnoreCase);
         var nodes = shown
             .Select(id => new FlowNode(id, label[id], kind.TryGetValue(id, out var k) ? k : "node",
                                        ValueOf(id), ImbalanceOf(id), DerivationOf(id),
@@ -683,6 +686,7 @@ public static class FlowGraphBuilder
             {
                 // A return lane counts toward its node's total, and is judged by what holds that node.
                 Balance = EnergyBalance.RoleOf(flow, id, KindOf(id), within.TryGetValue(BaseOf(id), out var holder) ? holder : within[id]),
+                Description = notes.TryGetValue(BaseOf(id), out var note) ? note : null,
             })
             .OrderBy(n => n.Id, StringComparer.OrdinalIgnoreCase)
             .ToList();

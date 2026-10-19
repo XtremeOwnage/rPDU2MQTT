@@ -1030,6 +1030,7 @@ export function addFlowSection(nav: any, sections: any) {
         const rows: any[] = [];
         rows.push(el('div', { class: 'nh-title', text: n.label }));
         rows.push(el('div', { class: 'nh-sub', text: `${n.kind || 'node'} · ${n.id}` }));
+        if (n.description) rows.push(el('div', { class: 'nh-description', text: n.description }));
         rows.push(el('div', { class: 'nh-value' + (unknownNode ? ' nh-unknown' : '') },
           unknownNode ? 'no data' : formatMeasure(nodeValue(n.id), units),
           el('span', { class: 'nh-metric', text: ' ' + metricLabel(metricSel.value).toLowerCase() })));
