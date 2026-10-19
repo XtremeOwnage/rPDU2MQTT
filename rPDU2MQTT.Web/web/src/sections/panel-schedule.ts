@@ -9,6 +9,7 @@ import { refreshDirty } from '../dirty.js';
 import { column, rowOf } from '../panel-layout.js';
 import { extensionsFor, renderExtensions } from '../entity-extensions.js';
 import { integrationIds } from '../plugin-pages.js';
+import { openNodeSheet } from './nodes.js';
 
 /// A breaker as the API reports it, with its chain and power resolved.
 type Leg = { leg: number; wire: string; clamp: string | null; channel: string | null; reversed: boolean };
@@ -473,10 +474,29 @@ export function addPanelScheduleSection(nav: any, sections: any) {
           sel.value = keep;
           huntCount.textContent = `${shown.length} of ${candidates().length} channels`;
         };
-        fill(chosen);
-        (sel as any)._fill = fill;
+        // The picked node's editor, over this one. Only a node of the config has one; a channel the bridge derives has none.
+        const toNode = btn('Edit node');
+        const configNode = () => (state.data?.EnergyFlow?.Nodes || []).find((x: any) => x.Id === sel.value);
+        const syncToNode = () => {
+          toNode.hidden = !configNode();
+          toNode.title = toNode.hidden ? '' : `Edit ${sel.value} without leaving this breaker.`;
+        };
+        toNode.onclick = () => {
+          const id = sel.value;
+          openNodeSheet(id, nodes, () => {
+            // A renamed node reads by its new name in the pickers.
+            const n = nodes.find(x => x.id === id);
+            const c = (state.data?.EnergyFlow?.Nodes || []).find((x: any) => x.Id === id);
+            if (n && c) n.label = c.Label || id;
+            pickers.forEach(p => (p as any)._fill(p.value));
+          });
+        };
+        const fillAndSync = (keep: string) => { fill(keep); syncToNode(); };
+        sel.onchange = syncToNode;
+        fillAndSync(chosen);
+        (sel as any)._fill = fillAndSync;
         pickers.push(sel);
-        pickerRows.appendChild(field(legs.length > 1 ? `Measured by (leg ${leg})` : 'Measured by', sel,
+        pickerRows.appendChild(field(legs.length > 1 ? `Measured by (leg ${leg})` : 'Measured by', el('div', { class: 'ps-node-row' }, sel, toNode),
           legs.length > 1 ? 'Both legs need a node before this breaker reports its power.' : ''));
       });
       // Filtering keeps whatever is picked, so narrowing the list never quietly unpicks it.

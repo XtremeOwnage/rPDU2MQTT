@@ -208,6 +208,41 @@ export function syncNodeModal(node: any, links: any[], cand: Map<string, any>, e
   nodeModal.body.appendChild(renderNodeEditor(node, links, cand, (close?: boolean) => { if (close) editing.id = null; rerender(); }));
 }
 
+/// The node editor on its own, over whatever is open (a breaker's editor, say) rather than on the Nodes page.
+/// `graph` is what the bridge reads, for the editor's pickers; `onClose` runs once it is put away.
+export function openNodeSheet(id: string, graph: { id: string, label: string, kind: string }[], onClose?: () => void) {
+  const flow = ensure(state.data, 'EnergyFlow', {});
+  const customNodes = ensure(flow, 'Nodes', []);
+  const node = customNodes.find((n: any) => n.Id === id);
+  if (!node) return;
+  const links = ensure(flow, 'Links', []);
+  const cand = flowCandidates({ nodes: graph }, customNodes);
+  const status = el('span', { class: 'sheet-dirty' });
+  const save = el('button', { class: 'primary', type: 'button', text: 'Save' }) as HTMLButtonElement;
+  const done = el('button', { type: 'button', text: 'Done' }) as HTMLButtonElement;
+  save.onclick = () => (document.getElementById('btn-save') as any)?.click();
+  const unwatch = onDirty((list: any[]) => {
+    const n = list.length;
+    status.textContent = n ? `${n} unsaved change${n === 1 ? '' : 's'}` : 'All changes saved';
+    status.classList.toggle('is-dirty', n > 0);
+    save.disabled = n === 0;
+  });
+  // Escape puts away this sheet only, not the one beneath it as well: caught before the page's own handler.
+  const onKey = (e: any) => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault?.(); dismiss(); } };
+  const finish = () => { unwatch(); window.removeEventListener('keydown', onKey, true); onClose?.(); };
+  const o = overlay(`Edit node — ${node.Label || node.Id}`, finish,
+    { footer: el('div', { class: 'sheet-foot-row' }, status, save, done), className: 'node-sheet node-sheet-over', sub: node.Id });
+  const dismiss = () => { o.close(); finish(); };
+  window.addEventListener('keydown', onKey, true);
+  done.onclick = dismiss;
+  const draw = (close?: boolean) => {
+    if (close) { dismiss(); return; }
+    o.body.innerHTML = '';
+    o.body.appendChild(renderNodeEditor(node, links, cand, draw));
+  };
+  draw();
+}
+
 /// Would adding from -> to close a cycle?
 export function wouldLoop(links: any[], from: string, to: string) {
   const adj: any = {};

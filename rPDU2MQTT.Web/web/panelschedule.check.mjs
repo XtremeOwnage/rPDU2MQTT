@@ -378,6 +378,28 @@ hunt().oninput({});
 await wait(30);
 if (nodeSel().value !== 'n30_1_8') fail('narrowing the list unpicked the channel that was already chosen');
 if (!optionsOf().includes('n30_1_8')) fail('the chosen channel was filtered out from under the person looking at it');
+// The picked node opens in its editor from beside the picker; with nothing picked, or a channel the config holds no
+// node for, there is nothing to open.
+const pickedEditor = () => query(sheet(), 'button', true).find(b => b.textContent === 'Edit node');
+if (!pickedEditor()) fail('the picker has no button to open the picked node');
+if (!pickedEditor().hidden) fail('a channel with no node in the config offers to open its editor');
+nodeSel().value = 'n30_1_7';
+nodeSel().onchange({});
+if (pickedEditor().hidden) fail('a picked node of the config does not offer to open its editor');
+// It opens over the breaker's editor, which stays where it was beneath it.
+pickedEditor().onclick();
+const nodeSheet = () => query(sandbox.document.body, '.node-sheet-over', true)[0];
+if (!nodeSheet()) fail('the node editor did not open from the breaker');
+if (!sheet() || nodeSel()?.value !== 'n30_1_7') fail('opening the node editor put the breaker editor away');
+if (!/z-index:\s*51/.test((css.match(/\.sheet-backdrop:has\(\.node-sheet-over\)\s*\{[^}]*\}/) || [''])[0]))
+  fail('the node editor is not drawn above the breaker editor');
+query(nodeSheet(), 'button', true).find(b => b.textContent === 'Done').onclick();
+if (nodeSheet()) fail('Done did not put the node editor away');
+if (!sheet()) fail('putting the node editor away closed the breaker editor too');
+nodeSel().value = '';
+nodeSel().onchange({});
+if (!pickedEditor().hidden) fail('with nothing picked the editor button still shows');
+nodeSel().value = 'n30_1_8';
 // Clearing it brings the rest back.
 hunt().value = '';
 hunt().oninput({});
