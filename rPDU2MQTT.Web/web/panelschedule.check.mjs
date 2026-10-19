@@ -386,6 +386,16 @@ if (!pickedEditor().hidden) fail('a channel with no node in the config offers to
 nodeSel().value = 'n30_1_7';
 nodeSel().onchange({});
 if (pickedEditor().hidden) fail('a picked node of the config does not offer to open its editor');
+// It opens over the breaker's editor, which stays where it was beneath it.
+pickedEditor().onclick();
+const nodeSheet = () => query(sandbox.document.body, '.node-sheet-over', true)[0];
+if (!nodeSheet()) fail('the node editor did not open from the breaker');
+if (!sheet() || nodeSel()?.value !== 'n30_1_7') fail('opening the node editor put the breaker editor away');
+if (!/z-index:\s*51/.test((css.match(/\.sheet-backdrop:has\(\.node-sheet-over\)\s*\{[^}]*\}/) || [''])[0]))
+  fail('the node editor is not drawn above the breaker editor');
+query(nodeSheet(), 'button', true).find(b => b.textContent === 'Done').onclick();
+if (nodeSheet()) fail('Done did not put the node editor away');
+if (!sheet()) fail('putting the node editor away closed the breaker editor too');
 nodeSel().value = '';
 nodeSel().onchange({});
 if (!pickedEditor().hidden) fail('with nothing picked the editor button still shows');

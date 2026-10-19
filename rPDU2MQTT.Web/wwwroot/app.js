@@ -8299,6 +8299,41 @@ function syncNodeModal(node     , links       , cand                  , editing 
   nodeModal.body.appendChild(renderNodeEditor(node, links, cand, (close          ) => { if (close) editing.id = null; rerender(); }));
 }
 
+/// The node editor on its own, over whatever is open (a breaker's editor, say) rather than on the Nodes page.
+/// `graph` is what the bridge reads, for the editor's pickers; `onClose` runs once it is put away.
+function openNodeSheet(id        , graph                                               , onClose             ) {
+  const flow = ensure(state.data, 'EnergyFlow', {});
+  const customNodes = ensure(flow, 'Nodes', []);
+  const node = customNodes.find((n     ) => n.Id === id);
+  if (!node) return;
+  const links = ensure(flow, 'Links', []);
+  const cand = flowCandidates({ nodes: graph }, customNodes);
+  const status = el('span', { class: 'sheet-dirty' });
+  const save = el('button', { class: 'primary', type: 'button', text: 'Save' })                     ;
+  const done = el('button', { type: 'button', text: 'Done' })                     ;
+  save.onclick = () => (document.getElementById('btn-save')       )?.click();
+  const unwatch = onDirty((list       ) => {
+    const n = list.length;
+    status.textContent = n ? `${n} unsaved change${n === 1 ? '' : 's'}` : 'All changes saved';
+    status.classList.toggle('is-dirty', n > 0);
+    save.disabled = n === 0;
+  });
+  // Escape puts away this sheet only, not the one beneath it as well: caught before the page's own handler.
+  const onKey = (e     ) => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault?.(); dismiss(); } };
+  const finish = () => { unwatch(); window.removeEventListener('keydown', onKey, true); onClose?.(); };
+  const o = overlay(`Edit node — ${node.Label || node.Id}`, finish,
+    { footer: el('div', { class: 'sheet-foot-row' }, status, save, done), className: 'node-sheet node-sheet-over', sub: node.Id });
+  const dismiss = () => { o.close(); finish(); };
+  window.addEventListener('keydown', onKey, true);
+  done.onclick = dismiss;
+  const draw = (close          ) => {
+    if (close) { dismiss(); return; }
+    o.body.innerHTML = '';
+    o.body.appendChild(renderNodeEditor(node, links, cand, draw));
+  };
+  draw();
+}
+
 /// Would adding from -> to close a cycle?
 function wouldLoop(links       , from        , to        ) {
   const adj      = {};
@@ -13175,16 +13210,22 @@ function addPanelScheduleSection(nav     , sections     ) {
           sel.value = keep;
           huntCount.textContent = `${shown.length} of ${candidates().length} channels`;
         };
-        // Straight to the picked node's editor. Only a node of the config has one; a channel the bridge derives has none.
+        // The picked node's editor, over this one. Only a node of the config has one; a channel the bridge derives has none.
         const toNode = btn('Edit node');
+        const configNode = () => (state.data?.EnergyFlow?.Nodes || []).find((x     ) => x.Id === sel.value);
         const syncToNode = () => {
-          toNode.hidden = !(state.data?.EnergyFlow?.Nodes || []).some((x     ) => x.Id === sel.value);
-          toNode.title = toNode.hidden ? '' : `Open ${sel.value} in the node editor.`;
+          toNode.hidden = !configNode();
+          toNode.title = toNode.hidden ? '' : `Edit ${sel.value} without leaving this breaker.`;
         };
         toNode.onclick = () => {
-          closeSheet();
-          editNodeOnNextOpen(sel.value);
-          (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Nodes')?.click();
+          const id = sel.value;
+          openNodeSheet(id, nodes, () => {
+            // A renamed node reads by its new name in the pickers.
+            const n = nodes.find(x => x.id === id);
+            const c = (state.data?.EnergyFlow?.Nodes || []).find((x     ) => x.Id === id);
+            if (n && c) n.label = c.Label || id;
+            pickers.forEach(p => (p       )._fill(p.value));
+          });
         };
         const fillAndSync = (keep        ) => { fill(keep); syncToNode(); };
         sel.onchange = syncToNode;

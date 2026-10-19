@@ -1646,6 +1646,8 @@
 /* The picker with its node's editor button to its right. */
 .ps-node-row { display: flex; gap: 8px; align-items: center; }
 .ps-node-row > select { flex: 1; }
+/* The node editor opened from a breaker's sits over the breaker's sheet. */
+.sheet-backdrop:has(.node-sheet-over) { z-index: 51; }
 /* The page: the panel straight after its picker; its settings folded beneath it. */
 .ps-pick, .ps-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .ps-settings { margin: var(--sp-4) 0 0; border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 0 var(--sp-3); }
