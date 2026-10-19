@@ -1475,7 +1475,7 @@ rooms it serves.
   stay together when either is moved or resized; the corner picked first stays put.
 - A room that only follows a shared or joined corner keeps its level and plumb walls, so it stretches as a
   rectangle.
-- *Keep square* holds every wall of a room level or plumb (every corner at 90° if the room is turned).
+- A room keeps its level and plumb walls while a corner or wall is dragged; hold Shift to drag it free. *Square up* straightens a nearly square room once, storing no constraints.
 - An unsatisfiable constraint is marked red, and the floor names it.
 - Each room lists its constraints, each removable. A wall's *Fix* button holds its length.
 - The *Constraints* checkbox shows or hides the markers.
