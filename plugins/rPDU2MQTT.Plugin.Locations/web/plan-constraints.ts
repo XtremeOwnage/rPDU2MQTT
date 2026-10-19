@@ -78,7 +78,9 @@ function residual(c: PlanConstraint, pt: (r: PlanRef, end?: number) => Pt | null
 /// were shared stay shared once one of them has moved. `hold` names the rooms being reshaped by hand: every other
 /// room is only pulled along, by the corners it shares or is joined at, and keeps its level and plumb walls so as it
 /// goes, stretching as a rectangle instead of skewing (#602).
-export type PlanSolveOpts = { before?: PlanShape[]; hold?: string[] };
+/// `keep` holds the level and plumb walls of the rooms in `hold` too, as a rectangle in a sketch is held: dragging a
+/// corner resizes the room square instead of skewing it.
+export type PlanSolveOpts = { before?: PlanShape[]; hold?: string[]; keep?: boolean };
 
 /// Move the free corners until every constraint holds, or as near as they can. Corners of a locked room, of a
 /// locked wall, or named in `fixed` ("room#corner") do not move. Coincident corners are one point. Returns the worst
@@ -116,16 +118,18 @@ export function planSolve(shapes: PlanShape[], constraints: PlanConstraint[], fi
   if (opts.hold) {
     const hold = new Set(opts.hold);
     shapes.forEach(s => {
-      if (hold.has(s.Id) || s.Locked) return;
+      const held = hold.has(s.Id);
+      if ((held && !opts.keep) || s.Locked) return;
       if (constraints.some(c => c.Kind === 'angle' && c.Refs[0]?.Room === s.Id && Math.abs(Math.abs(Number(c.Value) || 0) - 90) > 0.5)) return;
-      followers.add(s.Id);
+      if (!held) followers.add(s.Id);
+      const id = held ? 'keep' : '';
       const was = opts.before?.find(b => b.Id === s.Id && b.Shape.length === s.Shape.length) || s;
       const n = was.Shape.length;
       was.Shape.forEach((p, i) => {
         const q = was.Shape[(i + 1) % n];
         if (Math.hypot(q.X - p.X, q.Y - p.Y) < 1) return;
-        if (Math.abs(q.Y - p.Y) <= 0.15) implied.push({ Id: '', Kind: 'horizontal', Refs: [{ Room: s.Id, Edge: i }] });
-        else if (Math.abs(q.X - p.X) <= 0.15) implied.push({ Id: '', Kind: 'vertical', Refs: [{ Room: s.Id, Edge: i }] });
+        if (Math.abs(q.Y - p.Y) <= 0.15) implied.push({ Id: id, Kind: 'horizontal', Refs: [{ Room: s.Id, Edge: i }] });
+        else if (Math.abs(q.X - p.X) <= 0.15) implied.push({ Id: id, Kind: 'vertical', Refs: [{ Room: s.Id, Edge: i }] });
       });
     });
   }

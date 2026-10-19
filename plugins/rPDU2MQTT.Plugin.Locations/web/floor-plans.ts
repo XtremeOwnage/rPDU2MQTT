@@ -551,14 +551,16 @@ export default function mount(sec: any, host: any) {
   const shapeHeld = (sh: any) => !!sh && (sh.Locked || (sh.LockedWalls || []).length > 0);
   let lastSolve: { worst: number; unmet: string[] } = { worst: 0, unmet: [] };
   /// Bring every constraint on this floor back into line, holding still the corners named. The rooms in `hold` are
-  /// the ones being reshaped; the rest follow the corners they share, keeping their level and plumb walls.
-  const solve = (fixed: string[] = [], hold?: string[]) => {
+  /// the ones being reshaped, and keep their level and plumb walls so unless `free` (Shift, while dragging); the rest
+  /// follow the corners they share, keeping theirs.
+  const solve = (fixed: string[] = [], hold?: string[], free = false) => {
     if (!constraintsNow().length && !hold) { lastSolve = { worst: 0, unmet: [] }; return; }
-    lastSolve = planSolve(shapesNow(), constraintsNow(), new Set(fixed), 120, { before: before || gesture?.before || undefined, hold });
+    lastSolve = planSolve(shapesNow(), constraintsNow(), new Set(fixed), 120, { before: before || gesture?.before || undefined, hold, keep: !free });
   };
   const keysOf = (sh: any) => (sh?.Shape || []).map((_: any, i: number) => `${sh.Id}#${i}`);
   const saidLocked = () => toast('That is locked. Unlock it in its panel to change it.', false);
   let cPicks: PlanRef[] = [];
+  let consLit = '';
   const sameRef = (a: PlanRef, b: PlanRef) => a.Room === b.Room && (a.Corner ?? null) === (b.Corner ?? null) && (a.Edge ?? null) === (b.Edge ?? null);
   /// The corner or wall under the pointer: a corner when one is close, else the nearest wall.
   const pickRef = (p: Pt): PlanRef | null => {
@@ -585,6 +587,13 @@ export default function mount(sec: any, host: any) {
   };
   const cornerPt = (r: PlanRef) => { const sh = shapeById(r.Room); return sh && r.Corner != null ? sh.Shape[r.Corner] : null; };
   const addConstraint = (kind: string, refs: PlanRef[], value?: number) => {
+    // The same constraint twice holds nothing more; a length or angle given again replaces the one there.
+    const same = constraintsNow().find(c => c.Kind === kind && c.Refs.length === refs.length && c.Refs.every(r => refs.some(q => sameRef(r, q))));
+    if (same && (kind === 'length' || kind === 'angle') && value != null) {
+      act(() => { same.Value = value; solve([], refs.map(r => r.Room)); cPicks = []; });
+      return;
+    }
+    if (same) { cPicks = []; drawPlan(); toast('That is already held.', false); return; }
     const id = freshIn(constraintsNow(), kind);
     // Joining, the room picked first (or the one whose wall it is) stays put; the other comes to it, stretching as a
     // rectangle would. Anything else reshapes the rooms it names.
@@ -925,15 +934,17 @@ export default function mount(sec: any, host: any) {
         svg.appendChild(lk);
       }
     });
-    // Constraints, where they hold: a pill on each wall or corner, red where they cannot.
+    // Constraints: only the selected room's (every one, with the Constrain tool), and any that cannot hold. Each says
+    // in a word what it holds; the walls it pairs are lit and joined.
     if (consShown()) {
       const pill = (at: Pt, text: string, unmet: boolean) => {
-        const w = (text.length * 6.5 + 10) * u, hh = 15 * u;
+        const w = (text.length * 6.2 + 12) * u, hh = 16 * u;
         const g = svgEl('g', { class: 'fp-cons' + (unmet ? ' is-unmet' : ''), transform: `translate(${at.X},${at.Y})` });
         g.appendChild(svgEl('rect', { x: -w / 2, y: -hh / 2, width: w, height: hh, rx: hh / 2, 'stroke-width': u }));
         const t = svgEl('text', { y: u, 'font-size': 10.5 * u }); t.textContent = text; g.appendChild(t);
         svg.appendChild(g);
       };
+      const wall = (m: any, unmet: boolean) => svg.appendChild(svgEl('line', { x1: m.a.X, y1: m.a.Y, x2: m.b.X, y2: m.b.Y, class: 'fp-cons-wall' + (unmet ? ' is-unmet' : ''), 'stroke-width': 4 * u }));
       const inward = (m: any, px: number) => { const dx = m.centre.X - m.mid.X, dy = m.centre.Y - m.mid.Y, d = Math.hypot(dx, dy) || 1; return { X: m.mid.X + dx / d * px * u, Y: m.mid.Y + dy / d * px * u }; };
       /// The square or arc a draughtsman marks a held corner with, drawn along its two walls.
       const cornerMark = (sh: any, i: number, unmet: boolean) => {
@@ -946,19 +957,13 @@ export default function mount(sec: any, host: any) {
         const d = square ? `M${a.X} ${a.Y} L${a.X + c2.X - B.X} ${a.Y + c2.Y - B.Y} L${c2.X} ${c2.Y}` : `M${a.X} ${a.Y} A${m} ${m} 0 0 ${planCornerAngle(sh, i) > 0 ? 1 : 0} ${c2.X} ${c2.Y}`;
         svg.appendChild(svgEl('path', { d, class: 'fp-cons-mark' + (unmet ? ' is-unmet' : ''), 'stroke-width': 1.6 * u }));
       };
-      // A room held square shows it at its corners, not with a letter on every wall.
-      const squared = new Set<string>();
-      let pair = 0;
+      const all = mode === 'edit' && tool === 'constrain';
       constraintsNow().forEach(c => {
         const unmet = lastSolve.unmet.includes(c.Id);
-        if (c.Id.startsWith('square_') && (c.Kind === 'horizontal' || c.Kind === 'vertical')) {
-          const sh = shapeById(c.Refs[0]?.Room);
-          if (sh && !squared.has(sh.Id)) { squared.add(sh.Id); sh.Shape.forEach((_: Pt, i: number) => cornerMark(sh, i, squareOf(sh).some(k => lastSolve.unmet.includes(k.Id)))); }
-          return;
-        }
+        if (!(unmet || all || c.Id === consLit || c.Refs.some(r => r.Room === selection))) return;
         if (c.Kind === 'length' || c.Kind === 'horizontal' || c.Kind === 'vertical') {
           const m = edgeMid(c.Refs[0]);
-          if (m) pill(inward(m, c.Kind === 'length' ? 16 : 34), c.Kind === 'length' ? len(Number(c.Value) || 0) : c.Kind === 'horizontal' ? 'H' : 'V', unmet);
+          if (m) { wall(m, unmet); pill(inward(m, 16), c.Kind === 'length' ? len(Number(c.Value) || 0) : c.Kind === 'horizontal' ? 'level' : 'plumb', unmet); }
         } else if (c.Kind === 'angle') {
           const q = cornerPt(c.Refs[0]); const sh = shapeById(c.Refs[0].Room);
           if (q && sh) {
@@ -971,12 +976,21 @@ export default function mount(sec: any, host: any) {
         } else if (c.Kind === 'coincident') {
           const q = cornerPt(c.Refs[0]) || cornerPt(c.Refs[1]);
           if (q) svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u, class: 'fp-cons-ring' + (unmet ? ' is-unmet' : ''), 'stroke-width': 2 * u }));
+          const m = c.Refs[1] && edgeMid(c.Refs[1]); if (m) wall(m, unmet);
         } else {
-          pair++;
-          const sym = c.Kind === 'parallel' ? '∥' : c.Kind === 'perpendicular' ? '⊥' : '≡';
-          c.Refs.forEach(r => { const m = edgeMid(r); if (m) pill(inward(m, 34), `${sym}${pair}`, unmet); });
+          const ms = c.Refs.map(edgeMid).filter(Boolean) as any[];
+          ms.forEach(m => wall(m, unmet));
+          if (ms.length === 2) svg.appendChild(svgEl('line', { x1: ms[0].mid.X, y1: ms[0].mid.Y, x2: ms[1].mid.X, y2: ms[1].mid.Y, class: 'fp-cons-link' + (unmet ? ' is-unmet' : ''), 'stroke-width': 1.5 * u, 'stroke-dasharray': `${4 * u} ${3 * u}` }));
+          const at = ms.length === 2 ? { X: (ms[0].mid.X + ms[1].mid.X) / 2, Y: (ms[0].mid.Y + ms[1].mid.Y) / 2 } : ms[0] && inward(ms[0], 16);
+          if (at) pill(at, c.Kind === 'parallel' ? 'parallel' : c.Kind === 'perpendicular' ? 'square' : 'in line', unmet);
         }
       });
+    }
+    // The wall or corner a drag would take hold of.
+    if (grabLit && !dragging && mode === 'edit') {
+      const g = grabLit, cls = 'fp-grab' + (g.locked ? ' is-locked' : '');
+      if (g.corner != null) { const q = g.sh.Shape[g.corner]; if (q) svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: 8 * u * hs(), class: cls, 'stroke-width': 3 * u })); }
+      else { const [i, j] = planEdgeCorners(g.sh, g.edge!); const a = g.sh.Shape[i], b = g.sh.Shape[j]; if (a && b) svg.appendChild(svgEl('line', { x1: a.X, y1: a.Y, x2: b.X, y2: b.Y, class: cls, 'stroke-width': 5 * u })); }
     }
     // What the Constrain tool has picked.
     if (mode === 'edit' && tool === 'constrain') cPicks.forEach(r => {
@@ -1107,6 +1121,88 @@ export default function mount(sec: any, host: any) {
   const hitSel = (hit: any): NonNullable<Selection> | null => hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening }
     : hit.run ? { type: 'run', id: hit.run } : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
 
+  /// The tools a wall or corner can be dragged from without going back to Select: those that act on a tap, not a drag.
+  const GRAB_TOOLS = new Set(['select', 'constrain', 'door', 'window', 'item', 'measure']);
+  /// The corner or wall a drag here would take hold of, on any room or area, selected or not: a corner when one is
+  /// close, else a wall. The selected shape wins where they meet, then rooms over areas.
+  const grabAt = (p: Pt): { sh: any; corner?: number; edge?: number; locked: boolean } | null => {
+    if (mode !== 'edit' || !GRAB_TOOLS.has(tool) || extra.length) return null;
+    const sel = shapeOf(selection);
+    const order = [...(sel ? [sel] : []), ...roomsNow().filter(r => r !== sel && (r.Shape || []).length >= 3), ...areasNow().filter(a => a !== sel && (a.Shape || []).length >= 3)];
+    const cReach = 10 * upp() * hs(), wReach = 7 * upp() * hs();
+    let best: any = null, bestD = cReach;
+    order.forEach(sh => sh.Shape.forEach((q: Pt, i: number) => { const d = Math.hypot(q.X - p.X, q.Y - p.Y); if (d < bestD - 1e-9) { bestD = d; best = { sh, corner: i }; } }));
+    if (!best) {
+      bestD = wReach;
+      order.forEach(sh => sh.Shape.forEach((q: Pt, i: number) => {
+        const n = planNearestOnSegment(p, q, sh.Shape[(i + 1) % sh.Shape.length]);
+        const d = Math.hypot(n.X - p.X, n.Y - p.Y);
+        if (d < bestD - 1e-9) { bestD = d; best = { sh, edge: i }; }
+      }));
+    }
+    if (!best) return null;
+    const ks = best.corner != null ? [best.corner] : planEdgeCorners(best.sh, best.edge);
+    best.locked = ks.some((k: number) => cornerLocked(best.sh, k) || planSharedCorners(shapesNow(), best.sh.Id, k).some(l => cornerLocked(shapeById(l.room), l.corner)));
+    return best;
+  };
+  /// Take hold of a corner or a wall of `target` for dragging.
+  const holdCorner = (target: any, index: number, apart: boolean) => {
+    gesture.kind = 'corner'; gesture.index = index; selectedCorner = index;
+    // A corner shared with a neighbour moves in both rooms, unless Alt pulls it apart.
+    gesture.linked = apart ? [] : planSharedCorners(shapesNow(), target.Id, index);
+    const held = cornerLocked(target, index) || gesture.linked.some((l: any) => cornerLocked(shapeById(l.room), l.corner));
+    if (held) { gesture.kind = 'none'; saidLocked(); }
+  };
+  const holdWall = (target: any, edge: number, apart: boolean) => {
+    // Dragging a wall slides the whole wall, keeping its direction; its neighbours stretch to follow.
+    const [i, j] = planEdgeCorners(target, edge);
+    gesture.kind = 'wall'; gesture.index = edge;
+    gesture.ends = [i, j].map(k => ({ k, X: target.Shape[k].X, Y: target.Shape[k].Y, linked: apart ? [] : planSharedCorners(shapesNow(), target.Id, k) }));
+    const held = gesture.ends.some((x: any) => cornerLocked(target, x.k) || x.linked.some((l: any) => cornerLocked(shapeById(l.room), l.corner)));
+    if (held) { gesture.kind = 'none'; saidLocked(); }
+  };
+  /// Grabbed without being selected first: it is selected, then held.
+  const holdGrab = (g: NonNullable<ReturnType<typeof grabAt>>, apart: boolean) => {
+    const type: SelType = roomsNow().includes(g.sh) ? 'room' : 'area';
+    if (!(selection?.type === type && selection.id === g.sh.Id)) { selection = { type, id: g.sh.Id }; extra = []; selectedBend = -1; drawSide(); }
+    if (g.corner != null) holdCorner(g.sh, g.corner, apart); else holdWall(g.sh, g.edge!, apart);
+  };
+
+  /// What a drag from under the pointer would do, before it starts: the cursor says it, and the wall or corner it would
+  /// take hold of is lit.
+  let grabLit: { sh: any; corner?: number; edge?: number; locked: boolean } | null = null;
+  const cursorFor = (e: any): string => {
+    if (mode !== 'edit' || spaceDown) return '';
+    const g = grabLit;
+    if (g) {
+      if (g.locked) return 'not-allowed';
+      if (g.corner != null) return 'move';
+      const [i, j] = planEdgeCorners(g.sh, g.edge!);
+      const a = g.sh.Shape[i], b = g.sh.Shape[j];
+      // The wall slides across itself, so the arrows point across it.
+      const t = ((Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI + 90) % 180 + 180) % 180;
+      return t < 22.5 || t >= 157.5 ? 'ew-resize' : t < 67.5 ? 'nwse-resize' : t < 112.5 ? 'ns-resize' : 'nesw-resize';
+    }
+    if (tool !== 'select') return '';
+    const hit = hitOf(e);
+    if (hit.resize) return 'nwse-resize';
+    if (hit.rotate) return 'grab';
+    if (hit.corner != null || hit.mid != null || hit.runpt != null || hit.runmid != null) return 'move';
+    const under = hitSel(hit);
+    if (!under) return '';
+    if (under.type === 'room' || under.type === 'area') return shapeHeld(shapeOf(under)) ? 'not-allowed' : 'move';
+    return 'move';
+  };
+  const showGrab = (e: any) => {
+    const g = grabAt(toPlan(e));
+    const key = (x: typeof g) => x ? `${x.sh.Id}:${x.corner ?? ''}:${x.edge ?? ''}` : '';
+    const changed = key(g) !== key(grabLit);
+    grabLit = g;
+    svg.style.cursor = cursorFor(e);
+    if (changed) drawPlan();
+  };
+  svg.addEventListener('pointerleave', () => { if (grabLit) { grabLit = null; drawPlan(); } svg.style.cursor = ''; });
+
   svg.addEventListener('pointerdown', (e: any) => {
     // The middle button pans in every tool, as it does in drawing programs; the right button is left to the browser.
     if (e.button != null && e.button > 1) return;
@@ -1137,25 +1233,15 @@ export default function mount(sec: any, host: any) {
       const target = extra.length ? null : shapeOf(selection);
       const run = !extra.length && selection?.type === 'run' ? runOf(selection.id) : null;
       const under = hitSel(hit);
-      if (hit.corner != null && target) {
-        gesture.kind = 'corner'; gesture.index = hit.corner; selectedCorner = hit.corner;
-        // A corner shared with a neighbour moves in both rooms, unless Alt pulls it apart.
-        gesture.linked = e.altKey ? [] : planSharedCorners(shapesNow(), target.Id, hit.corner);
-        const held = cornerLocked(target, hit.corner) || gesture.linked.some((l: any) => cornerLocked(shapeById(l.room), l.corner));
-        if (held) { gesture.kind = 'none'; saidLocked(); }
-      }
-      else if (hit.mid != null && target) {
-        // Dragging a wall's middle slides the whole wall, keeping its direction; its neighbours stretch to follow.
-        const [i, j] = planEdgeCorners(target, hit.mid);
-        gesture.kind = 'wall'; gesture.index = hit.mid;
-        gesture.ends = [i, j].map(k => ({ k, X: target.Shape[k].X, Y: target.Shape[k].Y, linked: e.altKey ? [] : planSharedCorners(shapesNow(), target.Id, k) }));
-        const held = gesture.ends.some((x: any) => cornerLocked(target, x.k) || x.linked.some((l: any) => cornerLocked(shapeById(l.room), l.corner)));
-        if (held) { gesture.kind = 'none'; saidLocked(); }
-      }
+      // Near a wall or corner, a drag takes hold of it, selected or not; items, doors and wires on it come first.
+      const grab = under && under.type !== 'room' && under.type !== 'area' ? null : grabAt(p);
+      if (hit.corner != null && target) holdCorner(target, hit.corner, !!e.altKey);
+      else if (hit.mid != null && target) holdWall(target, hit.mid, !!e.altKey);
       else if (hit.runpt != null && run) { gesture.kind = 'runpt'; gesture.index = hit.runpt; selectedBend = hit.runpt; }
       else if (hit.runmid != null && run) { gesture.kind = 'runinsert'; gesture.index = hit.runmid; }
       else if (hit.resize) { gesture.kind = 'resize'; }
       else if (hit.rotate) { gesture.kind = 'rotate'; }
+      else if (grab && !additive) holdGrab(grab, !!e.altKey);
       else if (under && additive) { gesture.kind = 'none'; }
       else if (under) {
         // Dragging anything already selected moves the whole selection; anything else is selected first.
@@ -1172,6 +1258,9 @@ export default function mount(sec: any, host: any) {
       gesture.kind = 'rect'; rectStart = snapped(p); rectEnd = rectStart;
     } else if (mode === 'edit' && tool !== 'pan') {
       gesture.kind = 'tap';
+      // A tap does what the tool does; a drag from a wall or corner reshapes it, without going back to Select.
+      gesture.grab = grabAt(p);
+      gesture.apart = !!e.altKey;
     }
     dragging = true;
     drawPlan();
@@ -1181,6 +1270,7 @@ export default function mount(sec: any, host: any) {
     if (!pointers.has(e.pointerId)) {
       // Hovering: the next corner, bend or measuring point follows the pointer.
       if (draft.length || wireDraft || (measure && !measure.b)) { hover = tool === 'wire' ? drawSnap(wireLast(), toPlan(e)) : tool === 'measure' ? drawSnap(measure?.a, toPlan(e)) : drawSnap(draft[draft.length - 1], toPlan(e)); drawPlan(); }
+      else if (e.pointerType !== 'touch') showGrab(e);
       return;
     }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1203,6 +1293,7 @@ export default function mount(sec: any, host: any) {
     // A drag is one change: remembered once, as it starts.
     const begin = () => { if (!gesture.pushed) { history.push(); gesture.pushed = true; gesture.before = outlines(); } };
     const { w, h } = floorSize();
+    if (gesture.kind === 'tap' && gesture.grab) holdGrab(gesture.grab, gesture.apart);
     const k = gesture.kind;
     if (k === 'pan' || k === 'tap' || k === 'none') {
       if (k !== 'pan' && mode === 'edit' && tool !== 'pan') { gesture.kind = 'pan'; }
@@ -1296,7 +1387,7 @@ export default function mount(sec: any, host: any) {
           s.Shape[x.k] = q; fixed.push(`${s.Id}#${x.k}`);
           x.linked.forEach((l: any) => { const o = shapeById(l.room); if (o) { o.Shape[l.corner] = { ...q }; fixed.push(`${o.Id}#${l.corner}`); } });
         });
-        solve(fixed, [s.Id]);
+        solve(fixed, [s.Id], !!e.shiftKey);
       }
     } else if (k === 'corner') {
       begin();
@@ -1306,7 +1397,7 @@ export default function mount(sec: any, host: any) {
         s.Shape[gesture.index] = q;
         const fixed = [`${s.Id}#${gesture.index}`];
         (gesture.linked || []).forEach((l: any) => { const o = shapeById(l.room); if (o) { o.Shape[l.corner] = { ...q }; fixed.push(`${o.Id}#${l.corner}`); } });
-        solve(fixed, [s.Id]);
+        solve(fixed, [s.Id], !!e.shiftKey);
       }
     } else if (k === 'rect') {
       rectEnd = snapped(p);
@@ -2014,27 +2105,26 @@ export default function mount(sec: any, host: any) {
     return c.Kind;
   };
 
-  /// Keep square: like a rectangle drawn in a sketch, its walls held level and plumb, or where it is turned, its corners
-  /// held at 90°. Turned on for a room that is nearly square, it squares it up first (#601).
-  const squareOf = (sh: any) => constraintsNow().filter(c => c.Id.startsWith('square_') && c.Refs[0]?.Room === sh.Id);
-  const squareToggle = (sh: any) => {
-    const on = squareOf(sh).length > 0;
+  /// Square up: straightens a nearly square room, once. Nothing is stored; dragging it after keeps its level and plumb
+  /// walls anyway (#601).
+  const squareUp = (sh: any) => {
     const poly: Pt[] = sh.Shape;
     const n = poly.length;
     const tilt = (i: number) => { const a = poly[i], b = poly[(i + 1) % n]; return Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI; };
-    const axis = poly.every((_, i) => Math.abs(norm90(tilt(i))) <= 10 || Math.abs(Math.abs(norm90(tilt(i))) - 90) <= 10);
+    const off = (i: number) => Math.min(Math.abs(norm90(tilt(i))), Math.abs(Math.abs(norm90(tilt(i))) - 90));
+    const axis = poly.every((_, i) => off(i) <= 10);
     const square = poly.every((_, i) => Math.abs(Math.abs(planCornerAngle(sh, i)) - 90) <= 15);
-    const b = el('button', { class: 'small fp-toggle' + (on ? ' is-on' : ''), type: 'button', text: on ? 'Square' : 'Keep square' });
-    b.title = on ? 'Its corners are held square. Press to let them go.' : axis || square ? 'Hold every corner at 90°, as a rectangle in a sketch is held; it is squared up now.' : 'Only a room whose corners are all near 90° can be held square.';
-    b.setAttribute('aria-pressed', String(on));
-    b.disabled = !on && (!!sh.Locked || !(axis || square));
+    const done = poly.every((_, i) => off(i) <= 0.1) || poly.every((_, i) => Math.abs(Math.abs(planCornerAngle(sh, i)) - 90) <= 0.5);
+    const b = btn('Square up');
+    b.title = done ? 'It is square.' : axis || square ? 'Straighten its walls and corners to 90°.' : 'Only a room whose corners are all near 90° can be squared up.';
+    b.disabled = done || !!sh.Locked || !(axis || square);
     b.onclick = () => act(() => {
-      if (on) { setConstraints(constraintsNow().filter(c => !squareOf(sh).includes(c))); return; }
-      const add = (kind: string, ref: PlanRef, value?: number) => constraintsNow().push({ Id: freshIn(constraintsNow(), 'square'), Kind: kind, Refs: [ref], Value: value ?? null });
-      if (axis) poly.forEach((_, i) => add(Math.abs(norm90(tilt(i))) <= 10 ? 'horizontal' : 'vertical', { Room: sh.Id, Edge: i }));
-      else poly.slice(0, n - 1).forEach((_, i) => add('angle', { Room: sh.Id, Corner: i }, Math.sign(planCornerAngle(sh, i) || 1) * 90));
+      const temp: PlanConstraint[] = axis
+        ? poly.map((_, i) => ({ Id: `squareup${i}`, Kind: Math.abs(norm90(tilt(i))) <= 10 ? 'horizontal' : 'vertical', Refs: [{ Room: sh.Id, Edge: i }], Value: null }))
+        : poly.slice(0, n - 1).map((_, i) => ({ Id: `squareup${i}`, Kind: 'angle', Refs: [{ Room: sh.Id, Corner: i }], Value: Math.sign(planCornerAngle(sh, i) || 1) * 90 }));
       const first = poly.findIndex((_, i) => !cornerLocked(sh, i));
-      solve(first >= 0 && !(sh.LockedWalls || []).length ? [`${sh.Id}#${first}`] : [], [sh.Id]);
+      planSolve(shapesNow(), [...constraintsNow(), ...temp], new Set(first >= 0 && !(sh.LockedWalls || []).length ? [`${sh.Id}#${first}`] : []), 120, { before: before || undefined, hold: [sh.Id] });
+      solve([], [sh.Id]);
     });
     return b;
   };
@@ -2054,7 +2144,7 @@ export default function mount(sec: any, host: any) {
       const lock = el('button', { class: 'small fp-lock' + (held ? ' is-on' : ''), type: 'button', title: held ? 'Unlock it, so it can be changed again.' : 'Lock it in place.' }, fpToolIcon('lock'), held ? ' Locked' : ' Lock');
       lock.setAttribute('aria-pressed', String(held));
       lock.onclick = () => act(() => { if (s.Locked) delete s.Locked; else s.Locked = true; });
-      const sq = poly.length >= 3 ? squareToggle(s) : null;
+      const sq = poly.length >= 3 ? squareUp(s) : null;
       side.appendChild(sq ? actions(lock, sq) : actions(lock));
     }
     /// A length typed for a wall keeps any length it is fixed at in step, then the rest of the plan follows.
@@ -2131,12 +2221,7 @@ export default function mount(sec: any, host: any) {
     }
 
     // The constraints that hold this room, each removable.
-    // Held square, it is one line, not one for each wall.
-    const sqs = squareOf(s);
-    const mine: [string, PlanConstraint[]][] = [
-      ...(sqs.length ? [['Held square', sqs] as [string, PlanConstraint[]]] : []),
-      ...constraintsNow().filter(c => c.Refs.some(r => r.Room === s.Id) && !sqs.includes(c)).map(c => [describeConstraint(c), [c]] as [string, PlanConstraint[]]),
-    ];
+    const mine: [string, PlanConstraint[]][] = constraintsNow().filter(c => c.Refs.some(r => r.Room === s.Id)).map(c => [describeConstraint(c), [c]]);
     if (mine.length) {
       side.appendChild(el('h4', { text: 'Constraints' }));
       const cl2 = el('div', { class: 'fp-list' });
@@ -2144,6 +2229,9 @@ export default function mount(sec: any, host: any) {
         const unmet = cs.some(c => lastSolve.unmet.includes(c.Id));
         const rowEl = el('div', { class: 'fp-list-row is-static' + (unmet ? ' is-unmet' : '') }, el('span', { class: 'fp-list-name', text }),
           el('span', { class: 'fp-list-val' + (unmet ? ' is-nodata' : ''), text: unmet ? 'cannot hold' : 'holds' }));
+        // Pointing at one shows it on the plan.
+        rowEl.onmouseenter = () => { consLit = cs[0].Id; drawPlan(); };
+        rowEl.onmouseleave = () => { consLit = ''; drawPlan(); };
         if (editing) {
           const x = el('button', { class: 'fp-chip-x', type: 'button', text: '×', title: 'Remove this constraint' });
           x.onclick = () => act(() => { setConstraints(constraintsNow().filter(k => !cs.includes(k))); });

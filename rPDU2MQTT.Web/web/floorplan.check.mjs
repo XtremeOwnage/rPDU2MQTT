@@ -252,12 +252,12 @@ const tap = (target, x, y) => {
   svg.dispatch('pointerdown', { ...at(x, y), pointerId: id, button: 0, target });
   svg.dispatch('pointerup', { ...at(x, y), pointerId: id, target });
 };
-const drag = (target, from, to) => {
+const drag = (target, from, to, mods = {}) => {
   const id = pid++;
-  svg.dispatch('pointerdown', { ...at(...from), pointerId: id, button: 0, target });
-  svg.dispatch('pointermove', { ...at((from[0] + to[0]) / 2, (from[1] + to[1]) / 2), pointerId: id, target });
-  svg.dispatch('pointermove', { ...at(...to), pointerId: id, target });
-  svg.dispatch('pointerup', { ...at(...to), pointerId: id, target });
+  svg.dispatch('pointerdown', { ...at(...from), pointerId: id, button: 0, target, ...mods });
+  svg.dispatch('pointermove', { ...at((from[0] + to[0]) / 2, (from[1] + to[1]) / 2), pointerId: id, target, ...mods });
+  svg.dispatch('pointermove', { ...at(...to), pointerId: id, target, ...mods });
+  svg.dispatch('pointerup', { ...at(...to), pointerId: id, target, ...mods });
 };
 
 // View: the kitchen shaded by what it draws, the office unknown, the garage unmetered — and no zero anywhere.
@@ -667,21 +667,35 @@ if (!/Constraints/.test(textOf(side())) || !/fixed at/.test(textOf(side()))) fai
 key('z', { ctrlKey: true }); key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
 if ((floor().Constraints || []).length) fail(`undo did not take the constraints back: ${JSON.stringify(floor().Constraints)}`);
 
-// Keep square: the kitchen's walls are held level and plumb, and dragging its corner keeps it a rectangle (#601).
+// A room stays square while its corner is dragged, Shift lets it go, and Square up straightens it again, storing
+// nothing (#601).
 tap(polygonFor('kitchen'), 200, 150);
-const keepSq = button('Keep square', side());
-if (!keepSq) fail('a room has no way to be held square');
-keepSq.onclick();
-if ((floor().Constraints || []).filter(c => c.Id.startsWith('square_')).length !== 4) fail(`holding the kitchen square did not hold its four walls: ${JSON.stringify(floor().Constraints)}`);
-if (!/Held square/.test(textOf(side()))) fail('the room does not list that it is held square');
-if (!query(sec, 'path', true).some(p => p.classList.contains('fp-cons-mark'))) fail('a room held square shows no square corners');
+if (!button('Square up', side())?.disabled) fail('a square room offers to be squared up');
 drag(kCorner(2), [400, 300], [450, 350]);
 const sqK = roomById('kitchen').Shape, sqO = roomById('office').Shape;
 if (!(sqK[0].X === 0 && sqK[0].Y === 0 && sqK[1].Y === 0 && sqK[1].X === sqK[2].X && sqK[2].Y === sqK[3].Y && sqK[3].X === 0 && near1(sqK[2].X, 450) && near1(sqK[2].Y, 350)))
-  fail(`a room held square did not stay a rectangle: ${JSON.stringify(sqK)}`);
+  fail(`a room did not stay a rectangle while its corner was dragged: ${JSON.stringify(sqK)}`);
 if (sqO[0].X !== sqK[1].X || sqO[2].Y !== sqK[2].Y || sqO[1].X !== 800) fail(`the office did not follow the corners it shares, square: ${JSON.stringify(roomById('office').Shape)}`);
+key('z', { ctrlKey: true });
+drag(kCorner(2), [400, 300], [420, 330], { shiftKey: true });
+const skK = roomById('kitchen').Shape;
+if (skK[1].X === skK[2].X && skK[2].Y === skK[3].Y) fail(`Shift did not let the corner go free: ${JSON.stringify(skK)}`);
+const sqUp = button('Square up', side());
+if (!sqUp || sqUp.disabled) fail('a skewed room cannot be squared up');
+sqUp.onclick();
+const upK = roomById('kitchen').Shape;
+if (!(upK[0].Y === upK[1].Y && upK[1].X === upK[2].X && upK[2].Y === upK[3].Y && upK[3].X === upK[0].X)) fail(`Square up left it skewed: ${JSON.stringify(upK)}`);
+if ((floor().Constraints || []).length) fail(`Square up stored constraints: ${JSON.stringify(floor().Constraints)}`);
 key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
-if ((floor().Constraints || []).length) fail(`undo did not let the kitchen go: ${JSON.stringify(floor().Constraints)}`);
+
+// The same constraint twice is refused.
+toolBtn('Constrain').onclick();
+tap(svg, 2, 150); tap(svg, 798, 150); button('Parallel', sec).onclick();
+tap(svg, 798, 150); tap(svg, 2, 150); button('Parallel', sec).onclick();
+if (floor().Constraints.filter(c => c.Kind === 'parallel').length !== 1) fail(`the same constraint was added twice: ${JSON.stringify(floor().Constraints)}`);
+if (!query(sec, 'line', true).some(l => l.classList.contains('fp-cons-link'))) fail('paired walls are not joined on the plan');
+key('z', { ctrlKey: true });
+toolBtn('Select').onclick();
 
 // Join: two corners picked with Constrain become one, and the corner and wall pair offers On wall (#602).
 toolBtn('Constrain').onclick();
