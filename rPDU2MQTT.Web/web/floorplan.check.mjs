@@ -558,6 +558,9 @@ if (!/Protected by\s*GFCI/.test(textOf(side()))) fail(`a protected outlet does n
 key('Escape');
 
 // Measure a wall and say how long it really is: the scale follows, and the undo button takes it back.
+// In Edit a tool says what it does in its options bar, not in a bubble over the plan being drawn on.
+toolBtn('Door').onclick();
+if (!/Tap a wall to put a door/.test(textOf(query(sec, '.fp-opts'))) || !query(sec, '.fp-hint').hidden) fail(`the Door tool's help is not in its options bar: ${textOf(query(sec, '.fp-opts'))}`);
 toolBtn('Measure').onclick();
 tap(svg, 0, 0); tap(svg, 400, 0);
 if (!/13′ 1″/.test(textOf(query(sec, '.fp-opts')))) fail(`the measured line does not read its length: ${textOf(query(sec, '.fp-opts'))}`);
@@ -732,6 +735,14 @@ if (query(sec, '.fp-banner').hidden || !/will not be kept/.test(textOf(query(sec
 // Export: pictures of the floor, and every plan as a file to import again.
 button('Export…', sec).onclick();
 ['This floor as SVG', 'This floor as PNG', 'All floor plans (JSON)', 'Import floor plans…'].forEach(t => { if (!button(t, sheet())) fail(`the export sheet has no "${t}"`); });
+shut();
+// On a phone the floor's settings fold into More, which opens each of them.
+const more = button('More…', sec);
+if (!more) fail('there is no More menu for a phone');
+more.onclick();
+['Add a floor', 'Floor settings', 'Background', 'Tools…', 'Export…', 'Print'].forEach(t => { if (!button(t, sheet())) fail(`More has no "${t}"`); });
+button('Export…', sheet()).onclick();
+if (!button('This floor as SVG', sheet())) fail('More › Export did not open the export sheet');
 shut();
 
 // Appliances at their real size: a washer dropped by the kitchen's left wall stands with its back to it, facing in.

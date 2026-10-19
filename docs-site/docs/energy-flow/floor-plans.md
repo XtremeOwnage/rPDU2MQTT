@@ -61,6 +61,8 @@ Click an item for its circuit, meter, reading and what it is wired to.
 
 Keys: Ctrl+Z / Ctrl+Y undo / redo, Delete removes, Esc stops drawing, `+` `−` `0` zoom.
 
+On a phone, every tool shows in two rows, the plan fills the screen and fits what is drawn, and what is selected opens in a sheet over the foot of the plan (tap its grip for all of it). The floor's settings, background, tools, export and print are under **More…**.
+
 ![Tools menu](../assets/screenshots/floor-plan-tools.webp)
 
 ### Items

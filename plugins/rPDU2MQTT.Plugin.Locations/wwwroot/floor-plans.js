@@ -975,10 +975,9 @@ function mount(sec     , host     ) {
   ({ api, btn, closeSheet, el, ensure, openSheet, svgEl, toast, formatMeasure, state, refreshDirty, sparkline, analyse, circuitSession, searchSelect, makeMenu } = host);
   sec.classList.add('fp');
   sec.appendChild(el('h2', { text: 'Floor Plans' }));
-  sec.appendChild(el('div', { class: 'desc' },
-    'Each floor at real size: rooms and outdoor zones, doors and windows, and the outlets, lights, panels, meters '
-    + 'and devices on it with the cable runs between them. View shades each room by what it draws — a room with '
-    + 'nothing metered reads unmetered, never zero. Edit draws and moves everything; Ctrl+Z undoes.'));
+  sec.appendChild(el('div', { class: 'desc fp-intro' },
+    'Each floor at real size, with its rooms, doors and windows, and everything wired on it. View shades each room by '
+    + 'what it draws (a room with nothing metered reads unmetered, never zero); Edit draws and moves it all.'));
 
   // Where things are kept, and whether they will survive a restart: said loudly, above everything, when they will not.
   const banner = el('div', { class: 'fp-banner' });
@@ -1173,15 +1172,35 @@ function mount(sec     , host     ) {
   redoBtn.setAttribute('aria-label', 'Redo');
   redoBtn.onclick = () => redo();
   const status = el('span', { class: 'ld-count fp-status' });
+  // On a phone the floor's own settings fold into one menu, so the bar is one line: the floor, More, undo and redo.
+  [addBtn, floorBtn, bgBtn, toolsBtn, exportBtn, printBtn].forEach(b => b.classList.add('fp-wide-only'));
+  const moreBtn = btn('More…');
+  moreBtn.classList.add('fp-narrow-only');
+  moreBtn.title = 'Floor settings, background, tools, export and print.';
+  moreBtn.onclick = () => {
+    const body = el('div', { class: 'fp-sheet fp-more' });
+    ([[addBtn, 'Add a floor'], [floorBtn, 'Floor settings'], [bgBtn, 'Background'], [toolsBtn, 'Tools…'], [exportBtn, 'Export…'], [printBtn, 'Print']]                   ).forEach(([b, label]) => {
+      const go = btn(label);
+      go.disabled = b.disabled;
+      go.onclick = () => { closeSheet(); b.onclick(); };
+      body.appendChild(go);
+    });
+    openSheet({ title: floorNow()?.floor.Name || 'Floor', body });
+  };
   sec.appendChild(el('div', { class: 'ld-toolbar fp-bar' }, el('label', { class: 'ld-inst' }, 'Floor ', floorSel), addBtn, floorBtn, bgBtn, toolsBtn,
-    exportBtn, printBtn, el('span', { class: 'fp-undo' }, undoBtn, redoBtn), status));
+    exportBtn, printBtn, moreBtn, el('span', { class: 'fp-undo' }, undoBtn, redoBtn), status));
 
   const modeBar = el('div', { class: 'fp-seg', role: 'tablist' });
   const modeBtns                      = {};
   ([['view', 'View'], ['edit', 'Edit']]         ).forEach(([m, label]) => {
     const b = el('button', { class: 'fp-seg-btn', text: label, type: 'button' });
     b.setAttribute('role', 'tab');
-    b.onclick = () => { mode = m; tool = 'select'; draft = []; rectStart = null; wireDraft = null; measure = null; selectedCorner = -1; render(); };
+    b.onclick = () => {
+      const entering = m === 'edit' && mode !== 'edit';
+      mode = m; tool = 'select'; draft = []; rectStart = null; wireDraft = null; measure = null; selectedCorner = -1; render();
+      // On a phone, Edit brings the tools and the plan up to fill the screen.
+      if (entering && narrow()) palette.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    };
     modeBtns[m] = b;
     modeBar.appendChild(b);
   });
@@ -1241,7 +1260,18 @@ function mount(sec     , host     ) {
     const ox = (r.width - vb.w * k) / 2, oy = (r.height - vb.h * k) / 2;
     return { X: vb.x + (e.clientX - r.left - ox) / k, Y: vb.y + (e.clientY - r.top - oy) / k };
   };
-  const fit = () => { const { w, h } = floorSize(); const pad = Math.max(w, h) * 0.03; vb = { x: -pad, y: -pad, w: w + pad * 2, h: h + pad * 2 }; };
+  const fit = () => {
+    const { w, h } = floorSize();
+    // A phone's plan is narrow: it fits what is drawn rather than the whole plot, so the rooms are big enough to work on.
+    const drawn       = window.matchMedia?.('(max-width: 560px)').matches ? [...shapesNow().flatMap(x => x.Shape        ), ...itemsNow().map((it     ) => ({ X: it.X, Y: it.Y }))] : [];
+    if (drawn.length >= 3) {
+      const b = planBounds(drawn);
+      const pad = Math.max(b.w, b.h) * 0.08 + 10;
+      vb = { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 };
+      return;
+    }
+    const pad = Math.max(w, h) * 0.03; vb = { x: -pad, y: -pad, w: w + pad * 2, h: h + pad * 2 };
+  };
   const zoomAt = (p    , factor        ) => {
     const { w } = floorSize();
     const nw = Math.max(w * 0.02, Math.min(w * 4, vb.w / factor));
@@ -2555,6 +2585,7 @@ function mount(sec     , host     ) {
 
     palette.hidden = mode !== 'edit';
     body.classList.toggle('is-editing', mode === 'edit');
+    sec.classList.toggle('is-editing', mode === 'edit');
     Object.entries(toolBtns).forEach(([t, b]) => { b.classList.toggle('is-on', mode === 'edit' && t === tool); b.setAttribute('aria-pressed', String(mode === 'edit' && t === tool)); });
     undoBtn.disabled = !history.canUndo();
     redoBtn.disabled = !history.canRedo();
@@ -2562,8 +2593,10 @@ function mount(sec     , host     ) {
     opts.innerHTML = '';
     opts.hidden = mode !== 'edit';
     if (mode === 'edit') drawOpts();
-    const how = mode === 'view' ? 'Tap a room or item for its detail. Drag to pan, pinch or Ctrl+wheel to zoom.'
-      : FP_TOOLS.find(t => t[0] === tool)?.[3] || '';
+    // In Edit the options bar says what the tool does, so nothing sits over the plan being drawn on.
+    const what = FP_TOOLS.find(t => t[0] === tool)?.[3] || '';
+    if (mode === 'edit' && what && !opts.querySelector('.fp-opts-note')) opts.appendChild(el('span', { class: 'fp-opts-note', text: what }));
+    const how = mode === 'view' ? 'Tap a room or item for its detail. Drag to pan, pinch or Ctrl+wheel to zoom.' : '';
     hint.textContent = how;
     hint.hidden = !how || (mode === 'view' && (!!selection || viewHintSeen));
   };
@@ -2681,7 +2714,7 @@ function mount(sec     , host     ) {
         add(el('span', { class: 'fp-measure-read', text: len(d) }), el('span', { class: 'fp-opts-note', text: 'It is really' }), real, set);
       } else add(el('span', { class: 'fp-opts-note', text: measure ? 'Tap the second point.' : 'Tap the first point.' }));
     } else if (tool === 'select') {
-      add(el('span', { class: 'fp-opts-note', text: 'Drag to move; drag a box to select several. Double-click a corner or bend to remove it. Delete removes; Ctrl+Z undoes.' }));
+      add(el('span', { class: 'fp-opts-note', text: touch ? 'Drag to move; drag across empty space to select several; pinch to zoom. What is selected opens below.' : 'Drag to move; drag a box to select several. Double-click a corner or bend to remove it. Delete removes; Ctrl+Z undoes.' }));
     } else {
       add(el('span', { class: 'fp-opts-note', text: FP_TOOLS.find(t => t[0] === tool)?.[3] || '' }));
     }
@@ -2789,8 +2822,24 @@ function mount(sec     , host     ) {
     return out;
   };
 
+  /// On a phone, what is selected in Edit opens in a sheet over the foot of the plan, so the plan stays in sight:
+  /// a peek at first, all of it on a tap of its grip.
+  let sheetFull = false;
+  const narrow = () => !!window.matchMedia?.('(max-width: 560px)').matches;
+  const asSheet = () => mode === 'edit' && !!selection && narrow();
   const drawSide = () => {
     side.innerHTML = '';
+    const sheet = asSheet();
+    side.classList.toggle('is-sheet', sheet);
+    side.classList.toggle('is-full', sheet && sheetFull);
+    sec.classList.toggle('has-sheet', sheet);
+    if (sheet) {
+      const grip = el('button', { class: 'fp-grip', type: 'button', title: sheetFull ? 'Show less' : 'Show more' });
+      grip.setAttribute('aria-label', sheetFull ? 'Show less' : 'Show more');
+      grip.setAttribute('aria-expanded', String(sheetFull));
+      grip.onclick = () => { sheetFull = !sheetFull; drawSide(); };
+      side.appendChild(grip);
+    }
     const fl = floorNow();
     if (!fl) {
       side.appendChild(el('h3', { text: 'Start with a floor' }));
@@ -2963,7 +3012,7 @@ function mount(sec     , host     ) {
         walls.appendChild(el('div', { class: 'fp-wall-row' + (selectedCorner === i ? ' is-picked' : '') }, el('span', { class: 'fp-wall-k', text: `Wall ${i + 1}` }), inp, fixBtn, lockBtn));
       });
       side.appendChild(walls);
-      if (editing) side.appendChild(el('div', { class: 'desc', text: 'Drag a wall’s middle dot to slide the wall; double-click it to add a corner. A corner shared with the next room moves in both — hold Alt to pull it apart.' }));
+      if (editing) side.appendChild(el('div', { class: 'desc', text: touch ? 'Drag a wall’s middle dot to slide the wall. A corner shared with the next room moves in both.' : 'Drag a wall’s middle dot to slide the wall; double-click it to add a corner. A corner shared with the next room moves in both — hold Alt to pull it apart.' }));
     }
 
     if (editing && type === 'room') {

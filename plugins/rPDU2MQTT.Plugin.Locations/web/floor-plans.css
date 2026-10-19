@@ -230,8 +230,44 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
   .fp-palette { position: static; flex-direction: row; overflow-x: auto; scrollbar-width: none; }
   .fp-tool { flex: 0 0 64px; }
 }
+.fp-narrow-only, .fp-grip { display: none; }
+.fp-more { display: grid; gap: 8px; }
+.fp-more .btn, .fp-more button { width: 100%; justify-content: flex-start; min-height: 44px; }
 @media (max-width: 560px) {
+  .fp-wide-only { display: none !important; }
+  .fp-narrow-only { display: inline-flex; }
+  .fp-bar .ld-inst { flex: 1 1 auto; min-width: 0; }
+  .fp-bar .fp-floor { max-width: 100%; }
+  .fp-intro { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .section.fp.is-editing .fp-intro { display: none; }
   .fp-stage { max-height: 64vh; border-radius: var(--r); }
+  /* Editing on a phone: every tool in sight, and the plan as tall as the screen allows. */
+  .fp-palette { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; padding: 4px; overflow: visible; }
+  .fp-palette[hidden] { display: none; }
+  .fp-tool { padding: 6px 0 4px; min-height: 48px; }
+  .fp-opts { min-height: 0; padding: 6px 8px; }
+  .section.fp.is-editing .fp-stage { aspect-ratio: auto !important; height: max(300px, calc(100dvh - var(--appbar-h) - var(--tabbar-h) - 190px)); max-height: none; }
+  .fp-palette { scroll-margin-top: calc(var(--appbar-h) + 8px); }
+  .fp-bar .ld-inst { font-size: 0; }
+  .fp-bar .ld-inst .fp-floor { font-size: 14px; }
+  .fp-zbtn { width: 44px; height: 44px; }
+  .fp-plot-handle { display: none; }
+  /* What is selected, in a sheet over the foot of the plan. */
+  .fp-side.is-sheet {
+    position: fixed; z-index: 40; top: auto; left: 0; right: 0; bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+    max-height: min(210px, 32vh); padding-top: 26px; border-radius: 16px 16px 0 0; box-shadow: 0 -6px 24px rgba(0, 0, 0, .18); overscroll-behavior: contain;
+  }
+  body:has(#savebar:not(.is-hidden)) .fp-side.is-sheet { bottom: calc(var(--tabbar-h) + var(--savebar-h) + env(safe-area-inset-bottom, 0px)); }
+  .fp-side.is-sheet.is-full { max-height: 70vh; }
+  .fp-grip { display: block; position: absolute; top: 0; left: 0; right: 0; height: 26px; border: 0; background: none; cursor: pointer; }
+  .fp-grip::after { content: ''; position: absolute; left: 50%; top: 10px; width: 44px; height: 5px; margin-left: -22px; border-radius: 3px; background: var(--line); }
+  .section.fp.has-sheet .fp-legend { padding-bottom: 220px; }
+  /* The plan shrinks to stay clear of the sheet, and of the save bar when there is one. */
+  .section.fp.is-editing.has-sheet .fp-stage { height: max(220px, calc(100dvh - var(--appbar-h) - var(--tabbar-h) - 190px - min(210px, 32vh))); }
+  body:has(#savebar:not(.is-hidden)) .section.fp.is-editing .fp-stage { height: max(260px, calc(100dvh - var(--appbar-h) - var(--tabbar-h) - var(--savebar-h) - 190px)); }
+  body:has(#savebar:not(.is-hidden)) .section.fp.is-editing.has-sheet .fp-stage { height: max(200px, calc(100dvh - var(--appbar-h) - var(--tabbar-h) - var(--savebar-h) - 190px - min(210px, 32vh))); }
+  .fp-side.is-sheet .fp-id { display: none; }
+  .fp-side.is-sheet .fp-big { margin: 4px 0 0; font-size: 18px; }
   .fp-seg-btn { padding: 6px 12px; }
   .fp-tool { flex-basis: 56px; font-size: 10px; }
   .fp-kind span { display: none; }
