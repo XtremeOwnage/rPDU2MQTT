@@ -56,7 +56,7 @@ Click an item for its circuit, meter, reading and what it is wired to.
 | Door / Window | D / W | Click a wall. Door, double, sliding, garage, window, opening |
 | Item | I | Place an item |
 | Wire | L | From the supply item, each bend, to the load item |
-| Constrain | K | Coincident, in line, parallel, square, level, plumb, fixed length, angle |
+| Constrain | K | Join, on wall, in line, parallel, square, level, plumb, fixed length, angle |
 | Measure | M | Measure, or set the scale from a known distance |
 
 Keys: Ctrl+Z / Ctrl+Y undo / redo, Delete removes, Esc stops drawing, `+` `−` `0` zoom.

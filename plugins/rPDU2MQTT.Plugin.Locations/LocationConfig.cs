@@ -100,7 +100,7 @@ public class PlanConstraintConfig
 
     [AllowedValues(PlanConstraintKind.Coincident, PlanConstraintKind.Colinear, PlanConstraintKind.Parallel, PlanConstraintKind.Perpendicular,
         PlanConstraintKind.Horizontal, PlanConstraintKind.Vertical, PlanConstraintKind.Angle, PlanConstraintKind.Length)]
-    [Description("Coincident (two corners), colinear, parallel or perpendicular (two walls), horizontal or vertical (a wall), angle (a corner) or length (a wall).")]
+    [Description("Coincident (two corners, or a corner on a wall), colinear, parallel or perpendicular (two walls), horizontal or vertical (a wall), angle (a corner) or length (a wall).")]
     public string Kind { get; set; } = PlanConstraintKind.Length;
 
     [Description("The corners or walls it holds, each a room or area id with a corner or wall number counted from 0.")]

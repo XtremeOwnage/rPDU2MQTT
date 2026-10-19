@@ -1471,6 +1471,11 @@ rooms it serves.
 
 - Held during edits; the dragged or typed value stays and the rest adjusts. Locked rooms and walls never
   adjust.
+- *Join* (coincident) makes two corners one point; *On wall* keeps a corner on a wall's line. Joined rooms
+  stay together when either is moved or resized; the corner picked first stays put.
+- A room that only follows a shared or joined corner keeps its level and plumb walls, so it stretches as a
+  rectangle.
+- *Keep square* holds every wall of a room level or plumb (every corner at 90° if the room is turned).
 - An unsatisfiable constraint is marked red, and the floor names it.
 - Each room lists its constraints, each removable. A wall's *Fix* button holds its length.
 - The *Constraints* checkbox shows or hides the markers.

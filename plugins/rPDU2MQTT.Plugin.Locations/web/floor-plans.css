@@ -311,6 +311,8 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-cons { pointer-events: none; }
 .fp-cons-ring { fill: none; stroke: var(--series-7); pointer-events: none; }
 .fp-cons-ring.is-unmet { stroke: var(--bad); }
+.fp-cons-mark { fill: none; stroke: var(--series-7); pointer-events: none; }
+.fp-cons-mark.is-unmet { stroke: var(--bad); }
 .fp-pick { fill: none; stroke: var(--series-7); opacity: .75; pointer-events: none; stroke-linecap: round; }
 .fp-opts-note.is-picks { color: var(--series-7); font-weight: 600; }
 .fp-deg { width: 5em; }

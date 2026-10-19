@@ -184,6 +184,42 @@ const near1 = (a, b) => Math.abs(a - b) <= 1;
   if (!c.unmet.length) fail('two lengths for one wall are not reported as conflicting');
 }
 
+{
+  // Widening a room by typing: the room sharing its top wall follows the corner it shared, as a rectangle (#602).
+  const two = { Id: 'two', Shape: rect(350, 200, 650, 400) }, four = { Id: 'four', Shape: rect(350, 50, 650, 200) };
+  const before = JSON.parse(JSON.stringify([two, four]));
+  two.Shape = rect(350, 200, 750, 400);
+  planSolve([two, four], [], new Set(['two#0', 'two#1', 'two#2', 'two#3']), 120, { before, hold: ['two'] });
+  if (JSON.stringify(four.Shape) !== JSON.stringify(rect(350, 50, 750, 200))) fail(`the room above did not follow the wall it shares: ${JSON.stringify(four.Shape)}`);
+}
+{
+  // Joined corners are one point: the second room comes to the first, and comes along when the first moves.
+  const a = { Id: 'a', Shape: rect(0, 0, 100, 100) }, b = { Id: 'b', Shape: rect(130, 20, 230, 120) };
+  const join = [{ Id: 'j', Kind: 'coincident', Refs: [{ Room: 'a', Corner: 1 }, { Room: 'b', Corner: 0 }] }];
+  const before = planSolve([a, b], join, new Set(), 0);
+  if (!before.unmet.includes('j')) fail('two corners apart are not reported as unjoined');
+  const r = planSolve([a, b], join, new Set(['a#0', 'a#1', 'a#2', 'a#3']), 120, { hold: [] });
+  if (r.unmet.length || b.Shape[0].X !== 100 || b.Shape[0].Y !== 0 || a.Shape[1].X !== 100) fail(`joining did not bring the second corner to the first: ${JSON.stringify(b.Shape)}`);
+  if (b.Shape[1].Y !== 0 || b.Shape[3].X !== 100) fail(`the joined room did not stay square: ${JSON.stringify(b.Shape)}`);
+  a.Shape = rect(0, 50, 100, 150);
+  planSolve([a, b], join, new Set(['a#0', 'a#1', 'a#2', 'a#3']), 120, { hold: ['a'] });
+  if (b.Shape[0].X !== 100 || b.Shape[0].Y !== 50) fail(`a joined room did not follow the room it is joined to: ${JSON.stringify(b.Shape)}`);
+}
+{
+  // A corner on a wall stays on the wall's line.
+  const a = { Id: 'a', Shape: rect(0, 0, 100, 100) }, b = { Id: 'b', Shape: rect(110, 30, 210, 130) };
+  const r = planSolve([a, b], [{ Id: 'w', Kind: 'coincident', Refs: [{ Room: 'b', Corner: 0 }, { Room: 'a', Edge: 1 }] }], new Set(['a#0', 'a#1', 'a#2', 'a#3']), 120, { hold: [] });
+  if (r.unmet.length || !near1(b.Shape[0].X, 100) || !near1(b.Shape[0].Y, 30)) fail(`a corner held on a wall is not on it: ${JSON.stringify(b.Shape)}`);
+}
+{
+  // Two right angles leave a room free to skew; held level and plumb, it stays a rectangle as a corner is dragged (#601).
+  const a = { Id: 'a', Shape: rect(0, 0, 200, 100) };
+  const hv = [0, 1, 2, 3].map(i => ({ Id: `square_${i}`, Kind: i % 2 ? 'vertical' : 'horizontal', Refs: [{ Room: 'a', Edge: i }] }));
+  a.Shape[2] = { X: 260, Y: 140 };
+  planSolve([a], hv, new Set(['a#2']), 120, { hold: ['a'] });
+  if (JSON.stringify(a.Shape) !== JSON.stringify(rect(0, 0, 260, 140))) fail(`a room held square did not stay a rectangle: ${JSON.stringify(a.Shape)}`);
+}
+
 // --- The page ---
 const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Floor Plans');
 if (!link) fail('no Floor Plans page in the nav');
@@ -627,6 +663,40 @@ if (Math.abs(Math.hypot(k0[1].X - k0[0].X, k0[1].Y - k0[0].Y) - 400) > 1) fail(`
 if (!/Constraints/.test(textOf(side())) || !/fixed at/.test(textOf(side()))) fail('the room does not list its constraints');
 key('z', { ctrlKey: true }); key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
 if ((floor().Constraints || []).length) fail(`undo did not take the constraints back: ${JSON.stringify(floor().Constraints)}`);
+
+// Keep square: the kitchen's walls are held level and plumb, and dragging its corner keeps it a rectangle (#601).
+tap(polygonFor('kitchen'), 200, 150);
+const keepSq = button('Keep square', side());
+if (!keepSq) fail('a room has no way to be held square');
+keepSq.onclick();
+if ((floor().Constraints || []).filter(c => c.Id.startsWith('square_')).length !== 4) fail(`holding the kitchen square did not hold its four walls: ${JSON.stringify(floor().Constraints)}`);
+if (!/Held square/.test(textOf(side()))) fail('the room does not list that it is held square');
+if (!query(sec, 'path', true).some(p => p.classList.contains('fp-cons-mark'))) fail('a room held square shows no square corners');
+drag(kCorner(2), [400, 300], [450, 350]);
+const sqK = roomById('kitchen').Shape, sqO = roomById('office').Shape;
+if (!(sqK[0].X === 0 && sqK[0].Y === 0 && sqK[1].Y === 0 && sqK[1].X === sqK[2].X && sqK[2].Y === sqK[3].Y && sqK[3].X === 0 && near1(sqK[2].X, 450) && near1(sqK[2].Y, 350)))
+  fail(`a room held square did not stay a rectangle: ${JSON.stringify(sqK)}`);
+if (sqO[0].X !== sqK[1].X || sqO[2].Y !== sqK[2].Y || sqO[1].X !== 800) fail(`the office did not follow the corners it shares, square: ${JSON.stringify(roomById('office').Shape)}`);
+key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
+if ((floor().Constraints || []).length) fail(`undo did not let the kitchen go: ${JSON.stringify(floor().Constraints)}`);
+
+// Join: two corners picked with Constrain become one, and the corner and wall pair offers On wall (#602).
+toolBtn('Constrain').onclick();
+tap(svg, 2, 298);
+tap(svg, 798, 298);
+const joinBtn = button('Join', sec);
+if (!joinBtn) fail(`two corners picked offer no Join: ${textOf(query(sec, '.fp-opts'))}`);
+joinBtn.onclick();
+const joined = floor().Constraints.find(c => c.Kind === 'coincident');
+if (!joined) fail('joining two corners recorded nothing');
+if (roomById('office').Shape[2].X !== 0 || roomById('office').Shape[2].Y !== 300) fail(`the second corner did not come to the first: ${JSON.stringify(roomById('office').Shape)}`);
+if (JSON.stringify(roomById('kitchen').Shape) !== JSON.stringify(rect(0, 0, 400, 300))) fail(`the corner picked first moved: ${JSON.stringify(roomById('kitchen').Shape)}`);
+key('z', { ctrlKey: true });
+tap(svg, 798, 298);
+tap(svg, 200, 2);
+if (!button('On wall', sec)) fail(`a corner and a wall picked offer no On wall: ${textOf(query(sec, '.fp-opts'))}`);
+button('Clear', sec).onclick();
+toolBtn('Select').onclick();
 
 // A locked room does not move, reshape or delete.
 tap(polygonFor('kitchen'), 200, 150);

@@ -40,7 +40,7 @@ const FP_TOOLS: [Tool, string, string, string][] = [
   ['window', 'Window', 'W', 'Tap a wall to put a window in it.'],
   ['item', 'Item', 'I', 'Tap to place an outlet, light, appliance, panel, meter, pole or anything else.'],
   ['wire', 'Wire', 'L', 'Draw a cable run from the supply side: tap the panel or outlet feeding it, each bend, then the item it goes to.'],
-  ['constrain', 'Constrain', 'K', 'Tap corners or walls, then hold them: coincident, colinear, parallel, perpendicular, level, plumb, an angle or a length.'],
+  ['constrain', 'Constrain', 'K', 'Tap corners or walls, then hold them: joined, on a wall, colinear, parallel, perpendicular, level, plumb, an angle or a length.'],
   ['measure', 'Measure', 'M', 'Tap two points to measure between them, and set the plan’s scale from a distance you know.'],
 ];
 
@@ -229,8 +229,11 @@ export default function mount(sec: any, host: any) {
   const restore = (cur: any, v: any) => { Object.keys(cur).forEach(k => delete cur[k]); Object.assign(cur, v); };
   const history = planHistory(() => ({ flow: flowIn(), loc: locIn() }), v => { restore(flowIn(), v.flow); restore(locIn(), v.loc); });
   const changed = () => { refreshDirty(); schedule(); };
+  /// The outlines as they were when the change under way began: what was shared then stays shared (#602).
+  let before: PlanShape[] | null = null;
+  const outlines = () => JSON.parse(JSON.stringify(shapesNow().map(x => ({ Id: x.Id, Shape: x.Shape })))) as PlanShape[];
   /// One undoable change: remember what was, make the change, redraw.
-  const act = (fn: () => void) => { history.push(); fn(); changed(); render(); };
+  const act = (fn: () => void) => { history.push(); before = outlines(); try { fn(); } finally { before = null; } changed(); render(); };
   const undo = () => { if (history.undo()) { cleanSelection(); changed(); render(); } };
   const redo = () => { if (history.redo()) { cleanSelection(); changed(); render(); } };
   const exists = (x: NonNullable<Selection>) => x.type === 'item' ? !!itemOf(x.id) : x.type === 'run' ? !!runOf(x.id)
@@ -517,10 +520,11 @@ export default function mount(sec: any, host: any) {
   /// A shape that cannot move as a whole: locked, or holding a locked wall.
   const shapeHeld = (sh: any) => !!sh && (sh.Locked || (sh.LockedWalls || []).length > 0);
   let lastSolve: { worst: number; unmet: string[] } = { worst: 0, unmet: [] };
-  /// Bring every constraint on this floor back into line, holding still the corners named.
-  const solve = (fixed: string[] = []) => {
-    if (!constraintsNow().length) { lastSolve = { worst: 0, unmet: [] }; return; }
-    lastSolve = planSolve(shapesNow(), constraintsNow(), new Set(fixed));
+  /// Bring every constraint on this floor back into line, holding still the corners named. The rooms in `hold` are
+  /// the ones being reshaped; the rest follow the corners they share, keeping their level and plumb walls.
+  const solve = (fixed: string[] = [], hold?: string[]) => {
+    if (!constraintsNow().length && !hold) { lastSolve = { worst: 0, unmet: [] }; return; }
+    lastSolve = planSolve(shapesNow(), constraintsNow(), new Set(fixed), 120, { before: before || gesture?.before || undefined, hold });
   };
   const keysOf = (sh: any) => (sh?.Shape || []).map((_: any, i: number) => `${sh.Id}#${i}`);
   const saidLocked = () => toast('That is locked. Unlock it in its panel to change it.', false);
@@ -552,7 +556,14 @@ export default function mount(sec: any, host: any) {
   const cornerPt = (r: PlanRef) => { const sh = shapeById(r.Room); return sh && r.Corner != null ? sh.Shape[r.Corner] : null; };
   const addConstraint = (kind: string, refs: PlanRef[], value?: number) => {
     const id = freshIn(constraintsNow(), kind);
-    act(() => { constraintsNow().push({ Id: id, Kind: kind, Refs: refs.map(r => ({ ...r })), Value: value ?? null }); solve(); cPicks = []; });
+    // Joining, the room picked first (or the one whose wall it is) stays put; the other comes to it, stretching as a
+    // rectangle would. Anything else reshapes the rooms it names.
+    const anchor = kind === 'coincident' ? (refs.find(r => r.Edge != null) || refs[0]).Room : '';
+    act(() => {
+      constraintsNow().push({ Id: id, Kind: kind, Refs: refs.map(r => ({ ...r })), Value: value ?? null });
+      if (anchor) solve(keysOf(shapeById(anchor)), []); else solve([], refs.map(r => r.Room));
+      cPicks = [];
+    });
     if (lastSolve.unmet.includes(id)) toast('That constraint cannot hold with the others, or with what is locked. It is kept, and marked in red; Ctrl+Z takes it back.', false);
   };
 
@@ -894,17 +905,41 @@ export default function mount(sec: any, host: any) {
         svg.appendChild(g);
       };
       const inward = (m: any, px: number) => { const dx = m.centre.X - m.mid.X, dy = m.centre.Y - m.mid.Y, d = Math.hypot(dx, dy) || 1; return { X: m.mid.X + dx / d * px * u, Y: m.mid.Y + dy / d * px * u }; };
+      /// The square or arc a draughtsman marks a held corner with, drawn along its two walls.
+      const cornerMark = (sh: any, i: number, unmet: boolean) => {
+        const n = sh.Shape.length, B = sh.Shape[i], A = sh.Shape[(i - 1 + n) % n], C = sh.Shape[(i + 1) % n];
+        const ua = { X: A.X - B.X, Y: A.Y - B.Y }, uc = { X: C.X - B.X, Y: C.Y - B.Y };
+        const la = Math.hypot(ua.X, ua.Y) || 1, lc = Math.hypot(uc.X, uc.Y) || 1;
+        const m = Math.min(10 * u, la / 3, lc / 3);
+        const a = { X: B.X + ua.X / la * m, Y: B.Y + ua.Y / la * m }, c2 = { X: B.X + uc.X / lc * m, Y: B.Y + uc.Y / lc * m };
+        const square = Math.abs(Math.abs(planCornerAngle(sh, i)) - 90) <= 0.5;
+        const d = square ? `M${a.X} ${a.Y} L${a.X + c2.X - B.X} ${a.Y + c2.Y - B.Y} L${c2.X} ${c2.Y}` : `M${a.X} ${a.Y} A${m} ${m} 0 0 ${planCornerAngle(sh, i) > 0 ? 1 : 0} ${c2.X} ${c2.Y}`;
+        svg.appendChild(svgEl('path', { d, class: 'fp-cons-mark' + (unmet ? ' is-unmet' : ''), 'stroke-width': 1.6 * u }));
+      };
+      // A room held square shows it at its corners, not with a letter on every wall.
+      const squared = new Set<string>();
       let pair = 0;
       constraintsNow().forEach(c => {
         const unmet = lastSolve.unmet.includes(c.Id);
+        if (c.Id.startsWith('square_') && (c.Kind === 'horizontal' || c.Kind === 'vertical')) {
+          const sh = shapeById(c.Refs[0]?.Room);
+          if (sh && !squared.has(sh.Id)) { squared.add(sh.Id); sh.Shape.forEach((_: Pt, i: number) => cornerMark(sh, i, squareOf(sh).some(k => lastSolve.unmet.includes(k.Id)))); }
+          return;
+        }
         if (c.Kind === 'length' || c.Kind === 'horizontal' || c.Kind === 'vertical') {
           const m = edgeMid(c.Refs[0]);
           if (m) pill(inward(m, c.Kind === 'length' ? 16 : 34), c.Kind === 'length' ? len(Number(c.Value) || 0) : c.Kind === 'horizontal' ? 'H' : 'V', unmet);
         } else if (c.Kind === 'angle') {
           const q = cornerPt(c.Refs[0]); const sh = shapeById(c.Refs[0].Room);
-          if (q && sh) { const cc = planCentroid(sh.Shape); const dx = cc.X - q.X, dy = cc.Y - q.Y, d = Math.hypot(dx, dy) || 1; pill({ X: q.X + dx / d * 22 * u, Y: q.Y + dy / d * 22 * u }, `${Math.round(Math.abs(Number(c.Value) || 0))}°`, unmet); }
+          if (q && sh) {
+            cornerMark(sh, c.Refs[0].Corner!, unmet);
+            // Where it cannot hold, the pill says what the corner is, beside what it should be.
+            const want = Math.round(Math.abs(Number(c.Value) || 0)), now = Math.round(Math.abs(planCornerAngle(sh, c.Refs[0].Corner!)));
+            const cc = planCentroid(sh.Shape); const dx = cc.X - q.X, dy = cc.Y - q.Y, d = Math.hypot(dx, dy) || 1;
+            pill({ X: q.X + dx / d * 26 * u, Y: q.Y + dy / d * 26 * u }, unmet && now !== want ? `${now}° ≠ ${want}°` : `${want}°`, unmet);
+          }
         } else if (c.Kind === 'coincident') {
-          const q = cornerPt(c.Refs[0]);
+          const q = cornerPt(c.Refs[0]) || cornerPt(c.Refs[1]);
           if (q) svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u, class: 'fp-cons-ring' + (unmet ? ' is-unmet' : ''), 'stroke-width': 2 * u }));
         } else {
           pair++;
@@ -1136,7 +1171,7 @@ export default function mount(sec: any, host: any) {
     gesture.moved = true;
     const p = toPlan(e);
     // A drag is one change: remembered once, as it starts.
-    const begin = () => { if (!gesture.pushed) { history.push(); gesture.pushed = true; } };
+    const begin = () => { if (!gesture.pushed) { history.push(); gesture.pushed = true; gesture.before = outlines(); } };
     const { w, h } = floorSize();
     const k = gesture.kind;
     if (k === 'pan' || k === 'tap' || k === 'none') {
@@ -1194,7 +1229,8 @@ export default function mount(sec: any, host: any) {
         const box = boundsOf(m);
         if (box) { dx = Math.max(-box.x, Math.min(w - box.x - box.w, dx)); dy = Math.max(-box.y, Math.min(h - box.y - box.h, dy)); }
         shift(m, dx, dy);
-        if (m.shapes.length) solve(m.shapes.flatMap((x: any) => keysOf(x.sh)));
+        // Moved, a room leaves the rooms it only touched; those joined to it by a constraint come along.
+        if (m.shapes.length) { gesture.before = null; solve(m.shapes.flatMap((x: any) => keysOf(x.sh)), m.shapes.map((x: any) => x.sh.Id)); }
       }
     } else if (k === 'resize' || k === 'rotate') {
       begin();
@@ -1230,7 +1266,7 @@ export default function mount(sec: any, host: any) {
           s.Shape[x.k] = q; fixed.push(`${s.Id}#${x.k}`);
           x.linked.forEach((l: any) => { const o = shapeById(l.room); if (o) { o.Shape[l.corner] = { ...q }; fixed.push(`${o.Id}#${l.corner}`); } });
         });
-        solve(fixed);
+        solve(fixed, [s.Id]);
       }
     } else if (k === 'corner') {
       begin();
@@ -1240,7 +1276,7 @@ export default function mount(sec: any, host: any) {
         s.Shape[gesture.index] = q;
         const fixed = [`${s.Id}#${gesture.index}`];
         (gesture.linked || []).forEach((l: any) => { const o = shapeById(l.room); if (o) { o.Shape[l.corner] = { ...q }; fixed.push(`${o.Id}#${l.corner}`); } });
-        solve(fixed);
+        solve(fixed, [s.Id]);
       }
     } else if (k === 'rect') {
       rectEnd = snapped(p);
@@ -1715,7 +1751,9 @@ export default function mount(sec: any, host: any) {
         go('Hold angle', () => { const v = Math.max(1, Math.min(179.9, Number(deg.value) || 90)); addConstraint('angle', corners, Math.sign(cur || 1) * v); }, 'Hold the corner at this angle.');
         go('Square', () => addConstraint('angle', corners, Math.sign(cur || 1) * 90), 'Hold the corner at 90°.');
       } else if (corners.length === 2) {
-        go('Coincident', () => addConstraint('coincident', corners), 'Make the two corners one: a shared corner.');
+        go('Join', () => addConstraint('coincident', corners), 'Coincident: the two corners become one, and stay together as either room is moved or resized. The second comes to the first.');
+      } else if (corners.length === 1 && edges.length === 1) {
+        go('On wall', () => addConstraint('coincident', [corners[0], edges[0]]), 'Coincident: the corner stays on the wall’s line as either room is moved or resized.');
       } else if (edges.length === 2) {
         go('In line', () => addConstraint('colinear', edges), 'Colinear: the two walls lie along one line.');
         go('Parallel', () => addConstraint('parallel', edges));
@@ -1723,7 +1761,7 @@ export default function mount(sec: any, host: any) {
         const a = edgeMid(edges[0])!, b = edgeMid(edges[1])!;
         go('Same length', () => { addConstraint('length', [edges[1]], Math.round(a.len * 10) / 10); }, `Fix the second wall at the first one’s length, ${len(a.len)} (it is ${len(b.len)} now).`);
       } else if (cPicks.length === 2) {
-        add(el('span', { class: 'fp-opts-note', text: 'Pick two corners, or two walls.' }));
+        add(el('span', { class: 'fp-opts-note', text: 'Pick two corners, two walls, or a corner and a wall.' }));
       }
       if (cPicks.length) { const clear = btn('Clear'); clear.onclick = () => { cPicks = []; render(); }; add(clear); }
     } else if (tool === 'measure') {
@@ -1919,7 +1957,7 @@ export default function mount(sec: any, host: any) {
       case 'angle': return `${refName(a)} at ${Math.round(Math.abs(Number(c.Value) || 0) * 10) / 10}°`;
       case 'horizontal': return `${refName(a)} level`;
       case 'vertical': return `${refName(a)} plumb`;
-      case 'coincident': return `${refName(a)} on ${refName(b)}`;
+      case 'coincident': return b?.Edge != null ? `${refName(a)} on ${refName(b)}` : `${refName(a)} joined to ${refName(b)}`;
       case 'colinear': return `${refName(a)} in line with ${refName(b)}`;
       case 'parallel': return `${refName(a)} parallel to ${refName(b)}`;
       case 'perpendicular': return `${refName(a)} square to ${refName(b)}`;
@@ -1927,6 +1965,30 @@ export default function mount(sec: any, host: any) {
     return c.Kind;
   };
 
+  /// Keep square: like a rectangle drawn in a sketch, its walls held level and plumb, or where it is turned, its corners
+  /// held at 90°. Turned on for a room that is nearly square, it squares it up first (#601).
+  const squareOf = (sh: any) => constraintsNow().filter(c => c.Id.startsWith('square_') && c.Refs[0]?.Room === sh.Id);
+  const squareToggle = (sh: any) => {
+    const on = squareOf(sh).length > 0;
+    const poly: Pt[] = sh.Shape;
+    const n = poly.length;
+    const tilt = (i: number) => { const a = poly[i], b = poly[(i + 1) % n]; return Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI; };
+    const axis = poly.every((_, i) => Math.abs(norm90(tilt(i))) <= 10 || Math.abs(Math.abs(norm90(tilt(i))) - 90) <= 10);
+    const square = poly.every((_, i) => Math.abs(Math.abs(planCornerAngle(sh, i)) - 90) <= 15);
+    const b = el('button', { class: 'small fp-toggle' + (on ? ' is-on' : ''), type: 'button', text: on ? 'Square' : 'Keep square' });
+    b.title = on ? 'Its corners are held square. Press to let them go.' : axis || square ? 'Hold every corner at 90°, as a rectangle in a sketch is held; it is squared up now.' : 'Only a room whose corners are all near 90° can be held square.';
+    b.setAttribute('aria-pressed', String(on));
+    b.disabled = !on && (!!sh.Locked || !(axis || square));
+    b.onclick = () => act(() => {
+      if (on) { setConstraints(constraintsNow().filter(c => !squareOf(sh).includes(c))); return; }
+      const add = (kind: string, ref: PlanRef, value?: number) => constraintsNow().push({ Id: freshIn(constraintsNow(), 'square'), Kind: kind, Refs: [ref], Value: value ?? null });
+      if (axis) poly.forEach((_, i) => add(Math.abs(norm90(tilt(i))) <= 10 ? 'horizontal' : 'vertical', { Room: sh.Id, Edge: i }));
+      else poly.slice(0, n - 1).forEach((_, i) => add('angle', { Room: sh.Id, Corner: i }, Math.sign(planCornerAngle(sh, i) || 1) * 90));
+      const first = poly.findIndex((_, i) => !cornerLocked(sh, i));
+      solve(first >= 0 && !(sh.LockedWalls || []).length ? [`${sh.Id}#${first}`] : [], [sh.Id]);
+    });
+    return b;
+  };
   const drawShape = (type: 'room' | 'area', s: any, editing: boolean) => {
     const p = placeOf(s.Id);
     const name = el('input', { type: 'text', class: 'fp-name', value: s.Name || '' }) as HTMLInputElement;
@@ -1943,7 +2005,8 @@ export default function mount(sec: any, host: any) {
       const lock = el('button', { class: 'small fp-lock' + (held ? ' is-on' : ''), type: 'button', title: held ? 'Unlock it, so it can be changed again.' : 'Lock it in place.' }, fpToolIcon('lock'), held ? ' Locked' : ' Lock');
       lock.setAttribute('aria-pressed', String(held));
       lock.onclick = () => act(() => { if (s.Locked) delete s.Locked; else s.Locked = true; });
-      side.appendChild(actions(lock));
+      const sq = poly.length >= 3 ? squareToggle(s) : null;
+      side.appendChild(sq ? actions(lock, sq) : actions(lock));
     }
     /// A length typed for a wall keeps any length it is fixed at in step, then the rest of the plan follows.
     const settle = () => {
@@ -1953,7 +2016,7 @@ export default function mount(sec: any, host: any) {
         const [i, j] = planEdgeCorners(s, c.Refs[0].Edge);
         if (i < n && j < n) c.Value = Math.round(Math.hypot(s.Shape[j].X - s.Shape[i].X, s.Shape[j].Y - s.Shape[i].Y) * 10) / 10;
       });
-      solve(keysOf(s));
+      solve(keysOf(s), [s.Id]);
     };
     const lengthFix = (edge: number) => constraintsNow().find(c => c.Kind === 'length' && c.Refs[0]?.Room === s.Id && c.Refs[0].Edge === edge);
     if (poly.length >= 3) {
@@ -1982,7 +2045,7 @@ export default function mount(sec: any, host: any) {
             const k = want / L;
             s.Shape[(i + 1) % poly.length] = { X: planRound(a.X + (bpt.X - a.X) * k), Y: planRound(a.Y + (bpt.Y - a.Y) * k) };
             const fix = lengthFix(i); if (fix) fix.Value = Math.round(want * 10) / 10;
-            solve([`${s.Id}#${i}`, `${s.Id}#${(i + 1) % poly.length}`]);
+            solve([`${s.Id}#${i}`, `${s.Id}#${(i + 1) % poly.length}`], [s.Id]);
           });
         });
         inp.disabled = held;
@@ -2019,17 +2082,22 @@ export default function mount(sec: any, host: any) {
     }
 
     // The constraints that hold this room, each removable.
-    const mine = constraintsNow().filter(c => c.Refs.some(r => r.Room === s.Id));
+    // Held square, it is one line, not one for each wall.
+    const sqs = squareOf(s);
+    const mine: [string, PlanConstraint[]][] = [
+      ...(sqs.length ? [['Held square', sqs] as [string, PlanConstraint[]]] : []),
+      ...constraintsNow().filter(c => c.Refs.some(r => r.Room === s.Id) && !sqs.includes(c)).map(c => [describeConstraint(c), [c]] as [string, PlanConstraint[]]),
+    ];
     if (mine.length) {
       side.appendChild(el('h4', { text: 'Constraints' }));
       const cl2 = el('div', { class: 'fp-list' });
-      mine.forEach(c => {
-        const unmet = lastSolve.unmet.includes(c.Id);
-        const rowEl = el('div', { class: 'fp-list-row is-static' + (unmet ? ' is-unmet' : '') }, el('span', { class: 'fp-list-name', text: describeConstraint(c) }),
+      mine.forEach(([text, cs]) => {
+        const unmet = cs.some(c => lastSolve.unmet.includes(c.Id));
+        const rowEl = el('div', { class: 'fp-list-row is-static' + (unmet ? ' is-unmet' : '') }, el('span', { class: 'fp-list-name', text }),
           el('span', { class: 'fp-list-val' + (unmet ? ' is-nodata' : ''), text: unmet ? 'cannot hold' : 'holds' }));
         if (editing) {
           const x = el('button', { class: 'fp-chip-x', type: 'button', text: '×', title: 'Remove this constraint' });
-          x.onclick = () => act(() => { setConstraints(constraintsNow().filter(k => k !== c)); });
+          x.onclick = () => act(() => { setConstraints(constraintsNow().filter(k => !cs.includes(k))); });
           rowEl.appendChild(x);
         }
         cl2.appendChild(rowEl);
@@ -2097,7 +2165,7 @@ export default function mount(sec: any, host: any) {
       if (selectedCorner >= 0 && poly.length > 3) {
         side.appendChild(el('div', { class: 'desc', text: 'Double-click a corner to remove it, or drag a small dot to add one.' }));
         const dropCorner = btn('Remove corner');
-        dropCorner.onclick = () => act(() => { s.Shape.splice(selectedCorner, 1); selectedCorner = -1; });
+        dropCorner.onclick = () => { removeCorner(); };
         btns.push(dropCorner);
       }
       if (type === 'room' && poly.length >= 3) { const copy = btn('Duplicate'); copy.title = 'A copy beside it (Ctrl+D).'; copy.onclick = () => duplicate(); btns.push(copy); }
@@ -2344,7 +2412,7 @@ export default function mount(sec: any, host: any) {
       sh.Shape.splice(at, 1); selectedCorner = -1;
       setConstraints(planRefsAfterRemove(constraintsNow(), sh.Id, at, count));
       sh.LockedWalls = (sh.LockedWalls || []).filter((e: number) => e !== at && e !== (at - 1 + count) % count).map((e: number) => e > at ? e - 1 : e);
-      solve();
+      solve([], [sh.Id]);
     });
     return true;
   };
