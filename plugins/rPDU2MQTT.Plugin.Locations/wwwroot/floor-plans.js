@@ -1776,7 +1776,7 @@ function mount(sec     , host     ) {
     const focus = focusCircuit();
     // The rooms the focused circuit serves: the breaker's own list, and every room something on it is in.
     const focusRooms = new Set        (focus ? [...(circuitOf(focus)?.rooms || []), ...itemsIn().filter((i     ) => i.Circuit === focus).map((i     ) => i.Room).filter(Boolean)] : []);
-    // A selected GFCI shows what it protects: everything wired downstream of it, and the rest fades.
+    // A selected GFCI shows what it protects, in green, among the rest of its circuit.
     const gfci = selection?.type === 'item' && !extra.length ? itemOf(selection.id) : null;
     const downstream = gfci?.Gfci ? planDownstream(runsIn(), gfci.Id) : null;
     const isGfci = (id        ) => !!itemOf(id)?.Gfci;
@@ -1882,14 +1882,19 @@ function mount(sec     , host     ) {
     });
 
     // Cable runs, in their circuit's colour. A selected circuit comes forward and the rest fade.
-    if (showWiring || mode === 'edit') runsNow().forEach(r => {
+    // A wire is on the circuit of the outlets at its ends too, even when its own circuit was never set or is stale.
+    const onFocus = (r     ) => !!focus && (r.Circuit === focus || [r.From, r.To].some(id => id && itemOf(id)?.Circuit === focus));
+    // While viewing with the wiring hidden, the selected circuit's wires still show.
+    if (showWiring || mode === 'edit' || focus || downstream) runsNow().forEach(r => {
       const path = runPath(r);
       if (path.length < 2) return;
       const sel = isSel('run', r.Id);
-      const dim = downstream ? !downstream.runs.has(r.Id) : !!focus && r.Circuit !== focus;
-      const colour = r.Kind === 'circuit' ? planCircuitColor(r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
-      const lit = downstream ? downstream.runs.has(r.Id) : !!focus && r.Circuit === focus;
-      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (downstream ? ' is-protected' : ' is-focus') : ''}${r.Circuit ? '' : ' is-unknown'}` });
+      const prot = !!downstream?.runs.has(r.Id);
+      const lit = prot || onFocus(r);
+      if (!showWiring && mode !== 'edit' && !lit && !sel) return;
+      const dim = !!(focus || downstream) && !lit;
+      const colour = r.Kind === 'circuit' ? planCircuitColor(lit && focus ? focus : r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
+      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit ? '' : ' is-unknown'}` });
       const sw = (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : lit ? 2.2 : 1);
       // On the circuit being looked at, a wire is cased in the page's colour so it parts from a wall it runs along.
       if (lit) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-case', 'stroke-width': sw + 6 * u }));
@@ -1933,20 +1938,21 @@ function mount(sec     , host     ) {
       const sel = isSel('item', item.Id);
       const supply = PLAN_SUPPLY_KINDS.includes(item.Kind);
       const known = supply || (!!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true));
-      const dim = downstream ? !(downstream.items.has(item.Id) || item.Id === gfci .Id) : !!focus && item.Circuit !== focus;
-      const lit = downstream ? downstream.items.has(item.Id) : !!focus && item.Circuit === focus;
+      const prot = !!downstream?.items.has(item.Id);
+      const lit = prot || (!!focus && item.Circuit === focus);
+      const dim = !!(focus || downstream) && !lit && item.Id !== gfci?.Id;
       // Drawn at its real size when it has one: a washer is as big as a washer, turned as it stands.
       const W = Number(item.Width) || 0, D = Number(item.Depth) || 0, sized = W > 0 && D > 0;
       // A wall-mounted item sits beside its wall on the room's side, joined to it by a short stub, at any zoom.
       const facing = !sized && item.Facing != null && Number.isFinite(Number(item.Facing)) ? Number(item.Facing) * Math.PI / 180 : null;
       const off = facing == null ? { X: 0, Y: 0 } : { X: Math.cos(facing) * (r + 3 * u), Y: Math.sin(facing) * (r + 3 * u) };
       if (facing != null) svg.appendChild(svgEl('line', { x1: item.X, y1: item.Y, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
-      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (downstream ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
+      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
       g.dataset.item = item.Id;
       let rr = r;
       let hasArt = false;
       if (sized) {
-        const body = svgEl('g', { class: 'fp-body' + (sel ? ' is-selected' : '') + (dim ? ' is-dim' : '') + (lit ? (downstream ? ' is-protected' : ' is-focus') : '') + (known ? '' : ' is-unknown'), transform: `translate(${item.X},${item.Y}) rotate(${Number(item.Rotation) || 0})` });
+        const body = svgEl('g', { class: 'fp-body' + (sel ? ' is-selected' : '') + (dim ? ' is-dim' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : '') + (known ? '' : ' is-unknown'), transform: `translate(${item.X},${item.Y}) rotate(${Number(item.Rotation) || 0})` });
         body.dataset.item = item.Id;
         const shape = item.Round
           ? svgEl('ellipse', { rx: W / 2, ry: D / 2, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u })
@@ -1957,7 +1963,7 @@ function mount(sec     , host     ) {
           const m = 6 * u;
           const halo = item.Round ? svgEl('ellipse', { rx: W / 2 + m, ry: D / 2 + m, class: 'fp-halo', 'stroke-width': 3 * u })
             : svgEl('rect', { x: -W / 2 - m, y: -D / 2 - m, width: W + 2 * m, height: D + 2 * m, rx: m, class: 'fp-halo', 'stroke-width': 3 * u });
-          halo.style.stroke = downstream ? '' : planCircuitColor(item.Circuit);
+          halo.style.stroke = prot ? '' : planCircuitColor(item.Circuit);
           body.appendChild(halo);
         }
         body.appendChild(shape);
@@ -1974,7 +1980,7 @@ function mount(sec     , host     ) {
         if (item.Circuit && (showWiring || focus)) disc.style.stroke = planCircuitColor(item.Circuit);
         if (lit && !sel) {
           const halo = svgEl('circle', { r: r + 7 * u, class: 'fp-halo', 'stroke-width': 3 * u });
-          halo.style.stroke = downstream ? '' : planCircuitColor(item.Circuit);
+          halo.style.stroke = prot ? '' : planCircuitColor(item.Circuit);
           g.appendChild(halo);
         }
         g.appendChild(disc);
