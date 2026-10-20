@@ -59,6 +59,16 @@ public class FloorConfig
     [Description("How strongly the plan image shows behind the drawing, from 0 (hidden) to 1.")]
     public double ImageOpacity { get; set; } = 0.85;
 
+    [Range(0, 10000, ErrorMessage = "Interior wall must be between 0 and 10000.")]
+    [DefaultValue(0)]
+    [Description("How thick an interior wall is, in drawing units. Rooms on this floor are drawn to the middle of the walls between them, and their sizes read inside these walls. 0 draws walls as plain lines.")]
+    public double InteriorWall { get; set; }
+
+    [Range(0, 10000, ErrorMessage = "Exterior wall must be between 0 and 10000.")]
+    [DefaultValue(0)]
+    [Description("How thick an outside wall is, in drawing units. Rooms are drawn to the inside face of an outside wall, and the wall is drawn beyond it. 0 draws walls as plain lines.")]
+    public double ExteriorWall { get; set; }
+
     [AllowedValues("", Surfaces.Grass, Surfaces.Concrete, Surfaces.Gravel, Surfaces.Dirt, Surfaces.Pavers, Surfaces.Snow)]
     [Description("What the ground around the rooms looks like: grass, concrete, gravel, dirt, pavers or snow. Blank is plain paper.")]
     public string Ground { get; set; } = "";

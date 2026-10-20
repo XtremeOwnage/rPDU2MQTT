@@ -107,8 +107,8 @@ await wait(50);
 
 // --- The geometry, the units and the history the editor stands on ---
 // The page's own helpers, from the plugin's script.
-const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea };\n') + '})()', sandbox);
-const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea } = lib;
+const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea, planWallMass, planInset };\n') + '})()', sandbox);
+const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea, planWallMass, planInset } = lib;
 // The space left enclosed between rooms is found as its own region, and regions join back into one outline.
 const ring = [rect(0, 0, 300, 100), rect(0, 200, 300, 300), rect(0, 100, 100, 200), rect(200, 100, 300, 200)];
 const hole = planFaces(ring).filter(f => !planShapeAt(ring.map((r, i) => ({ Id: 'r' + i, Shape: r })), f.at));
@@ -153,6 +153,12 @@ const ft = 0.3048, inch = 0.0254;
   .forEach(([t, m]) => { if (!near(planParseLen(t, 'metric'), m)) fail(`"${t}" did not read as ${m} m: ${planParseLen(t, 'metric')}`); });
 if (planParseLen('twelve', 'imperial') !== null) fail('nonsense read as a length');
 if (planFmtLen(12 * ft + 6 * inch, 'imperial') !== '12′ 6″') fail(`12 ft 6 in was written ${planFmtLen(12 * ft + 6 * inch, 'imperial')}`);
+if (planFmtLen(4.5 * inch, 'imperial') !== '4½″' || !near(planParseLen('4½"', 'imperial'), 4.5 * inch)) fail(`a wall's thickness is not written or read to the half inch: ${planFmtLen(4.5 * inch, 'imperial')}`);
+// Walls from rooms drawn touching: the stretch two rooms share is one wall between them, the rest are outside walls.
+const wm = planWallMass([{ Id: 'a', Shape: rect(0, 0, 100, 100) }, { Id: 'b', Shape: rect(100, 0, 200, 50) }]);
+if (wm.filter(w => w.shared).length !== 2 || wm.filter(w => w.shared && w.draw).length !== 1 || wm.filter(w => !w.shared).length !== 7) fail(`the walls between and around two rooms are wrong: ${JSON.stringify(wm)}`);
+const ins = planInset(rect(0, 0, 100, 100), [0, 5, 0, 0]);
+if (ins[1].X !== 95 || ins[2].X !== 95 || ins[0].X !== 0) fail(`a room's inside is not inset from its shared wall: ${JSON.stringify(ins)}`);
 if (planFmtLen(0.85, 'metric') !== '85 cm' || planFmtLen(3.75, 'metric') !== '3.75 m') fail('metric lengths are not written as a tape reads them');
 if (planUnitSystem('auto', 'en-US') !== 'imperial' || planUnitSystem('auto', 'en-GB') !== 'metric' || planUnitSystem('metric', 'en-US') !== 'metric') fail('the unit setting is not followed');
 const box = { v: 1 };
@@ -465,6 +471,14 @@ const kx = Math.max(...roomById('kitchen').Shape.map(q => q.X)), ox = Math.min(.
 if (Math.abs(kx - 300) > 4 || Math.abs(kx - ox) > 0.5 || roomById('office').Shape.length !== 4) fail(`the office did not take in the strip from the kitchen: kitchen ${JSON.stringify(roomById('kitchen').Shape)}, office ${JSON.stringify(roomById('office').Shape)}`);
 key('z', { ctrlKey: true });
 if (Math.max(...roomById('kitchen').Shape.map(q => q.X)) !== 400) fail('undo did not give the kitchen its strip back');
+// With the floor's wall thickness set, the walls are drawn at it and gone again at 0.
+loc().Sites.forEach(st => st.Floors.forEach(f => { f.InteriorWall = 20; f.ExteriorWall = 15; }));
+tap(polygonFor('kitchen'), 200, 150);
+if (!query(sec, 'line', true).some(l => l.classList.contains('fp-wallmass'))) fail(`walls are not drawn at the floor's thickness: ${query(sec, 'line', true).length} lines, ${query(sec, 'polygon', true).length} polygons, rooms ${JSON.stringify(floor().Rooms.map(r => r.Id))} mode ${textOf(query(sec, '.fp-opts'))}`);
+loc().Sites.forEach(st => st.Floors.forEach(f => { f.InteriorWall = 0; f.ExteriorWall = 0; }));
+tap(polygonFor('kitchen'), 200, 150);
+if (query(sec, 'line', true).some(l => l.classList.contains('fp-wallmass'))) fail('walls are still drawn thick with no thickness set');
+
 key('a', { ctrlKey: true });
 if (!/\d+ selected/.test(textOf(side()))) fail('Ctrl+A did not select everything');
 key('Escape');

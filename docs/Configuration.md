@@ -1484,6 +1484,7 @@ room's walls, and the Constrain tool picks their ends and stretches as it does a
 - With the *Room* tool, tapping an empty space enclosed by rooms makes it a room that fills it exactly. *Take in space* (a selected room's panel or right-click menu) grows the room over a rectangle you drag, cutting that space out of the rooms under it.
 - A wall drawn with the *Wall* tool right across a room, side to side, splits it into two rooms; the larger piece keeps its name. A standalone wall already across a room offers *Split the room*.
 - Drawing and dragging snap to corners, then to level and plumb walls nearby (each way on its own), including the far face of a 4½ in wall from a room, so a room drawn next door leaves the wall between them.
+- *Interior walls* and *Exterior walls* (Floor settings) give the floor's walls a thickness. Rooms are then drawn touching: to the middle of the walls between them and the inside face of the outside walls. Walls are drawn at their thickness, doors cut through them, and sizes read inside them. *Close the gaps between rooms* converts a plan drawn with a gap at each wall.
 - An unsatisfiable constraint is marked red, and the floor names it.
 - Each room lists its constraints, each removable. A wall's *Fix* button holds its length.
 - The *Constraints* checkbox shows or hides the markers.

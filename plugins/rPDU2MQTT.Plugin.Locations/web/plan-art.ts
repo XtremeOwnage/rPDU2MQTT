@@ -123,18 +123,22 @@ export function planGlyph(kind: string, r: number): any {
 
 /// A door, window or opening: the wall cut, and what fills it, lying along the wall at its angle.
 /// `u` is drawing units per screen pixel; the wall is drawn a few pixels thick at any zoom.
-export function planOpening(o: any, u: number): any {
+/// `thick`: the wall's thickness when the floor gives one, so the gap cuts it through; `shift` moves the opening out
+/// into an outside wall drawn beyond its room.
+export function planOpening(o: any, u: number, thick = 0, shift: { X: number; Y: number } = { X: 0, Y: 0 }): any {
   const w = Math.max(1, Number(o.Width) || 90);
   const half = w / 2;
-  const g = svgEl('g', { class: 'fp-op is-' + (o.Kind || 'door'), transform: `translate(${o.X},${o.Y}) rotate(${Number(o.Angle) || 0})` });
-  const wall = 5 * u;
+  const g = svgEl('g', { class: 'fp-op is-' + (o.Kind || 'door'), transform: `translate(${o.X + shift.X},${o.Y + shift.Y}) rotate(${Number(o.Angle) || 0})` });
+  const wall = Math.max(5 * u, thick);
   g.appendChild(svgEl('line', { x1: -half, y1: 0, x2: half, y2: 0, class: 'fp-op-gap', 'stroke-width': wall + 2 * u }));
   const dir = o.Flip ? -1 : 1;
   const stroke = 1.6 * u;
+  // A leaf hangs from the face of the wall it swings out of.
+  const face = dir * thick / 2;
   const leaf = (hx: number, ox: number, len: number, left: boolean) => {
-    g.appendChild(svgEl('line', { x1: hx, y1: 0, x2: hx, y2: dir * len, class: 'fp-op-leaf', 'stroke-width': stroke * 1.4 }));
+    g.appendChild(svgEl('line', { x1: hx, y1: face, x2: hx, y2: face + dir * len, class: 'fp-op-leaf', 'stroke-width': stroke * 1.4 }));
     const sweep = left === (dir > 0) ? 0 : 1;
-    g.appendChild(svgEl('path', { d: `M ${hx} ${dir * len} A ${len} ${len} 0 0 ${sweep} ${ox} 0`, class: 'fp-op-arc', 'stroke-width': stroke }));
+    g.appendChild(svgEl('path', { d: `M ${hx} ${face + dir * len} A ${len} ${len} 0 0 ${sweep} ${ox} ${face}`, class: 'fp-op-arc', 'stroke-width': stroke }));
   };
   const kind = o.Kind || 'door';
   if (kind === 'door') {

@@ -113,6 +113,8 @@
   paint-order: stroke; stroke: var(--panel); stroke-width: .3em; stroke-linejoin: round; font-variant-numeric: tabular-nums;
 }
 .fp-op-gap { stroke: var(--panel2); }
+.fp-wallmass { stroke: var(--fg); stroke-linecap: square; pointer-events: none; }
+.fp-room-sel { fill: none; stroke: var(--accent-hi); stroke-linejoin: round; pointer-events: none; }
 .fp-op-leaf { stroke: var(--fg); stroke-linecap: round; }
 .fp-op-arc { fill: none; stroke: var(--muted); stroke-dasharray: 3 2; }
 .fp-op-glass { stroke: var(--series-1); }

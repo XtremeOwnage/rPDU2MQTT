@@ -336,3 +336,55 @@ export function planJoin(parts: Pt[][], eps = 0.5): Pt[] | null {
   }
   return rest.length ? null : planStraighten(shape, eps);
 }
+
+/// One stretch of wall: between two rooms (`shared`, drawn on its middle) or on the outside (drawn beyond the
+/// room, toward `out`). `room` and `edge` say whose side it came from.
+export type PlanWallPiece = { a: Pt; b: Pt; shared: boolean; draw?: boolean; room: string; edge: number; out: Pt };
+
+/// The walls of a floor from its rooms' outlines: each edge cut wherever another room's corner sits on it, and each
+/// stretch shared when another room runs back along it.
+export function planWallMass(rooms: { Id: string; Shape: Pt[] }[], eps = 0.5): PlanWallPiece[] {
+  const key = (p: Pt, q: Pt) => `${Math.round(p.X / eps)},${Math.round(p.Y / eps)}>${Math.round(q.X / eps)},${Math.round(q.Y / eps)}`;
+  const all: PlanWallPiece[] = [];
+  const list = rooms.filter(r => (r.Shape || []).length >= 3 && Math.abs(planArea(r.Shape)) > eps);
+  list.forEach(r => {
+    const poly = r.Shape, sign = Math.sign(planArea(poly));
+    const corners = list.filter(o => o !== r).flatMap(o => o.Shape);
+    poly.forEach((s, i) => {
+      const t = poly[(i + 1) % poly.length];
+      const len = Math.hypot(t.X - s.X, t.Y - s.Y);
+      if (len <= eps) return;
+      const along = (p: Pt) => ((p.X - s.X) * (t.X - s.X) + (p.Y - s.Y) * (t.Y - s.Y)) / len;
+      const cuts = corners.filter(p => { const n = planNearestOnSegment(p, s, t); return Math.hypot(n.X - p.X, n.Y - p.Y) <= eps && along(p) > eps && along(p) < len - eps; })
+        .map(p => planNearestOnSegment(p, s, t)).sort((x, y) => along(x) - along(y));
+      const out = { X: sign * (t.Y - s.Y) / len, Y: -sign * (t.X - s.X) / len };
+      [s, ...cuts, t].reduce((p, q) => { if (Math.hypot(q.X - p.X, q.Y - p.Y) > eps) all.push({ a: p, b: q, shared: false, room: r.Id, edge: i, out }); return q; });
+    });
+  });
+  const seen = new Map<string, PlanWallPiece>();
+  all.forEach(w => seen.set(key(w.a, w.b), w));
+  all.forEach(w => {
+    const back = seen.get(key(w.b, w.a));
+    w.shared = !!back && back.room !== w.room;
+    // A wall between two rooms is listed from both sides, and drawn from one.
+    w.draw = !w.shared || w.room < back!.room;
+  });
+  return all;
+}
+
+/// An outline with each edge moved inward by its own distance: a room's inside, within its walls.
+export function planInset(poly: Pt[], by: number[]): Pt[] {
+  const n = poly.length, sign = Math.sign(planArea(poly)) || 1;
+  const line = (i: number) => {
+    const a = poly[i], b = poly[(i + 1) % n], L = Math.hypot(b.X - a.X, b.Y - a.Y) || 1;
+    const nx = -sign * (b.Y - a.Y) / L, ny = sign * (b.X - a.X) / L, d = by[i] || 0;
+    return { p: { X: a.X + nx * d, Y: a.Y + ny * d }, v: { X: (b.X - a.X) / L, Y: (b.Y - a.Y) / L } };
+  };
+  return poly.map((_, j) => {
+    const l1 = line((j - 1 + n) % n), l2 = line(j);
+    const den = l1.v.X * l2.v.Y - l1.v.Y * l2.v.X;
+    if (Math.abs(den) < 1e-9) return l2.p;
+    const k = ((l2.p.X - l1.p.X) * l2.v.Y - (l2.p.Y - l1.p.Y) * l2.v.X) / den;
+    return { X: l1.p.X + l1.v.X * k, Y: l1.p.Y + l1.v.Y * k };
+  });
+}

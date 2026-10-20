@@ -398,8 +398,26 @@ export default function mount(sec: any, host: any) {
   const othersFor = (exclude: any) => [...outlinesOf([...roomsNow(), ...areasNow()].filter(s => s !== exclude)),
     ...wallsNow().filter((w: any) => w !== exclude).flatMap((w: any) => (w.Points || []).slice(1).map((q: Pt, i: number) => [w.Points[i], q]))];
   const snapStep = () => planSnapStep(sys()) * scale();
-  /// A 2x4 wall with drywall both sides, 4½ in: the far face of a room's wall is a snap line too.
-  const wallFace = () => 0.1143 * scale();
+  /// The floor's wall thicknesses. With either set, rooms are drawn touching, to the middle of the walls between them
+  /// and the inside face of the outside walls, and the walls are drawn at their thickness.
+  const interiorWall = () => Math.max(0, Number(floorNow()?.floor.InteriorWall) || 0);
+  const exteriorWall = () => Math.max(0, Number(floorNow()?.floor.ExteriorWall) || 0);
+  const thickWalls = () => interiorWall() > 0 || exteriorWall() > 0;
+  const massNow = () => planWallMass(roomsNow().filter(r => !r.Outdoor));
+  /// A room's inside: each wall it shares moved in by half the interior wall. Its outline when walls are thin lines.
+  const insideOf = (room: any, mass = massNow()): Pt[] => {
+    const poly: Pt[] = room.Shape || [];
+    if (!thickWalls() || room.Outdoor || poly.length < 3) return poly;
+    const half = interiorWall() / 2;
+    return planInset(poly, poly.map((a, i) => {
+      const b = poly[(i + 1) % poly.length], L = Math.hypot(b.X - a.X, b.Y - a.Y) || 1;
+      const shared = mass.filter(w => w.room === room.Id && w.edge === i && w.shared).reduce((t, w) => t + Math.hypot(w.b.X - w.a.X, w.b.Y - w.a.Y), 0);
+      return shared / L > 0.5 ? half : 0;
+    }));
+  };
+  /// A 2x4 wall with drywall both sides, 4½ in: drawn as gaps between rooms, the far face of a room's wall is a snap
+  /// line too. With the floor's wall thickness set, rooms touch and there is no far face to find.
+  const wallFace = () => thickWalls() ? 0 : 0.1143 * scale();
   const clampPt = (p: Pt) => { const { w, h } = floorSize(); return { X: planRound(Math.max(0, Math.min(w, p.X))), Y: planRound(Math.max(0, Math.min(h, p.Y))) }; };
   const snapped = (p: Pt, exclude: any = null) => {
     if (!snapOn) return clampPt(p);
@@ -735,6 +753,8 @@ export default function mount(sec: any, host: any) {
       else if (room.SurfaceColor) svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-surface is-solid', fill: room.SurfaceColor }));
     });
     const labels: any[] = [];
+    const walls = thickWalls();
+    const mass = walls ? massNow() : [];
     rooms.forEach(room => {
       const poly: Pt[] = room.Shape;
       const p = placeOf(room.Id);
@@ -743,7 +763,7 @@ export default function mount(sec: any, host: any) {
       const shape = svgEl('polygon', {
         points: points(poly),
         class: `fp-room ${room.Outdoor ? 'is-outdoor' : 'is-indoor'} is-${mode === 'view' ? st : 'edit'}${room.Surface ? ' has-surface' : ''}${sel ? ' is-selected' : ''}`,
-        'stroke-width': (room.Outdoor ? 1.5 : sel ? 5 : 4) * u,
+        'stroke-width': (room.Outdoor ? 1.5 : sel ? (walls ? 3 : 5) : walls ? 1 : 4) * u,
       });
       if (room.Outdoor) shape.setAttribute('stroke-dasharray', `${7 * u} ${5 * u}`);
       if (mode === 'view' && st === 'known') shape.style.fill = shadeOf(p!.value, max);
@@ -754,9 +774,22 @@ export default function mount(sec: any, host: any) {
       if (focusRooms.has(room.Id)) svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-circuit-tint', fill: planCircuitColor(focus) }));
       const lines = [room.Name || room.Id];
       if (mode === 'view') lines.push(st === 'known' ? fmt(p!.value) : st === 'unknown' ? 'no data' : 'unmetered');
-      if (showSizes || (mode === 'edit' && sel)) lines.push(areaText(poly));
+      if (showSizes || (mode === 'edit' && sel)) lines.push(areaText(insideOf(room, mass)));
       labels.push(label(poly, lines, 'fp-label' + (mode === 'view' ? ' is-' + st : '') + (room.Outdoor ? ' is-outdoor' : '')));
     });
+
+    // The walls at the floor's thickness: between rooms on their middle, outside walls beyond the rooms. The selected
+    // room's outline is drawn again over them.
+    if (walls) {
+      const iw = interiorWall(), xw = exteriorWall();
+      mass.filter(w => w.draw).forEach(w => {
+        const t = w.shared ? iw : xw;
+        if (t <= 0) return;
+        const o = w.shared ? 0 : t / 2;
+        svg.appendChild(svgEl('line', { x1: w.a.X + w.out.X * o, y1: w.a.Y + w.out.Y * o, x2: w.b.X + w.out.X * o, y2: w.b.Y + w.out.Y * o, class: 'fp-wallmass', 'stroke-width': t }));
+      });
+      rooms.filter(r => isSel('room', r.Id)).forEach(r => svg.appendChild(svgEl('polygon', { points: points(r.Shape), class: 'fp-room-sel', 'stroke-width': 3 * u })));
+    }
 
     areasNow().forEach(area => {
       const poly: Pt[] = area.Shape || [];
@@ -791,7 +824,16 @@ export default function mount(sec: any, host: any) {
 
     // Doors and windows cut the walls they sit in.
     openingsNow().forEach(o => {
-      const g = planOpening(o, u);
+      // At the floor's wall thickness, a door cuts the whole wall, and one in an outside wall sits out in it.
+      let thick = 0, shift = { X: 0, Y: 0 };
+      if (walls) {
+        const near = mass.map(w => { const q = planNearestOnSegment(o, w.a, w.b); return { w, d: Math.hypot(q.X - o.X, q.Y - o.Y) }; }).sort((a, b) => a.d - b.d)[0];
+        if (near && near.d <= Math.max(interiorWall(), exteriorWall(), 6 * u)) {
+          thick = near.w.shared ? interiorWall() : exteriorWall();
+          if (!near.w.shared) shift = { X: near.w.out.X * thick / 2, Y: near.w.out.Y * thick / 2 };
+        }
+      }
+      const g = planOpening(o, u, thick, shift);
       if (isSel('opening', o.Id)) g.classList.add('is-selected');
       svg.appendChild(g);
     });
@@ -943,17 +985,21 @@ export default function mount(sec: any, host: any) {
     const dimsFor = rooms.filter(rm => showSizes || (mode === 'edit' && selection?.type === 'room' && selection.id === rm.Id));
     dimsFor.forEach(rm => {
       const poly: Pt[] = rm.Shape;
+      const inner = insideOf(rm, mass);
       const sign = planArea(poly) >= 0 ? 1 : -1;
       poly.forEach((a, i) => {
         const b = poly[(i + 1) % poly.length];
         const L = Math.hypot(b.X - a.X, b.Y - a.Y);
+        // Read inside the walls, as a tape measure would.
+        const ia = inner[i], ib = inner[(i + 1) % inner.length];
+        const inL = Math.hypot(ib.X - ia.X, ib.Y - ia.Y);
         if (L / u < 40) return;
         const nx = -(b.Y - a.Y) / L * sign, ny = (b.X - a.X) / L * sign;
         let ang = Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI;
         if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
         const mx = (a.X + b.X) / 2 - nx * 11 * u, my = (a.Y + b.Y) / 2 - ny * 11 * u;
         const t = svgEl('text', { x: mx, y: my, class: 'fp-dim', 'font-size': font * 0.85, transform: `rotate(${ang} ${mx} ${my})` });
-        t.textContent = len(L);
+        t.textContent = len(inL);
         svg.appendChild(t);
       });
     });
@@ -2385,12 +2431,14 @@ export default function mount(sec: any, host: any) {
     const lengthFix = (edge: number) => constraintsNow().find(c => c.Kind === 'length' && c.Refs[0]?.Room === s.Id && c.Refs[0].Edge === edge);
     if (poly.length >= 3) {
       side.appendChild(el('h4', { text: 'Size' }));
-      side.appendChild(row('Floor area', areaText(poly)));
+      // Sizes read inside the walls when the floor gives them a thickness.
+      const inner = type === 'room' ? insideOf(s) : poly;
+      side.appendChild(row('Floor area', areaText(inner)));
       if (editing && type === 'room' && planIsBox(poly)) {
         // A rectangle is sized by its inside measurements; its top-left corner stays put.
-        const b = planBounds(poly);
-        const setBox = (w: number, h: number) => { if (held || (s.LockedWalls || []).length) { saidLocked(); render(); return; } act(() => { s.Shape = planClamp(planRect({ X: b.x, Y: b.y }, { X: b.x + w, Y: b.y + h }), floorSize().w, floorSize().h); settle(); }); };
-        const wi = lenInput(b.w, w => setBox(w, b.h)), di = lenInput(b.h, h => setBox(b.w, h));
+        const b = planBounds(poly), ib = planBounds(inner);
+        const setBox = (w: number, h: number) => { if (held || (s.LockedWalls || []).length) { saidLocked(); render(); return; } act(() => { s.Shape = planClamp(planRect({ X: b.x, Y: b.y }, { X: b.x + w + (b.w - ib.w), Y: b.y + h + (b.h - ib.h) }), floorSize().w, floorSize().h); settle(); }); };
+        const wi = lenInput(ib.w, w => setBox(w, ib.h)), di = lenInput(ib.h, h => setBox(ib.w, h));
         if (held) { wi.disabled = true; di.disabled = true; }
         side.appendChild(el('div', { class: 'fp-two' }, field('Width', wi), field('Depth', di)));
       }
@@ -2399,11 +2447,14 @@ export default function mount(sec: any, host: any) {
       poly.forEach((a, i) => {
         const bpt = poly[(i + 1) % poly.length];
         const L = Math.hypot(bpt.X - a.X, bpt.Y - a.Y);
+        const ia = inner[i], ibp = inner[(i + 1) % inner.length];
+        const inL = inner === poly ? L : Math.hypot(ibp.X - ia.X, ibp.Y - ia.Y);
         const wallLocked = (s.LockedWalls || []).includes(i);
-        if (!editing) { walls.appendChild(row(`Wall ${i + 1}`, len(L) + (wallLocked ? ' · locked' : '') + (lengthFix(i) ? ' · fixed' : ''))); return; }
+        if (!editing) { walls.appendChild(row(`Wall ${i + 1}`, len(inL) + (wallLocked ? ' · locked' : '') + (lengthFix(i) ? ' · fixed' : ''))); return; }
         // Typing a wall's length moves the corner at its far end along the wall.
-        const inp = lenInput(L, want => {
+        const inp = lenInput(inL, wantIn => {
           if (held || cornerLocked(s, (i + 1) % poly.length)) { saidLocked(); render(); return; }
+          const want = wantIn + (L - inL);
           act(() => {
             if (!L) return;
             const k = want / L;
@@ -3087,6 +3138,49 @@ export default function mount(sec: any, host: any) {
   };
   addBtn.onclick = addSheet;
 
+  /// Rooms drawn apart, a wall's thickness between them, brought together on the middle of each wall; what stands on
+  /// a wall that moves moves with it. Gaps up to half again the wall's thickness are taken as walls.
+  const closeGaps = () => {
+    const f = floorNow()?.floor;
+    if (!f) return;
+    const t = interiorWall() || 0.1143 * scale();
+    const rooms = roomsNow().filter(r => !r.Outdoor && (r.Shape || []).length >= 3 && !r.Locked);
+    type Side = { r: any; i: number; at: number; lo: number; hi: number; dir: number; upright: boolean };
+    const sides: Side[] = [];
+    rooms.forEach(r => {
+      const poly: Pt[] = r.Shape, sign = Math.sign(planArea(poly));
+      poly.forEach((a, i) => {
+        const b = poly[(i + 1) % poly.length];
+        if (Math.abs(a.X - b.X) < 0.01 && Math.abs(a.Y - b.Y) > 1) sides.push({ r, i, at: a.X, lo: Math.min(a.Y, b.Y), hi: Math.max(a.Y, b.Y), dir: sign * Math.sign(b.Y - a.Y), upright: true });
+        else if (Math.abs(a.Y - b.Y) < 0.01 && Math.abs(a.X - b.X) > 1) sides.push({ r, i, at: a.Y, lo: Math.min(a.X, b.X), hi: Math.max(a.X, b.X), dir: -sign * Math.sign(b.X - a.X), upright: false });
+      });
+    });
+    const moves = new Map<Side, number[]>();
+    sides.forEach(p => sides.forEach(q => {
+      if (p.r === q.r || p.upright !== q.upright || p.dir <= 0 || q.dir >= 0) return;
+      const gap = q.at - p.at;
+      if (gap <= 0.5 || gap > t * 1.5 || Math.min(p.hi, q.hi) - Math.max(p.lo, q.lo) <= 1) return;
+      const mid = (p.at + q.at) / 2;
+      [p, q].forEach(s => { if (!moves.has(s)) moves.set(s, []); moves.get(s)!.push(mid); });
+    }));
+    if (!moves.size) return toast('No gaps the width of a wall were found between rooms.', false);
+    act(() => {
+      moves.forEach((mids, sd) => {
+        const to = planRound(mids.reduce((a, b) => a + b, 0) / mids.length), from = sd.at;
+        const poly: Pt[] = sd.r.Shape, n = poly.length;
+        [poly[sd.i], poly[(sd.i + 1) % n]].forEach(q => { if (sd.upright) q.X = to; else q.Y = to; });
+        itemsIn().forEach((it: any) => {
+          if (it.Room !== sd.r.Id) return;
+          const on = sd.upright ? Math.abs(it.X - from) < 1 && it.Y >= sd.lo - 1 && it.Y <= sd.hi + 1 : Math.abs(it.Y - from) < 1 && it.X >= sd.lo - 1 && it.X <= sd.hi + 1;
+          if (on) { if (sd.upright) it.X = to; else it.Y = to; }
+        });
+      });
+      if (!(Number(f.InteriorWall) > 0)) f.InteriorWall = planRound(t);
+      if (!(Number(f.ExteriorWall) > 0)) f.ExteriorWall = planRound(t);
+    });
+    toast(`Closed ${moves.size} wall gaps; walls are drawn ${len(interiorWall())} thick.`, true);
+  };
+
   const floorSheet = () => {
     const fl = floorNow();
     if (!fl) return addSheet();
@@ -3104,6 +3198,12 @@ export default function mount(sec: any, host: any) {
         field('Plot width', lenInput(w, v => act(() => { f.Width = Math.max(100, Math.round(v)); viewFor = ''; }))),
         field('Plot depth', lenInput(h, v => act(() => { f.Height = Math.max(100, Math.round(v)); viewFor = ''; })))),
       field('Ground', select(PLAN_GROUNDS, f.Ground || '', v => act(() => { f.Ground = v; })), 'What is drawn around the rooms: a lawn, a slab, gravel.'),
+      el('h4', { text: 'Walls' }),
+      el('div', { class: 'fp-two' },
+        field('Interior walls', lenInput(Number(f.InteriorWall) || 0, v => act(() => { f.InteriorWall = Math.max(0, planRound(v)); }), '4½ in')),
+        field('Exterior walls', lenInput(Number(f.ExteriorWall) || 0, v => act(() => { f.ExteriorWall = Math.max(0, planRound(v)); }), '6 in'))),
+      el('div', { class: 'desc', text: 'With a thickness, rooms are drawn touching: to the middle of the walls between them and the inside of the outside walls. The walls are drawn at their thickness and sizes read inside them. A 2x4 wall with drywall both sides is 4½ in.' }),
+      actions((() => { const b = btn('Close the gaps between rooms'); b.title = 'For rooms drawn with a gap where each wall stands: meet them in the middle of it, and set the wall thickness from it.'; b.onclick = () => { closeGaps(); closeSheet(); }; return b; })()),
       el('h4', { text: 'Arrange' }),
       actions(
         (() => { const b = btn('Centre the drawing'); b.title = 'Move everything drawn on this floor to the middle of the plot.'; b.onclick = () => { arrange('centre'); closeSheet(); }; return b; })(),
