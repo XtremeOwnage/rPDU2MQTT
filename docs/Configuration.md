@@ -1458,6 +1458,10 @@ rooms it serves.
 - Selecting a GFCI highlights what it protects. A protected outlet names its GFCI and shows a green dot when
   wiring is shown.
 
+**Standalone walls** (`Walls`, per floor): the *Wall* tool draws a wall that is not the side of a room, end to end with
+bends. `Thickness` is in drawing units; 0 is an interior wall's 4½ in. Doors, windows and outlets sit in them as in a
+room's walls, and the Constrain tool picks their ends and stretches as it does a room's corners and walls.
+
 **Shared walls.**
 
 - Coincident corners belong to every room meeting there; dragging one moves it in all.
@@ -1471,6 +1475,19 @@ rooms it serves.
 
 - Held during edits; the dragged or typed value stays and the rest adjusts. Locked rooms and walls never
   adjust.
+- *Join* (coincident) makes two corners one point; *On wall* keeps a corner on a wall's line. Joined rooms
+  stay together when either is moved or resized; the corner picked first stays put.
+- A room that only follows a shared or joined corner keeps its level and plumb walls, so it stretches as a
+  rectangle.
+- A room keeps its level and plumb walls while a corner or wall is dragged; hold Shift to drag it free. *Square up* straightens a nearly square room once, storing no constraints.
+- *Merge rooms* (with two or more rooms selected) makes rooms that share a wall one room. The first picked keeps its name; items, areas, breakers and constraints that named the others move to it, and constraints on the wall between them are dropped.
+- With the *Room* tool, tapping an empty space enclosed by rooms makes it a room that fills it exactly. *Take in space* (a selected room's panel or right-click menu) grows the room over a rectangle you drag, cutting that space out of the rooms under it.
+- A wall drawn with the *Wall* tool right across a room, side to side, splits it into two rooms; the larger piece keeps its name. A standalone wall already across a room offers *Split the room*.
+- Drawing and dragging snap to corners, then to level and plumb walls nearby (each way on its own), including the far face of a 4½ in wall from a room, so a room drawn next door leaves the wall between them.
+- *Interior walls* and *Exterior walls* (Floor settings) give the floor's walls a thickness. Rooms are then drawn touching: to the middle of the walls between them and the inside face of the outside walls. Walls are drawn at their thickness, doors cut through them, and sizes read inside them. *Close the gaps between rooms* converts a plan drawn with a gap at each wall.
+- *North points* (Floor settings) sets which way north is on the drawing; the compass in the corner of the plan follows it.
+- *Show* hides kinds of item (outlets, lights, appliances, panels and power) and the compass. In Edit, a room's name can be dragged to where it reads best; double-click it to put it back.
+- The *Circuits* view (View mode) draws every circuit's runs and rings each item in its circuit colour, so a circuit can be traced from its breaker.
 - An unsatisfiable constraint is marked red, and the floor names it.
 - Each room lists its constraints, each removable. A wall's *Fix* button holds its length.
 - The *Constraints* checkbox shows or hides the markers.

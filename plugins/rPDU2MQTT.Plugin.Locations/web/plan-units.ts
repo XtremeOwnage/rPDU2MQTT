@@ -18,6 +18,8 @@ export function planFmtLen(m: number, sys: UnitSystem): string {
   const neg = m < 0 ? '−' : '';
   m = Math.abs(m);
   if (sys === 'imperial') {
+    // Under a foot, such as a wall's thickness, to the half inch.
+    if (m / INCH < 11.75) { const h = Math.round(m / INCH * 2) / 2; return `${neg}${Math.floor(h) || (h % 1 ? '' : 0)}${h % 1 ? '½' : ''}″`; }
     let inches = Math.round(m / INCH);
     const ft = Math.floor(inches / 12);
     inches -= ft * 12;
@@ -36,7 +38,7 @@ export function planFmtArea(m2: number, sys: UnitSystem): string {
 
 /// A typed length, in metres: 12' 6", 12ft 6in, 12 6, 150", 3.75m, 3m 75cm, 375 cm, 3750mm. A bare number is feet or metres.
 export function planParseLen(text: string, sys: UnitSystem): number | null {
-  const t = String(text || '').toLowerCase().replace(/[’′]/g, "'").replace(/[”″]/g, '"').replace(/,/g, '.').replace(/\s+/g, ' ').trim();
+  const t = String(text || '').toLowerCase().replace(/ ?½/g, '.5').replace(/ ?¼/g, '.25').replace(/ ?¾/g, '.75').replace(/[’′]/g, "'").replace(/[”″]/g, '"').replace(/,/g, '.').replace(/\s+/g, ' ').trim();
   if (!t) return null;
   const num = '(\\d+(?:\\.\\d+)?|\\.\\d+)';
   let m = t.match(new RegExp(`^${num} ?(?:'|ft|feet|foot)(?: ?${num} ?(?:"|in|inch|inches)?)?$`));

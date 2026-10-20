@@ -38,6 +38,31 @@ function planCentroid(poly      )     {
   return { X: cx / (6 * a), Y: cy / (6 * a) };
 }
 
+/// Where a room's name goes by default: the point inside it furthest from its walls, so an L-shaped hall is labelled
+/// in its widest part rather than at a centre that may fall outside it. A plain rectangle gets its centre.
+function planLabelPoint(poly      )     {
+  const c = planCentroid(poly);
+  if (poly.length < 3) return c;
+  const edge = (p    ) => {
+    let d = Infinity;
+    for (let i = 0; i < poly.length; i++) { const q = planNearestOnSegment(p, poly[i], poly[(i + 1) % poly.length]); d = Math.min(d, Math.hypot(q.X - p.X, q.Y - p.Y)); }
+    return planContains(poly, p) ? d : -d;
+  };
+  let best = c, bd = edge(c);
+  const xs = poly.map(p => p.X), ys = poly.map(p => p.Y);
+  let x0 = Math.min(...xs), y0 = Math.min(...ys), w = Math.max(...xs) - x0, h = Math.max(...ys) - y0;
+  // A coarse grid, then finer ones round the best so far; the centroid wins a near tie, so symmetric rooms keep it.
+  for (let pass = 0; pass < 4; pass++) {
+    const n = 24;
+    for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) {
+      const p = { X: x0 + w * i / n, Y: y0 + h * j / n }, d = edge(p);
+      if (d > bd * 1.02 + 1e-9) { best = p; bd = d; }
+    }
+    x0 = best.X - w / 8; y0 = best.Y - h / 8; w /= 4; h /= 4;
+  }
+  return best;
+}
+
 /// Is a point inside an outline? Even-odd ray casting; a point on an edge may land either side.
 function planContains(poly      , p    )          {
   let inside = false;
@@ -72,13 +97,37 @@ const planDist = (a    , b    ) => Math.hypot(a.X - b.X, a.Y - b.Y);
 
 /// Where a point lands once snapped: onto another outline's corner, else its edge, else the grid. Corners win
 /// over edges so two rooms drawn side by side share their corners exactly.
-function planSnap(p    , others        , threshold        , grid = 0)                                                      {
+/// `others` may hold standalone walls as two-point lines, which snap without a far face.
+/// `wall`: how thick a wall is. A point also snaps to the far face of a wall from a room, so a room drawn next door
+/// leaves the wall between them.
+function planSnap(p    , others        , threshold        , grid = 0, wall = 0)                                                      {
   let best            = null, bestD = threshold;
   for (const poly of others) for (const v of poly) {
     const d = planDist(p, v);
     if (d <= bestD) { best = v; bestD = d; }
   }
   if (best) return { pt: { X: best.X, Y: best.Y }, to: 'corner' };
+  // Level and plumb walls nearby, each way on its own: X to the nearest upright wall, Y to the nearest level one.
+  let sx                = null, sy                = null, dx = threshold, dy = threshold;
+  for (const poly of others) {
+    const turn = Math.sign(planArea(poly));
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      const reach = threshold * 3;
+      if (Math.abs(a.X - b.X) < 1e-6 && p.Y >= Math.min(a.Y, b.Y) - reach && p.Y <= Math.max(a.Y, b.Y) + reach) {
+        const out = Math.sign(b.Y - a.Y) * turn;
+        for (const x of wall > 0 && turn ? [a.X, a.X + out * wall] : [a.X]) { const d = Math.abs(p.X - x); if (d <= dx) { dx = d; sx = x; } }
+      }
+      if (Math.abs(a.Y - b.Y) < 1e-6 && p.X >= Math.min(a.X, b.X) - reach && p.X <= Math.max(a.X, b.X) + reach) {
+        const out = Math.sign(a.X - b.X) * turn;
+        for (const y of wall > 0 && turn ? [a.Y, a.Y + out * wall] : [a.Y]) { const d = Math.abs(p.Y - y); if (d <= dy) { dy = d; sy = y; } }
+      }
+    }
+  }
+  if (sx != null || sy != null) {
+    const g = (v        ) => grid > 0 ? Math.round(v / grid) * grid : v;
+    return { pt: { X: sx ?? g(p.X), Y: sy ?? g(p.Y) }, to: 'edge' };
+  }
   bestD = threshold;
   for (const poly of others) for (let i = 0; i < poly.length; i++) {
     const q = planNearestOnSegment(p, poly[i], poly[(i + 1) % poly.length]);
@@ -174,6 +223,200 @@ function planProtectedBy(runs                                  , isGfci         
   return null;
 }
 
+/// Two rooms that meet along a wall, as one outline: the shared stretch of wall goes, the rest is kept as drawn.
+/// Null when they do not share a wall, overlap, or would leave a hole or two separate pieces.
+function planUnion(a      , b      , eps = 0.5)              {
+  if (a.length < 3 || b.length < 3) return null;
+  const ccw = (p      ) => planArea(p) < 0 ? [...p].reverse() : p;
+  const A = ccw(a), B = ccw(b);
+  const same = (p    , q    ) => Math.hypot(p.X - q.X, p.Y - q.Y) <= eps;
+  const onSeg = (p    , s    , t    ) => { const n = planNearestOnSegment(p, s, t); return same(n, p) && !same(p, s) && !same(p, t); };
+  // Every edge broken wherever a corner of the other room sits along it, so shared stretches line up end to end.
+  const split = (poly      , other      ) => {
+    const out             = [];
+    poly.forEach((s, i) => {
+      const t = poly[(i + 1) % poly.length];
+      const len = Math.hypot(t.X - s.X, t.Y - s.Y) || 1;
+      const cuts = other.filter(p => onSeg(p, s, t)).map(p => ({ p, d: ((p.X - s.X) * (t.X - s.X) + (p.Y - s.Y) * (t.Y - s.Y)) / len })).sort((x, y) => x.d - y.d).map(x => x.p);
+      [s, ...cuts, t].reduce((prev, cur) => { if (!same(prev, cur)) out.push([prev, cur]); return cur; });
+    });
+    return out;
+  };
+  const ea = split(A, B), eb = split(B, A);
+  const shared = (e          , list            ) => list.some(f => same(e[0], f[1]) && same(e[1], f[0]));
+  const strictlyIn = (p    , poly      ) => planContains(poly, p) && poly.every((s, i) => !same(planNearestOnSegment(p, s, poly[(i + 1) % poly.length]), p));
+  const mid = (e          ) => ({ X: (e[0].X + e[1].X) / 2, Y: (e[0].Y + e[1].Y) / 2 });
+  if (ea.some(e => strictlyIn(mid(e), B)) || eb.some(e => strictlyIn(mid(e), A))) return null;
+  const keepA = ea.filter(e => !shared(e, eb)), keepB = eb.filter(e => !shared(e, ea));
+  if (keepA.length === ea.length) return null;
+  const edges = [...keepA, ...keepB];
+  const loop       = [];
+  let at = edges.shift() ;
+  loop.push(at[0]);
+  while (edges.length) {
+    const i = edges.findIndex(e => same(e[0], at[1]));
+    if (i < 0) return null;
+    at = edges.splice(i, 1)[0];
+    loop.push(at[0]);
+  }
+  if (!same(at[1], loop[0])) return null;
+  return planStraighten(loop, eps);
+}
+
+/// Corners left standing in the middle of a straight wall are dropped. Null when nothing of an outline is left.
+/// A wall that ends inside a region traces out and back; those spikes go too.
+function planStraighten(loop      , eps = 0.5)              {
+  let out = loop;
+  for (let before = -1; before !== out.length && out.length >= 3;) {
+    before = out.length;
+    const cur = out;
+    out = cur.filter((p, i) => {
+      const s = cur[(i - 1 + cur.length) % cur.length], t = cur[(i + 1) % cur.length];
+      if (Math.hypot(s.X - t.X, s.Y - t.Y) <= eps) return false;
+      const n = planNearestOnSegment(p, s, t);
+      return Math.hypot(n.X - p.X, n.Y - p.Y) > eps;
+    });
+    out = out.filter((p, i) => Math.hypot(p.X - out[(i + 1) % out.length].X, p.Y - out[(i + 1) % out.length].Y) > eps);
+  }
+  return out.length >= 3 ? out : null;
+}
+
+/// A room cut by a line drawn across it, wall to wall: the pieces, largest first. One piece when the line does not
+/// reach across.
+function planSplit(room      , line      , eps = 0.5)         {
+  const parts = planFaces([room], eps, [line]).filter(f => planContains(room, f.at)).map(f => planStraighten(f.shape, eps)).filter((x)            => !!x);
+  return parts.sort((a, b) => Math.abs(planArea(b)) - Math.abs(planArea(a)));
+}
+
+/// Every enclosed region the outlines carve the floor into, the empty spaces between rooms included: each edge is
+/// cut wherever another edge or corner meets it, and the regions are traced edge to edge. `at` is a point just
+/// inside each one, beside its first wall.
+function planFaces(polys        , eps = 0.5, lines         = [])                            {
+  const nodes       = [];
+  const node = (p    ) => {
+    let i = nodes.findIndex(q => Math.hypot(p.X - q.X, p.Y - q.Y) <= eps);
+    if (i < 0) { nodes.push({ X: p.X, Y: p.Y }); i = nodes.length - 1; }
+    return i;
+  };
+  const segs             = [];
+  polys.filter(p => p.length >= 3).forEach(p => p.forEach((s, i) => segs.push([s, p[(i + 1) % p.length]])));
+  lines.forEach(l => l.slice(1).forEach((t, i) => segs.push([l[i], t])));
+  const cross = (s          , t          )            => {
+    const [a, b] = s, [c, d] = t;
+    const den = (b.X - a.X) * (d.Y - c.Y) - (b.Y - a.Y) * (d.X - c.X);
+    if (Math.abs(den) < 1e-9) return null;
+    const u = ((c.X - a.X) * (d.Y - c.Y) - (c.Y - a.Y) * (d.X - c.X)) / den;
+    const v = ((c.X - a.X) * (b.Y - a.Y) - (c.Y - a.Y) * (b.X - a.X)) / den;
+    return u > 0 && u < 1 && v > 0 && v < 1 ? { X: a.X + u * (b.X - a.X), Y: a.Y + u * (b.Y - a.Y) } : null;
+  };
+  const links = new Set        ();
+  segs.forEach(sg => {
+    const [s, t] = sg;
+    const len = Math.hypot(t.X - s.X, t.Y - s.Y);
+    if (len <= eps) return;
+    const cuts       = [];
+    segs.forEach(o => {
+      if (o === sg) return;
+      o.forEach(p => { const n = planNearestOnSegment(p, s, t); if (Math.hypot(n.X - p.X, n.Y - p.Y) <= eps) cuts.push(n); });
+      const x = cross(sg, o);
+      if (x) cuts.push(x);
+    });
+    const along = (p    ) => ((p.X - s.X) * (t.X - s.X) + (p.Y - s.Y) * (t.Y - s.Y)) / len;
+    const ids = [s, ...cuts.sort((a, b) => along(a) - along(b)), t].map(node);
+    for (let i = 1; i < ids.length; i++) if (ids[i] !== ids[i - 1]) links.add(Math.min(ids[i], ids[i - 1]) + ',' + Math.max(ids[i], ids[i - 1]));
+  });
+  const out = new Map                  ();
+  links.forEach(k => { const [a, b] = k.split(',').map(Number); (out.get(a) || out.set(a, []).get(a) ).push(b); (out.get(b) || out.set(b, []).get(b) ).push(a); });
+  const ang = (a        , b        ) => Math.atan2(nodes[b].Y - nodes[a].Y, nodes[b].X - nodes[a].X);
+  out.forEach((list, a) => list.sort((x, y) => ang(a, x) - ang(a, y)));
+  // Arriving at b from a, carry on along the edge next round from the one back to a: each region is traced
+  // with its inside on the same hand, and the outline around each group of rooms comes out the other way round.
+  const used = new Set        ();
+  const faces                            = [];
+  out.forEach((list, a0) => list.forEach(b0 => {
+    if (used.has(a0 + '>' + b0)) return;
+    const loop           = [];
+    let a = a0, b = b0;
+    for (let guard = 0; guard < 10000 && !used.has(a + '>' + b); guard++) {
+      used.add(a + '>' + b); loop.push(a);
+      const around = out.get(b) ;
+      const next = around[(around.indexOf(a) - 1 + around.length) % around.length];
+      a = b; b = next;
+    }
+    const shape = loop.map(i => nodes[i]);
+    if (shape.length < 3 || planArea(shape) <= eps * eps) return;
+    // A point a hair inside, off the middle of the longest wall, so it is in this region and not an island in it.
+    let best = 0, bl = -1;
+    shape.forEach((p, i) => { const q = shape[(i + 1) % shape.length]; const l = Math.hypot(q.X - p.X, q.Y - p.Y); if (l > bl) { bl = l; best = i; } });
+    const p = shape[best], q = shape[(best + 1) % shape.length];
+    const off = Math.min(eps * 2, bl / 4);
+    faces.push({ shape, at: { X: (p.X + q.X) / 2 - (q.Y - p.Y) / bl * off, Y: (p.Y + q.Y) / 2 + (q.X - p.X) / bl * off } });
+  }));
+  return faces;
+}
+
+/// Regions traced by planFaces, joined back into one outline where they meet. Null when they do not make one piece.
+function planJoin(parts        , eps = 0.5)              {
+  if (!parts.length) return null;
+  let shape = parts[0], rest = parts.slice(1);
+  for (let progress = true; progress && rest.length;) {
+    progress = false;
+    for (const r of [...rest]) { const next = planUnion(shape, r, eps); if (next) { shape = next; rest = rest.filter(x => x !== r); progress = true; } }
+  }
+  return rest.length ? null : planStraighten(shape, eps);
+}
+
+/// One stretch of wall: between two rooms (`shared`, drawn on its middle) or on the outside (drawn beyond the
+/// room, toward `out`). `room` and `edge` say whose side it came from.
+
+/// The walls of a floor from its rooms' outlines: each edge cut wherever another room's corner sits on it, and each
+/// stretch shared when another room runs back along it.
+function planWallMass(rooms                               , eps = 0.5)                  {
+  const key = (p    , q    ) => `${Math.round(p.X / eps)},${Math.round(p.Y / eps)}>${Math.round(q.X / eps)},${Math.round(q.Y / eps)}`;
+  const all                  = [];
+  const list = rooms.filter(r => (r.Shape || []).length >= 3 && Math.abs(planArea(r.Shape)) > eps);
+  list.forEach(r => {
+    const poly = r.Shape, sign = Math.sign(planArea(poly));
+    const corners = list.filter(o => o !== r).flatMap(o => o.Shape);
+    poly.forEach((s, i) => {
+      const t = poly[(i + 1) % poly.length];
+      const len = Math.hypot(t.X - s.X, t.Y - s.Y);
+      if (len <= eps) return;
+      const along = (p    ) => ((p.X - s.X) * (t.X - s.X) + (p.Y - s.Y) * (t.Y - s.Y)) / len;
+      const cuts = corners.filter(p => { const n = planNearestOnSegment(p, s, t); return Math.hypot(n.X - p.X, n.Y - p.Y) <= eps && along(p) > eps && along(p) < len - eps; })
+        .map(p => planNearestOnSegment(p, s, t)).sort((x, y) => along(x) - along(y));
+      const out = { X: sign * (t.Y - s.Y) / len, Y: -sign * (t.X - s.X) / len };
+      [s, ...cuts, t].reduce((p, q) => { if (Math.hypot(q.X - p.X, q.Y - p.Y) > eps) all.push({ a: p, b: q, shared: false, room: r.Id, edge: i, out }); return q; });
+    });
+  });
+  const seen = new Map                       ();
+  all.forEach(w => seen.set(key(w.a, w.b), w));
+  all.forEach(w => {
+    const back = seen.get(key(w.b, w.a));
+    w.shared = !!back && back.room !== w.room;
+    // A wall between two rooms is listed from both sides, and drawn from one.
+    w.draw = !w.shared || w.room < back .room;
+  });
+  return all;
+}
+
+/// An outline with each edge moved inward by its own distance: a room's inside, within its walls.
+function planInset(poly      , by          )       {
+  const n = poly.length, sign = Math.sign(planArea(poly)) || 1;
+  const line = (i        ) => {
+    const a = poly[i], b = poly[(i + 1) % n], L = Math.hypot(b.X - a.X, b.Y - a.Y) || 1;
+    const nx = -sign * (b.Y - a.Y) / L, ny = sign * (b.X - a.X) / L, d = by[i] || 0;
+    return { p: { X: a.X + nx * d, Y: a.Y + ny * d }, v: { X: (b.X - a.X) / L, Y: (b.Y - a.Y) / L } };
+  };
+  return poly.map((_, j) => {
+    const l1 = line((j - 1 + n) % n), l2 = line(j);
+    const den = l1.v.X * l2.v.Y - l1.v.Y * l2.v.X;
+    if (Math.abs(den) < 1e-9) return l2.p;
+    const k = ((l2.p.X - l1.p.X) * l2.v.Y - (l2.p.Y - l1.p.Y) * l2.v.X) / den;
+    return { X: l1.p.X + l1.v.X * k, Y: l1.p.Y + l1.v.Y * k };
+  });
+}
+
 // ── plan-units.ts ───────────────────────────────────────────────
 // Real-world lengths on the floor plans (#463): feet and inches or metres and centimetres, as the GUI settings say.
 
@@ -193,6 +436,8 @@ function planFmtLen(m        , sys            )         {
   const neg = m < 0 ? '−' : '';
   m = Math.abs(m);
   if (sys === 'imperial') {
+    // Under a foot, such as a wall's thickness, to the half inch.
+    if (m / INCH < 11.75) { const h = Math.round(m / INCH * 2) / 2; return `${neg}${Math.floor(h) || (h % 1 ? '' : 0)}${h % 1 ? '½' : ''}″`; }
     let inches = Math.round(m / INCH);
     const ft = Math.floor(inches / 12);
     inches -= ft * 12;
@@ -211,7 +456,7 @@ function planFmtArea(m2        , sys            )         {
 
 /// A typed length, in metres: 12' 6", 12ft 6in, 12 6, 150", 3.75m, 3m 75cm, 375 cm, 3750mm. A bare number is feet or metres.
 function planParseLen(text        , sys            )                {
-  const t = String(text || '').toLowerCase().replace(/[’′]/g, "'").replace(/[”″]/g, '"').replace(/,/g, '.').replace(/\s+/g, ' ').trim();
+  const t = String(text || '').toLowerCase().replace(/ ?½/g, '.5').replace(/ ?¼/g, '.25').replace(/ ?¾/g, '.75').replace(/[’′]/g, "'").replace(/[”″]/g, '"').replace(/,/g, '.').replace(/\s+/g, ' ').trim();
   if (!t) return null;
   const num = '(\\d+(?:\\.\\d+)?|\\.\\d+)';
   let m = t.match(new RegExp(`^${num} ?(?:'|ft|feet|foot)(?: ?${num} ?(?:"|in|inch|inches)?)?$`));
@@ -284,9 +529,11 @@ function planHistory(get           , set                  , limit = 200)        
 }
 
 // ── plan-constraints.ts ─────────────────────────────────────────
-// Geometric constraints on floor plans (#463): coincident corners, colinear, parallel and perpendicular walls,
+// Geometric constraints on floor plans (#463): coincident corners (or a corner on a wall), colinear, parallel and perpendicular walls,
 // horizontal and vertical walls, fixed angles and fixed lengths — kept by relaxing the points toward each
 // constraint in turn until they all hold. Corners that sit on top of one another move as one: a shared wall.
+
+/// `Open`: a wall drawn on its own, whose last point does not join back to its first.
 
 /// Corners closer than this, in drawing units, are one corner shared by the rooms that meet there.
 const SHARED = 0.5;
@@ -323,7 +570,18 @@ function residual(c                , pt                                         
   const edgeOf = (r         ) => { const a = pt(r, 0), b = pt(r, 1); return a && b ? [a, b]             : null; };
   const angleOf = (e          ) => Math.atan2(e[1].Y - e[0].Y, e[1].X - e[0].X) * 180 / Math.PI;
   switch (c.Kind) {
-    case 'coincident': { const a = pt(c.Refs[0]), b = pt(c.Refs[1]); return a && b ? Math.hypot(a.X - b.X, a.Y - b.Y) : 0; }
+    case 'coincident': {
+      const [p, e] = c.Refs[0]?.Corner != null ? [c.Refs[0], c.Refs[1]] : [c.Refs[1], c.Refs[0]];
+      if (!p || !e) return 0;
+      const a = pt(p);
+      if (!a) return 0;
+      if (e.Corner != null) { const b = pt(e); return b ? Math.hypot(a.X - b.X, a.Y - b.Y) : 0; }
+      // A corner on a wall: how far it is off the wall's line.
+      const w = edgeOf(e);
+      if (!w) return 0;
+      const L = Math.hypot(w[1].X - w[0].X, w[1].Y - w[0].Y) || 1;
+      return Math.abs((a.X - w[0].X) * (w[1].Y - w[0].Y) - (a.Y - w[0].Y) * (w[1].X - w[0].X)) / L;
+    }
     case 'length': { const e = edgeOf(c.Refs[0]); return e && c.Value != null ? Math.abs(Math.hypot(e[1].X - e[0].X, e[1].Y - e[0].Y) - c.Value) : 0; }
     case 'horizontal': { const e = edgeOf(c.Refs[0]); return e ? Math.abs(e[1].Y - e[0].Y) : 0; }
     case 'vertical': { const e = edgeOf(c.Refs[0]); return e ? Math.abs(e[1].X - e[0].X) : 0; }
@@ -344,122 +602,228 @@ function residual(c                , pt                                         
   return 0;
 }
 
+/// What a solve knows beyond the plan as it is now. `before` is the plan as it was before this edit, so corners that
+/// were shared stay shared once one of them has moved. `hold` names the rooms being reshaped by hand: every other
+/// room is only pulled along, by the corners it shares or is joined at, and keeps its level and plumb walls so as it
+/// goes, stretching as a rectangle instead of skewing (#602).
+/// `keep` holds the level and plumb walls of the rooms in `hold` too, as a rectangle in a sketch is held: dragging a
+/// corner resizes the room square instead of skewing it.
+
 /// Move the free corners until every constraint holds, or as near as they can. Corners of a locked room, of a
-/// locked wall, or named in `fixed` ("room#corner") do not move. Returns the worst constraint left unmet.
-function planSolve(shapes             , constraints                  , fixed              = new Set(), iterations = 120)                                     {
+/// locked wall, or named in `fixed` ("room#corner") do not move. Coincident corners are one point. Returns the worst
+/// constraint left unmet.
+function planSolve(shapes             , constraints                  , fixed              = new Set(), iterations = 120, opts                = {})                                     {
   const byId = new Map(shapes.map(s => [s.Id, s]));
-  // Corners that coincide are one variable: moving one moves every room that shares it.
-
-  const vars        = [];
-  const varOf = new Map             ();
-  shapes.forEach(s => s.Shape.forEach((p, i) => {
-    const key = `${s.Id}#${i}`;
-    let v = vars.find(x => Math.hypot(x.X - p.X, x.Y - p.Y) <= SHARED);
-    if (!v) { v = { X: p.X, Y: p.Y, w: 1, members: [] }; vars.push(v); }
-    v.members.push([s, i]);
-    varOf.set(key, v);
-    const n = s.Shape.length;
-    const walled = (s.LockedWalls || []).some(e => e === i || ((e + 1) % n) === i);
-    if (s.Locked || walled || fixed.has(key)) v.w = 0;
-  }));
-  if (!constraints.length) return { worst: 0, unmet: [] };
-  const vRef = (r         , end = 0)             => {
-    const s = byId.get(r.Room);
+  const keyOf = (r                     , end = 0)                => {
+    const s = r && byId.get(r.Room);
     if (!s || !s.Shape.length) return null;
-    const i = r.Corner != null ? r.Corner : r.Edge != null ? planEdgeCorners(s, r.Edge)[end] : null;
-    return i == null || i < 0 || i >= s.Shape.length ? null : varOf.get(`${s.Id}#${i}`) || null;
+    const i = r .Corner != null ? r .Corner : r .Edge != null ? planEdgeCorners(s, r .Edge)[end] : null;
+    return i == null || i < 0 || i >= s.Shape.length ? null : `${s.Id}#${i}`;
   };
-  const both = (a     , b     ) => a.w + b.w;
-  const rotate = (p     , pivot    , deg        ) => {
-    const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
-    const x = p.X - pivot.X, y = p.Y - pivot.Y;
-    p.X = pivot.X + x * c - y * s; p.Y = pivot.Y + x * s + y * c;
+  const isPoint = (r          ) => !!r && r.Corner != null;
+  const pt = (r         , end = 0)            => {
+    const k = keyOf(r, end);
+    return k ? byId.get(r.Room) .Shape[Number(k.slice(k.lastIndexOf('#') + 1))] || null : null;
   };
-  /// Turn a wall about whichever end is held, or its middle when neither is.
-  const turnEdge = (a     , b     , deg        ) => {
-    if (!a.w && !b.w) return;
-    const pivot = !a.w ? { X: a.X, Y: a.Y } : !b.w ? { X: b.X, Y: b.Y } : { X: (a.X + b.X) / 2, Y: (a.Y + b.Y) / 2 };
-    if (a.w) rotate(a, pivot, deg);
-    if (b.w) rotate(b, pivot, deg);
+  const evaluate = () => {
+    let worst = 0;
+    const unmet           = [];
+    constraints.forEach(c => {
+      const e = residual(c, pt, byId);
+      const tol = c.Kind === 'angle' || c.Kind === 'parallel' || c.Kind === 'perpendicular' ? 0.5 : 1;
+      if (e > tol) unmet.push(c.Id);
+      worst = Math.max(worst, e);
+    });
+    return { worst, unmet };
   };
-  const edgeW = (a     , b     ) => (a.w && b.w ? 1 : a.w || b.w ? 0.5 : 0);
-  const ang = (a     , b     ) => Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI;
+  if (!constraints.length && !opts.hold) return { worst: 0, unmet: [] };
+  if (iterations <= 0) return evaluate();
 
-  for (let it = 0; it < iterations; it++) {
-    for (const c of constraints) {
-      const r0 = c.Refs[0], r1 = c.Refs[1];
-      if (c.Kind === 'coincident') {
-        const a = vRef(r0), b = vRef(r1);
-        if (!a || !b || a === b || !both(a, b)) continue;
-        const dx = b.X - a.X, dy = b.Y - a.Y, k = both(a, b);
-        a.X += dx * a.w / k; a.Y += dy * a.w / k; b.X -= dx * b.w / k; b.Y -= dy * b.w / k;
-      } else if (c.Kind === 'length' && c.Value != null) {
-        const a = vRef(r0, 0), b = vRef(r0, 1);
-        if (!a || !b || !both(a, b)) continue;
-        const dx = b.X - a.X, dy = b.Y - a.Y, cur = Math.hypot(dx, dy) || 1e-9, diff = (cur - c.Value) / cur, k = both(a, b);
-        a.X += dx * diff * a.w / k; a.Y += dy * diff * a.w / k; b.X -= dx * diff * b.w / k; b.Y -= dy * diff * b.w / k;
-      } else if (c.Kind === 'horizontal' || c.Kind === 'vertical') {
-        const a = vRef(r0, 0), b = vRef(r0, 1);
-        if (!a || !b || !both(a, b)) continue;
-        const k = both(a, b);
-        if (c.Kind === 'horizontal') { const d = b.Y - a.Y; a.Y += d * a.w / k; b.Y -= d * b.w / k; }
-        else { const d = b.X - a.X; a.X += d * a.w / k; b.X -= d * b.w / k; }
-      } else if (c.Kind === 'angle' && c.Value != null && r0?.Corner != null) {
-        const s = byId.get(r0.Room);
-        if (!s || s.Shape.length < 3) continue;
-        const n = s.Shape.length;
-        const B = varOf.get(`${s.Id}#${r0.Corner}`), A = varOf.get(`${s.Id}#${(r0.Corner - 1 + n) % n}`), C = varOf.get(`${s.Id}#${(r0.Corner + 1) % n}`);
-        if (!A || !B || !C) continue;
-        const u = { X: A.X - B.X, Y: A.Y - B.Y }, v = { X: C.X - B.X, Y: C.Y - B.Y };
-        const cur = Math.atan2(u.X * v.Y - u.Y * v.X, u.X * v.X + u.Y * v.Y) * 180 / Math.PI;
-        const err = norm180(c.Value - cur);
-        const k = A.w + C.w;
-        if (!k) continue;
-        rotate(C, B, err * C.w / k);
-        rotate(A, B, -err * A.w / k);
-      } else if (c.Kind === 'parallel' || c.Kind === 'perpendicular' || c.Kind === 'colinear') {
-        const a = vRef(r0, 0), b = vRef(r0, 1), p = vRef(r1, 0), q = vRef(r1, 1);
-        if (!a || !b || !p || !q) continue;
-        const w1 = edgeW(a, b), w2 = edgeW(p, q);
-        if (!w1 && !w2) continue;
-        const d = norm90(ang(a, b) - ang(p, q) - (c.Kind === 'perpendicular' ? 90 : 0));
-        turnEdge(p, q, d * w2 / (w1 + w2));
-        turnEdge(a, b, -d * w1 / (w1 + w2));
-        if (c.Kind === 'colinear') {
-          // Then the second wall is brought onto the first one's line, each side giving way by what it is free to.
-          const L = Math.hypot(b.X - a.X, b.Y - a.Y) || 1e-9;
-          const nx = -(b.Y - a.Y) / L, ny = (b.X - a.X) / L;
-          [p, q].forEach(x => {
-            const dist = (x.X - a.X) * nx + (x.Y - a.Y) * ny;
-            const k = x.w + w1;
-            if (!k) return;
-            x.X -= nx * dist * x.w / k; x.Y -= ny * dist * x.w / k;
-            const back = dist * w1 / k / 2;
-            if (a.w) { a.X += nx * back; a.Y += ny * back; }
-            if (b.w) { b.X += nx * back; b.Y += ny * back; }
-          });
+  // The rooms only pulled along keep the walls that are level or plumb so.
+  const implied                   = [];
+  const followers = new Set        ();
+  if (opts.hold) {
+    const hold = new Set(opts.hold);
+    shapes.forEach(s => {
+      const held = hold.has(s.Id);
+      if ((held && !opts.keep) || s.Locked) return;
+      if (constraints.some(c => c.Kind === 'angle' && c.Refs[0]?.Room === s.Id && Math.abs(Math.abs(Number(c.Value) || 0) - 90) > 0.5)) return;
+      if (!held) followers.add(s.Id);
+      const id = held ? 'keep' : '';
+      const was = opts.before?.find(b => b.Id === s.Id && b.Shape.length === s.Shape.length) || s;
+      const n = was.Shape.length;
+      was.Shape.forEach((p, i) => {
+        if (s.Open && i === n - 1) return;
+        const q = was.Shape[(i + 1) % n];
+        if (Math.hypot(q.X - p.X, q.Y - p.Y) < 1) return;
+        if (Math.abs(q.Y - p.Y) <= 0.15) implied.push({ Id: id, Kind: 'horizontal', Refs: [{ Room: s.Id, Edge: i }] });
+        else if (Math.abs(q.X - p.X) <= 0.15) implied.push({ Id: id, Kind: 'vertical', Refs: [{ Room: s.Id, Edge: i }] });
+      });
+    });
+  }
+  const all = [...constraints, ...implied];
+  if (!all.length) return { worst: 0, unmet: [] };
+
+  /// `led`: the point belongs to a room that is not merely following, so what a follower keeps cannot move it.
+
+  const at = (k        ) => { const h = k.lastIndexOf('#'); return byId.get(k.slice(0, h)) .Shape[Number(k.slice(h + 1))]; };
+  const put = (k        , p    ) => { const h = k.lastIndexOf('#'); byId.get(k.slice(0, h)) .Shape[Number(k.slice(h + 1))] = p; };
+  const keys           = [];
+  const locked = new Set        ();
+  shapes.forEach(s => {
+    const n = s.Shape.length;
+    s.Shape.forEach((_, i) => {
+      const k = `${s.Id}#${i}`;
+      keys.push(k);
+      if (s.Locked || (s.LockedWalls || []).some(e => e === i || ((e + 1) % n) === i)) locked.add(k);
+    });
+  });
+  // Which corners are one point: those that sat together before this edit, and those joined by a coincident constraint.
+  const parent = new Map(keys.map(k => [k, k]));
+  const find = (k        )         => { while (parent.get(k) !== k) { const up = parent.get(parent.get(k) ) ; parent.set(k, up); k = up; } return k; };
+  const join = (a               , b               ) => { if (!a || !b) return; const ra = find(a), rb = find(b); if (ra !== rb) parent.set(rb, ra); };
+  const was = shapes.map(s => opts.before?.find(b => b.Id === s.Id && b.Shape.length === s.Shape.length) || s);
+  const flat                 = [];
+  was.forEach((s, j) => s.Shape.forEach((p, i) => flat.push([`${shapes[j].Id}#${i}`, p])));
+  for (let i = 0; i < flat.length; i++) for (let j = i + 1; j < flat.length; j++) {
+    const p = flat[i][1], q = flat[j][1];
+    if (Math.abs(p.X - q.X) <= SHARED && Math.abs(p.Y - q.Y) <= SHARED && Math.hypot(p.X - q.X, p.Y - q.Y) <= SHARED) join(flat[i][0], flat[j][0]);
+  }
+  const leads = new Set        ();
+  constraints.forEach(c => { if (c.Kind === 'coincident' && isPoint(c.Refs[0]) && isPoint(c.Refs[1])) { const a = keyOf(c.Refs[0]), b = keyOf(c.Refs[1]); if (a) leads.add(a); join(a, b); } });
+  const groups = new Map                  ();
+  keys.forEach(k => { const r = find(k); const g = groups.get(r); if (g) g.push(k); else groups.set(r, [k]); });
+
+  const relax = () => {
+    const vars        = [];
+    const varOf = new Map             ();
+    const hard = (k        ) => locked.has(k) || fixed.has(k);
+    groups.forEach(ms => {
+      // Corners held in different places cannot be one point; each is its own, and the constraint goes unmet.
+      const held        = [];
+      ms.filter(hard).forEach(k => {
+        const p = at(k);
+        let v = held.find(c => Math.hypot(c.X - p.X, c.Y - p.Y) <= SHARED);
+        if (!v) { v = { X: p.X, Y: p.Y, w: 0, members: [] }; held.push(v); }
+        v.members.push(k);
+      });
+      const rest = ms.filter(k => !hard(k));
+      if (!held.length) {
+        const lead = rest.find(k => leads.has(k)) || rest[0];
+        const p = at(lead);
+        held.push({ X: p.X, Y: p.Y, w: 1, members: [] });
+      }
+      rest.forEach(k => {
+        const p = at(k);
+        let best = held[0];
+        held.forEach(v => { if (Math.hypot(v.X - p.X, v.Y - p.Y) < Math.hypot(best.X - p.X, best.Y - p.Y)) best = v; });
+        best.members.push(k);
+      });
+      held.forEach(v => { v.led = v.members.some(k => !followers.has(k.slice(0, k.lastIndexOf('#')))); vars.push(v); v.members.forEach(k => varOf.set(k, v)); });
+    });
+    const vRef = (r                     , end = 0)             => { const k = keyOf(r, end); return k ? varOf.get(k) || null : null; };
+    const both = (a     , b     ) => a.w + b.w;
+    const rotate = (p     , pivot    , deg        ) => {
+      const t = deg * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+      const x = p.X - pivot.X, y = p.Y - pivot.Y;
+      p.X = pivot.X + x * c - y * s; p.Y = pivot.Y + x * s + y * c;
+    };
+    /// Turn a wall about whichever end is held, or its middle when neither is.
+    const turnEdge = (a     , b     , deg        ) => {
+      if (!a.w && !b.w) return;
+      const pivot = !a.w ? { X: a.X, Y: a.Y } : !b.w ? { X: b.X, Y: b.Y } : { X: (a.X + b.X) / 2, Y: (a.Y + b.Y) / 2 };
+      if (a.w) rotate(a, pivot, deg);
+      if (b.w) rotate(b, pivot, deg);
+    };
+    const edgeW = (a     , b     ) => (a.w && b.w ? 1 : a.w || b.w ? 0.5 : 0);
+    const ang = (a     , b     ) => Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI;
+    /// Bring a point onto a wall's line, the point and the wall each giving way by what they are free to.
+    const ontoLine = (x     , a     , b     , wl        ) => {
+      const L = Math.hypot(b.X - a.X, b.Y - a.Y) || 1e-9;
+      const nx = -(b.Y - a.Y) / L, ny = (b.X - a.X) / L;
+      const dist = (x.X - a.X) * nx + (x.Y - a.Y) * ny;
+      const k = x.w + wl;
+      if (!k) return;
+      x.X -= nx * dist * x.w / k; x.Y -= ny * dist * x.w / k;
+      const back = dist * wl / k;
+      if (a.w) { a.X += nx * back; a.Y += ny * back; }
+      if (b.w) { b.X += nx * back; b.Y += ny * back; }
+    };
+
+    for (let it = 0; it < iterations; it++) {
+      for (const c of all) {
+        const r0 = c.Refs[0], r1 = c.Refs[1];
+        if (c.Kind === 'coincident') {
+          if (isPoint(r0) && isPoint(r1)) {
+            const a = vRef(r0), b = vRef(r1);
+            if (!a || !b || a === b || !both(a, b)) continue;
+            const dx = b.X - a.X, dy = b.Y - a.Y, k = both(a, b);
+            a.X += dx * a.w / k; a.Y += dy * a.w / k; b.X -= dx * b.w / k; b.Y -= dy * b.w / k;
+          } else {
+            // A corner on a wall: it lies on the wall's line.
+            const [p, e] = isPoint(r0) ? [r0, r1] : [r1, r0];
+            const x = vRef(p), a = vRef(e, 0), b = vRef(e, 1);
+            if (!x || !a || !b || x === a || x === b) continue;
+            ontoLine(x, a, b, edgeW(a, b));
+          }
+        } else if (c.Kind === 'length' && c.Value != null) {
+          const a = vRef(r0, 0), b = vRef(r0, 1);
+          if (!a || !b || !both(a, b)) continue;
+          const dx = b.X - a.X, dy = b.Y - a.Y, cur = Math.hypot(dx, dy) || 1e-9, diff = (cur - c.Value) / cur, k = both(a, b);
+          a.X += dx * diff * a.w / k; a.Y += dy * diff * a.w / k; b.X -= dx * diff * b.w / k; b.Y -= dy * diff * b.w / k;
+        } else if (c.Kind === 'horizontal' || c.Kind === 'vertical') {
+          const a = vRef(r0, 0), b = vRef(r0, 1);
+          if (!a || !b) continue;
+          // A follower's own level and plumb walls give way to the room it follows, never the other way.
+          const wa = c.Id === '' && a.led ? 0 : a.w, wb = c.Id === '' && b.led ? 0 : b.w, k = wa + wb;
+          if (!k) continue;
+          if (c.Kind === 'horizontal') { const d = b.Y - a.Y; a.Y += d * wa / k; b.Y -= d * wb / k; }
+          else { const d = b.X - a.X; a.X += d * wa / k; b.X -= d * wb / k; }
+        } else if (c.Kind === 'angle' && c.Value != null && r0?.Corner != null) {
+          const s = byId.get(r0.Room);
+          if (!s || s.Shape.length < 3) continue;
+          const n = s.Shape.length;
+          const B = varOf.get(`${s.Id}#${r0.Corner}`), A = varOf.get(`${s.Id}#${(r0.Corner - 1 + n) % n}`), C = varOf.get(`${s.Id}#${(r0.Corner + 1) % n}`);
+          if (!A || !B || !C) continue;
+          const u = { X: A.X - B.X, Y: A.Y - B.Y }, v = { X: C.X - B.X, Y: C.Y - B.Y };
+          const cur = Math.atan2(u.X * v.Y - u.Y * v.X, u.X * v.X + u.Y * v.Y) * 180 / Math.PI;
+          const err = norm180(c.Value - cur);
+          const k = A.w + C.w;
+          if (k) {
+            rotate(C, B, err * C.w / k);
+            rotate(A, B, -err * A.w / k);
+          } else if (B.w) {
+            // Both walls' far ends are held: the corner itself moves, onto the circle where the walls meet at that angle.
+            const mid = { X: (A.X + C.X) / 2, Y: (A.Y + C.Y) / 2 };
+            const half = Math.hypot(C.X - A.X, C.Y - A.Y) / 2;
+            const t = Math.abs(c.Value) * Math.PI / 180;
+            const R = half / Math.max(1e-6, Math.sin(t));
+            const off = R * Math.cos(t);
+            const L = half * 2 || 1e-9;
+            const nx = -(C.Y - A.Y) / L, ny = (C.X - A.X) / L;
+            const side = Math.sign((B.X - mid.X) * nx + (B.Y - mid.Y) * ny) || 1;
+            const cx = mid.X + nx * side * off, cy = mid.Y + ny * side * off;
+            const d = Math.hypot(B.X - cx, B.Y - cy) || 1e-9;
+            B.X = cx + (B.X - cx) / d * R; B.Y = cy + (B.Y - cy) / d * R;
+          }
+        } else if (c.Kind === 'parallel' || c.Kind === 'perpendicular' || c.Kind === 'colinear') {
+          const a = vRef(r0, 0), b = vRef(r0, 1), p = vRef(r1, 0), q = vRef(r1, 1);
+          if (!a || !b || !p || !q) continue;
+          const w1 = edgeW(a, b), w2 = edgeW(p, q);
+          if (!w1 && !w2) continue;
+          const d = norm90(ang(a, b) - ang(p, q) - (c.Kind === 'perpendicular' ? 90 : 0));
+          turnEdge(p, q, d * w2 / (w1 + w2));
+          turnEdge(a, b, -d * w1 / (w1 + w2));
+          if (c.Kind === 'colinear') [p, q].forEach(x => ontoLine(x, a, b, w1 / 2));
         }
       }
     }
-  }
-  // Write each variable back to every corner that shares it, rounded as outlines are stored.
-  vars.forEach(v => v.members.forEach(([s, i]) => { s.Shape[i] = { X: Math.round(v.X * 10) / 10, Y: Math.round(v.Y * 10) / 10 }; }));
-
-  const pt = (r         , end = 0)            => {
-    const s = byId.get(r.Room);
-    if (!s || !s.Shape.length) return null;
-    const i = r.Corner != null ? r.Corner : r.Edge != null ? planEdgeCorners(s, r.Edge)[end] : null;
-    return i == null ? null : s.Shape[i] || null;
+    // Write each point back to every corner that is it, rounded as outlines are stored.
+    vars.forEach(v => v.members.forEach(k => put(k, { X: Math.round(v.X * 10) / 10, Y: Math.round(v.Y * 10) / 10 })));
   };
-  let worst = 0;
-  const unmet           = [];
-  constraints.forEach(c => {
-    const e = residual(c, pt, byId);
-    const tol = c.Kind === 'angle' || c.Kind === 'parallel' || c.Kind === 'perpendicular' ? 0.5 : 1;
-    if (e > tol) unmet.push(c.Id);
-    worst = Math.max(worst, e);
-  });
-  return { worst, unmet };
+
+  relax();
+  return evaluate();
 }
 
 /// Keep constraints pointing at the same corners when one is added at `at` in a room's outline.
@@ -485,6 +849,43 @@ function planRefsAfterRemove(constraints                  , room        , at    
 /// Everything that no longer refers to a room: when it is deleted, or its outline redrawn.
 function planRefsWithout(constraints                  , room        )                   {
   return constraints.filter(c => !c.Refs.some(r => r.Room === room));
+}
+
+/// Two rooms merged into one: references to either move to the matching corner or wall of the merged outline,
+/// and anything that pointed at the wall between them, or now points at one thing twice, goes.
+function planRefsAfterMerge(constraints                  , keep        , gone        , before                      , merged      , eps = 0.5) {
+  const n = merged.length;
+  const same = (p    , q    ) => Math.hypot(p.X - q.X, p.Y - q.Y) <= eps;
+  const offLine = (p    , s    , t    ) => { const l = Math.hypot(t.X - s.X, t.Y - s.Y) || 1; return Math.abs((t.X - s.X) * (p.Y - s.Y) - (t.Y - s.Y) * (p.X - s.X)) / l; };
+  const corner = (room        , c        )                => { const p = before[room]?.[c]; if (!p) return null; const j = merged.findIndex(q => same(p, q)); return j < 0 ? null : j; };
+  const edge = (room        , e        )                => {
+    const old = before[room];
+    if (!old?.[e]) return null;
+    const s = old[e], t = old[(e + 1) % old.length];
+    const len = Math.hypot(t.X - s.X, t.Y - s.Y) || 1;
+    const along = (p    ) => ((p.X - s.X) * (t.X - s.X) + (p.Y - s.Y) * (t.Y - s.Y)) / len;
+    for (let j = 0; j < n; j++) {
+      const a = merged[j], b = merged[(j + 1) % n];
+      if (offLine(a, s, t) > eps || offLine(b, s, t) > eps) continue;
+      const lo = Math.max(0, Math.min(along(a), along(b))), hi = Math.min(len, Math.max(along(a), along(b)));
+      if (hi - lo > eps) return j;
+    }
+    return null;
+  };
+  const kept                   = [];
+  constraints.forEach(c => {
+    if (!c.Refs.some(r => r.Room === keep || r.Room === gone)) return kept.push(c);
+    const refs            = [];
+    for (const r of c.Refs) {
+      if (r.Room !== keep && r.Room !== gone) { refs.push(r); continue; }
+      const to = r.Corner != null ? corner(r.Room, r.Corner) : r.Edge != null ? edge(r.Room, r.Edge) : null;
+      if (to == null) return;
+      refs.push(r.Corner != null ? { ...r, Room: keep, Corner: to } : { ...r, Room: keep, Edge: to });
+    }
+    if (new Set(refs.map(r => `${r.Room}|${r.Corner}|${r.Edge}`)).size < refs.length) return;
+    kept.push({ ...c, Refs: refs });
+  });
+  return { constraints: kept, edge };
 }
 
 // ── plan-art.ts ─────────────────────────────────────────────────
@@ -598,13 +999,15 @@ function planGlyph(kind        , r        )      {
     case 'hvac': rect(-0.9, -0.9, 1.8, 1.8, 0.2); circle(0, 0, 0.6); line(-0.42, -0.42, 0.42, 0.42); line(-0.42, 0.42, 0.42, -0.42); break;
     case 'junction': rect(-0.75, -0.75, 1.5, 1.5, 0.1); circle(0, 0, 0.3); break;
     case 'ev-charger': rect(-0.6, -0.9, 1.2, 1.8, 0.25); path('M0.12 -0.6 L-0.25 0.08 L0.05 0.08 L-0.12 0.6 L0.28 -0.12 L-0.02 -0.12 Z'); break;
-    case 'panel': rect(-0.6, -0.95, 1.2, 1.9, 0.1); [-0.5, -0.15, 0.2, 0.55].forEach(y => line(-0.35, y, 0.35, y)); break;
+    // A breaker panel: the bus down the middle and a row of breakers either side of it.
+    case 'panel': line(0, -1.25, 0, 1.25); [-0.95, -0.5, -0.05, 0.4, 0.85].forEach(y => { line(-0.75, y, -0.2, y); line(0.2, y, 0.75, y); }); break;
     case 'meter': circle(0, 0, 0.85); line(0, 0.2, 0.45, -0.35); circle(0, 0.2, 0.08); break;
     case 'pole': line(0, -0.95, 0, 0.95); line(-0.75, -0.55, 0.75, -0.55); circle(-0.6, -0.72, 0.1); circle(0.6, -0.72, 0.1); break;
     case 'transformer': circle(-0.3, 0, 0.5); circle(0.3, 0, 0.5); break;
     case 'solar': rect(-0.95, -0.65, 1.9, 1.3, 0.05); line(-0.95, 0, 0.95, 0); line(-0.32, -0.65, -0.32, 0.65); line(0.32, -0.65, 0.32, 0.65); break;
     case 'battery': rect(-0.8, -0.5, 1.5, 1.0, 0.12); rect(0.7, -0.2, 0.2, 0.4, 0.05); line(-0.45, 0, -0.1, 0); line(-0.275, -0.18, -0.275, 0.18); break;
-    case 'inverter': rect(-0.85, -0.85, 1.7, 1.7, 0.15); path('M-0.55 0 Q-0.28 -0.5 0 0 T0.55 0'); break;
+    // The drawing symbol: a box cut corner to corner, DC (=) in one half and AC (~) in the other.
+    case 'inverter': rect(-0.85, -0.85, 1.7, 1.7, 0.15); line(-0.85, 0.85, 0.85, -0.85); line(-0.62, -0.5, -0.12, -0.5); line(-0.62, -0.26, -0.12, -0.26); path('M0.08 0.42 Q0.22 0.14 0.36 0.42 T0.64 0.42'); break;
     case 'generator': circle(0, 0, 0.85); text('G'); break;
     default: rect(-0.9, -0.65, 1.8, 1.3, 0.2); line(-0.4, 0.9, 0.4, 0.9); break;
   }
@@ -613,18 +1016,22 @@ function planGlyph(kind        , r        )      {
 
 /// A door, window or opening: the wall cut, and what fills it, lying along the wall at its angle.
 /// `u` is drawing units per screen pixel; the wall is drawn a few pixels thick at any zoom.
-function planOpening(o     , u        )      {
+/// `thick`: the wall's thickness when the floor gives one, so the gap cuts it through; `shift` moves the opening out
+/// into an outside wall drawn beyond its room.
+function planOpening(o     , u        , thick = 0, shift                           = { X: 0, Y: 0 })      {
   const w = Math.max(1, Number(o.Width) || 90);
   const half = w / 2;
-  const g = svgEl('g', { class: 'fp-op is-' + (o.Kind || 'door'), transform: `translate(${o.X},${o.Y}) rotate(${Number(o.Angle) || 0})` });
-  const wall = 5 * u;
+  const g = svgEl('g', { class: 'fp-op is-' + (o.Kind || 'door'), transform: `translate(${o.X + shift.X},${o.Y + shift.Y}) rotate(${Number(o.Angle) || 0})` });
+  const wall = Math.max(5 * u, thick);
   g.appendChild(svgEl('line', { x1: -half, y1: 0, x2: half, y2: 0, class: 'fp-op-gap', 'stroke-width': wall + 2 * u }));
   const dir = o.Flip ? -1 : 1;
   const stroke = 1.6 * u;
+  // A leaf hangs from the face of the wall it swings out of.
+  const face = dir * thick / 2;
   const leaf = (hx        , ox        , len        , left         ) => {
-    g.appendChild(svgEl('line', { x1: hx, y1: 0, x2: hx, y2: dir * len, class: 'fp-op-leaf', 'stroke-width': stroke * 1.4 }));
+    g.appendChild(svgEl('line', { x1: hx, y1: face, x2: hx, y2: face + dir * len, class: 'fp-op-leaf', 'stroke-width': stroke * 1.4 }));
     const sweep = left === (dir > 0) ? 0 : 1;
-    g.appendChild(svgEl('path', { d: `M ${hx} ${dir * len} A ${len} ${len} 0 0 ${sweep} ${ox} 0`, class: 'fp-op-arc', 'stroke-width': stroke }));
+    g.appendChild(svgEl('path', { d: `M ${hx} ${face + dir * len} A ${len} ${len} 0 0 ${sweep} ${ox} ${face}`, class: 'fp-op-arc', 'stroke-width': stroke }));
   };
   const kind = o.Kind || 'door';
   if (kind === 'door') {
@@ -824,13 +1231,14 @@ const FP_TOOLS                                   = [
   ['pan', 'Pan', 'H', 'Drag to move around the plan. Two fingers or the wheel with Ctrl also pan and zoom.'],
   ['room', 'Room', 'R', 'Drag a rectangle to draw a room, or add one by its measurements.'],
   ['outline', 'Outline', 'P', 'Tap each corner of an odd-shaped room; tap the first corner again to close it.'],
+  ['wall', 'Wall', 'E', 'Draw a wall on its own: tap each end and bend, then tap the last point again or double-tap to finish.'],
   ['zone', 'Outdoor', 'O', 'Drag out a yard, porch, patio, driveway or deck.'],
   ['area', 'Area', 'A', 'Drag out an area that may span rooms, such as upstairs or the server corner.'],
   ['door', 'Door', 'D', 'Tap a wall to put a door in it.'],
   ['window', 'Window', 'W', 'Tap a wall to put a window in it.'],
   ['item', 'Item', 'I', 'Tap to place an outlet, light, appliance, panel, meter, pole or anything else.'],
   ['wire', 'Wire', 'L', 'Draw a cable run from the supply side: tap the panel or outlet feeding it, each bend, then the item it goes to.'],
-  ['constrain', 'Constrain', 'K', 'Tap corners or walls, then hold them: coincident, colinear, parallel, perpendicular, level, plumb, an angle or a length.'],
+  ['constrain', 'Constrain', 'K', 'Tap corners or walls, then hold them: joined, on a wall, colinear, parallel, perpendicular, level, plumb, an angle or a length.'],
   ['measure', 'Measure', 'M', 'Tap two points to measure between them, and set the plan’s scale from a distance you know.'],
 ];
 
@@ -843,6 +1251,7 @@ function fpToolIcon(tool        )      {
     case 'pan': p('M12 3 V21 M3 12 H21 M12 3 L9.5 5.5 M12 3 L14.5 5.5 M12 21 L9.5 18.5 M12 21 L14.5 18.5 M3 12 L5.5 9.5 M3 12 L5.5 14.5 M21 12 L18.5 9.5 M21 12 L18.5 14.5'); break;
     case 'room': p('M4 5 H20 V19 H4 Z M4 12 H10'); break;
     case 'outline': p('M4 7 L11 4 L20 8 L18 19 L6 18 Z'); break;
+    case 'wall': p('M3 18 L10 11 L21 11 M3 15 L10 8 L21 8'); break;
     case 'zone': p('M12 3 L7 11 H10 L6 17 H18 L14 11 H17 Z M12 17 V21'); break;
     case 'area': p('M4 5 H7 M10 5 H14 M17 5 H20 V8 M20 11 V14 M20 17 V19 H17 M14 19 H10 M7 19 H4 V16 M4 13 V10 M4 7 V5'); break;
     case 'door': p('M4 20 H20 M6 20 V6 M6 6 A14 14 0 0 1 20 20'); break;
@@ -863,10 +1272,9 @@ function mount(sec     , host     ) {
   ({ api, btn, closeSheet, el, ensure, openSheet, svgEl, toast, formatMeasure, state, refreshDirty, sparkline, analyse, circuitSession, searchSelect, makeMenu } = host);
   sec.classList.add('fp');
   sec.appendChild(el('h2', { text: 'Floor Plans' }));
-  sec.appendChild(el('div', { class: 'desc' },
-    'Each floor at real size: rooms and outdoor zones, doors and windows, and the outlets, lights, panels, meters '
-    + 'and devices on it with the cable runs between them. View shades each room by what it draws — a room with '
-    + 'nothing metered reads unmetered, never zero. Edit draws and moves everything; Ctrl+Z undoes.'));
+  sec.appendChild(el('div', { class: 'desc fp-intro' },
+    'Each floor at real size, with its rooms, doors and windows, and everything wired on it. View shades each room by '
+    + 'what it draws (a room with nothing metered reads unmetered, never zero); Edit draws and moves it all.'));
 
   // Where things are kept, and whether they will survive a restart: said loudly, above everything, when they will not.
   const banner = el('div', { class: 'fp-banner' });
@@ -928,12 +1336,21 @@ function mount(sec     , host     ) {
   let floorId = remembered('floor', '');
   let mode                  = 'view';
   let tool       = 'select';
+  /// The room a rectangle drawn with the Room tool is added to, taking the space from the rooms under it.
+  let claimFor = '';
   let itemKind = remembered('kind', 'outlet');
   let doorKind = 'door';
   let wireKind = 'circuit';
   let snapOn = remembered('snap', '1') === '1';
   let showWiring = remembered('wiring', '1') === '1';
   let showSizes = remembered('sizes', '0') === '1';
+  /// What the plan leaves out, by kind of item, and the compass: chosen under Show and kept per browser.
+  const SHOW_GROUPS                               = [
+    ['outlets', 'Outlets and switches', ['outlet', 'switch', 'junction']], ['lights', 'Lights and fans', ['fixture', 'fan']],
+    ['appliances', 'Appliances and devices', ['appliance', 'device', 'hvac', 'ev-charger']], ['power', 'Panels and power', PLAN_SUPPLY_KINDS],
+  ];
+  const hidden = new Set(remembered('hide', '').split(',').filter(Boolean));
+  const shown = (item     ) => !hidden.has((SHOW_GROUPS.find(g => g[2].includes(item.Kind)) || SHOW_GROUPS[2])[0]);
   let period = remembered('period', 'now');
   let selection            = null;
   /// Everything else selected with it: Shift, Ctrl or ⌘ adds to a selection, and a box drag selects all it holds.
@@ -969,6 +1386,13 @@ function mount(sec     , host     ) {
   const roomsNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Rooms', []) : []; };
   const areasNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Areas', []) : []; };
   const openingsNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Openings', []) : []; };
+  /// Walls drawn on their own, not as the side of a room: a half wall, a partition, a wall still to be closed in.
+  const wallsNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Walls', []) : []; };
+  const standaloneOf = (id        ) => wallsNow().find((w     ) => w.Id === id);
+  /// A standalone wall's thickness: its own, or an interior wall's 4½ inches.
+  const wallThick = (w     ) => Number(w.Thickness) > 0 ? Number(w.Thickness) : 0.1143 * scale();
+  /// The wire or standalone wall selected on its own, whose bends can be dragged.
+  const lineSel = () => extra.length ? null : selection?.type === 'run' ? runOf(selection.id) : selection?.type === 'wall' ? standaloneOf(selection.id) : null;
   const shapeOf = (sel           ) => sel?.type === 'room' ? roomsNow().find(r => r.Id === sel.id)
     : sel?.type === 'area' ? areasNow().find(a => a.Id === sel.id) : null;
   const itemOf = (id        ) => itemsIn().find((p     ) => p.Id === id);
@@ -1019,11 +1443,14 @@ function mount(sec     , host     ) {
   const restore = (cur     , v     ) => { Object.keys(cur).forEach(k => delete cur[k]); Object.assign(cur, v); };
   const history = planHistory(() => ({ flow: flowIn(), loc: locIn() }), v => { restore(flowIn(), v.flow); restore(locIn(), v.loc); });
   const changed = () => { refreshDirty(); schedule(); };
+  /// The outlines as they were when the change under way began: what was shared then stays shared (#602).
+  let before                     = null;
+  const outlines = () => JSON.parse(JSON.stringify(solverShapes().map(x => ({ Id: x.Id, Shape: x.Shape }))))               ;
   /// One undoable change: remember what was, make the change, redraw.
-  const act = (fn            ) => { history.push(); fn(); changed(); render(); };
+  const act = (fn            ) => { history.push(); before = outlines(); try { fn(); } finally { before = null; } changed(); render(); };
   const undo = () => { if (history.undo()) { cleanSelection(); changed(); render(); } };
   const redo = () => { if (history.redo()) { cleanSelection(); changed(); render(); } };
-  const exists = (x                        ) => x.type === 'item' ? !!itemOf(x.id) : x.type === 'run' ? !!runOf(x.id)
+  const exists = (x                        ) => x.type === 'item' ? !!itemOf(x.id) : x.type === 'run' ? !!runOf(x.id) : x.type === 'wall' ? !!standaloneOf(x.id)
     : x.type === 'opening' ? !!openingOf(x.id) : !!shapeOf(x);
   /// Everything selected, the primary first.
   const selected = ()                           => [...(selection ? [selection] : []), ...extra];
@@ -1031,7 +1458,7 @@ function mount(sec     , host     ) {
   const cleanSelection = () => {
     extra = extra.filter(exists);
     if (!selection) return;
-    const gone = selection.type === 'item' ? !itemOf(selection.id) : selection.type === 'run' ? !runOf(selection.id)
+    const gone = selection.type === 'item' ? !itemOf(selection.id) : selection.type === 'run' ? !runOf(selection.id) : selection.type === 'wall' ? !standaloneOf(selection.id)
       : selection.type === 'opening' ? !openingOf(selection.id) : !shapeOf(selection);
     if (gone) selection = null;
     selectedCorner = -1;
@@ -1058,15 +1485,36 @@ function mount(sec     , host     ) {
   redoBtn.setAttribute('aria-label', 'Redo');
   redoBtn.onclick = () => redo();
   const status = el('span', { class: 'ld-count fp-status' });
+  // On a phone the floor's own settings fold into one menu, so the bar is one line: the floor, More, undo and redo.
+  [addBtn, floorBtn, bgBtn, toolsBtn, exportBtn, printBtn].forEach(b => b.classList.add('fp-wide-only'));
+  const moreBtn = btn('More…');
+  moreBtn.classList.add('fp-narrow-only');
+  moreBtn.title = 'Floor settings, background, tools, export and print.';
+  moreBtn.onclick = () => {
+    const body = el('div', { class: 'fp-sheet fp-more' });
+    ([[addBtn, 'Add a floor'], [floorBtn, 'Floor settings'], [bgBtn, 'Background'], [toolsBtn, 'Tools…'], [exportBtn, 'Export…'], [printBtn, 'Print']]                   ).forEach(([b, label]) => {
+      if (b.classList.contains('fp-off')) return;
+      const go = btn(label);
+      go.disabled = b.disabled;
+      go.onclick = () => { closeSheet(); b.onclick(); };
+      body.appendChild(go);
+    });
+    openSheet({ title: floorNow()?.floor.Name || 'Floor', body });
+  };
   sec.appendChild(el('div', { class: 'ld-toolbar fp-bar' }, el('label', { class: 'ld-inst' }, 'Floor ', floorSel), addBtn, floorBtn, bgBtn, toolsBtn,
-    exportBtn, printBtn, el('span', { class: 'fp-undo' }, undoBtn, redoBtn), status));
+    exportBtn, printBtn, moreBtn, el('span', { class: 'fp-undo' }, undoBtn, redoBtn), status));
 
   const modeBar = el('div', { class: 'fp-seg', role: 'tablist' });
   const modeBtns                      = {};
   ([['view', 'View'], ['edit', 'Edit']]         ).forEach(([m, label]) => {
     const b = el('button', { class: 'fp-seg-btn', text: label, type: 'button' });
     b.setAttribute('role', 'tab');
-    b.onclick = () => { mode = m; tool = 'select'; draft = []; rectStart = null; wireDraft = null; measure = null; selectedCorner = -1; render(); };
+    b.onclick = () => {
+      const entering = m === 'edit' && mode !== 'edit';
+      mode = m; tool = 'select'; draft = []; rectStart = null; wireDraft = null; measure = null; selectedCorner = -1; render();
+      // On a phone, Edit brings the tools and the plan up to fill the screen.
+      if (entering && narrow()) palette.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    };
     modeBtns[m] = b;
     modeBar.appendChild(b);
   });
@@ -1100,7 +1548,17 @@ function mount(sec     , host     ) {
   const empty = el('div', { class: 'fp-empty' });
   const fpMenu = makeMenu(() => stage, 'fp-menu');
   const menu = fpMenu.el;
-  const stage = el('div', { class: 'fp-stage' }, svg, menu, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), scaleBar, hint, empty);
+  const compass = el('div', { class: 'fp-compass', title: 'North. Set which way it points in Floor settings.' });
+  // The four points ride round the ring with north; each letter is turned back upright as it goes.
+  const points4 = (['N', 'E', 'S', 'W']         ).map((t, i) => {
+    const a = i * Math.PI / 2, x = Math.round(Math.sin(a) * 20.5 * 10) / 10, y = Math.round(-Math.cos(a) * 20.5 * 10) / 10;
+    return { x, y, el: Object.assign(svgEl('text', { x, y, class: 'fp-compass-text' + (t === 'N' ? ' is-n' : '') }), { textContent: t }) };
+  });
+  const needle = svgEl('svg', { viewBox: '-30 -30 60 60', 'aria-hidden': 'true' });
+  needle.append(svgEl('circle', { r: 28, class: 'fp-compass-ring' }), svgEl('path', { d: 'M0 -14 L4 0 L0 -2 L-4 0 Z', class: 'fp-compass-n' }),
+    svgEl('path', { d: 'M0 14 L4 0 L0 2 L-4 0 Z', class: 'fp-compass-s' }), ...points4.map(q => q.el));
+  compass.append(needle);
+  const stage = el('div', { class: 'fp-stage' }, svg, menu, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), compass, scaleBar, hint, empty);
   const side = el('aside', { class: 'fp-side' });
   const legend = el('div', { class: 'fp-legend' });
   const body = el('div', { class: 'fp-body' }, palette, el('div', { class: 'fp-main' }, opts, stage, legend), side);
@@ -1108,7 +1566,7 @@ function mount(sec     , host     ) {
 
   const pickTool = (t      ) => {
     if (mode !== 'edit') mode = 'edit';
-    tool = t; draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; selectedCorner = -1;
+    tool = t; claimFor = ''; draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; selectedCorner = -1;
     render();
   };
 
@@ -1126,7 +1584,18 @@ function mount(sec     , host     ) {
     const ox = (r.width - vb.w * k) / 2, oy = (r.height - vb.h * k) / 2;
     return { X: vb.x + (e.clientX - r.left - ox) / k, Y: vb.y + (e.clientY - r.top - oy) / k };
   };
-  const fit = () => { const { w, h } = floorSize(); const pad = Math.max(w, h) * 0.03; vb = { x: -pad, y: -pad, w: w + pad * 2, h: h + pad * 2 }; };
+  const fit = () => {
+    const { w, h } = floorSize();
+    // A phone's plan is narrow: it fits what is drawn rather than the whole plot, so the rooms are big enough to work on.
+    const drawn       = window.matchMedia?.('(max-width: 560px)').matches ? [...shapesNow().flatMap(x => x.Shape        ), ...itemsNow().map((it     ) => ({ X: it.X, Y: it.Y }))] : [];
+    if (drawn.length >= 3) {
+      const b = planBounds(drawn);
+      const pad = Math.max(b.w, b.h) * 0.08 + 10;
+      vb = { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 };
+      return;
+    }
+    const pad = Math.max(w, h) * 0.03; vb = { x: -pad, y: -pad, w: w + pad * 2, h: h + pad * 2 };
+  };
   const zoomAt = (p    , factor        ) => {
     const { w } = floorSize();
     const nw = Math.max(w * 0.02, Math.min(w * 4, vb.w / factor));
@@ -1140,12 +1609,34 @@ function mount(sec     , host     ) {
   zoomFit.onclick = () => { fit(); drawPlan(); };
 
   const outlinesOf = (list       ) => list.filter(s => (s.Shape || []).length >= 3).map(s => s.Shape        );
-  const othersFor = (exclude     ) => outlinesOf([...roomsNow(), ...areasNow()].filter(s => s !== exclude));
+  // Standalone walls snap too, each stretch a line of its own: their ends, along them, and level with them.
+  const othersFor = (exclude     ) => [...outlinesOf([...roomsNow(), ...areasNow()].filter(s => s !== exclude)),
+    ...wallsNow().filter((w     ) => w !== exclude).flatMap((w     ) => (w.Points || []).slice(1).map((q    , i        ) => [w.Points[i], q]))];
   const snapStep = () => planSnapStep(sys()) * scale();
+  /// The floor's wall thicknesses. With either set, rooms are drawn touching, to the middle of the walls between them
+  /// and the inside face of the outside walls, and the walls are drawn at their thickness.
+  const interiorWall = () => Math.max(0, Number(floorNow()?.floor.InteriorWall) || 0);
+  const exteriorWall = () => Math.max(0, Number(floorNow()?.floor.ExteriorWall) || 0);
+  const thickWalls = () => interiorWall() > 0 || exteriorWall() > 0;
+  const massNow = () => planWallMass(roomsNow().filter(r => !r.Outdoor));
+  /// A room's inside: each wall it shares moved in by half the interior wall. Its outline when walls are thin lines.
+  const insideOf = (room     , mass = massNow())       => {
+    const poly       = room.Shape || [];
+    if (!thickWalls() || room.Outdoor || poly.length < 3) return poly;
+    const half = interiorWall() / 2;
+    return planInset(poly, poly.map((a, i) => {
+      const b = poly[(i + 1) % poly.length], L = Math.hypot(b.X - a.X, b.Y - a.Y) || 1;
+      const shared = mass.filter(w => w.room === room.Id && w.edge === i && w.shared).reduce((t, w) => t + Math.hypot(w.b.X - w.a.X, w.b.Y - w.a.Y), 0);
+      return shared / L > 0.5 ? half : 0;
+    }));
+  };
+  /// A 2x4 wall with drywall both sides, 4½ in: drawn as gaps between rooms, the far face of a room's wall is a snap
+  /// line too. With the floor's wall thickness set, rooms touch and there is no far face to find.
+  const wallFace = () => thickWalls() ? 0 : 0.1143 * scale();
   const clampPt = (p    ) => { const { w, h } = floorSize(); return { X: planRound(Math.max(0, Math.min(w, p.X))), Y: planRound(Math.max(0, Math.min(h, p.Y))) }; };
   const snapped = (p    , exclude      = null) => {
     if (!snapOn) return clampPt(p);
-    return clampPt(planSnap(p, othersFor(exclude), 12 * upp(), snapStep()).pt);
+    return clampPt(planSnap(p, othersFor(exclude), 12 * upp(), snapStep(), wallFace()).pt);
   };
   /// Within a few degrees of level or plumb from the last point, a line is made exactly so.
   const ortho = (prev                       , q    ) => {
@@ -1159,7 +1650,7 @@ function mount(sec     , host     ) {
   /// A drawn point: onto a wall corner or edge when one is near, else level or plumb from the last point, else the grid.
   const drawSnap = (prev                       , p    , grid = true) => {
     if (!snapOn) return clampPt(p);
-    const sn = planSnap(p, othersFor(null), 16 * upp() * hs(), grid ? snapStep() : 0);
+    const sn = planSnap(p, othersFor(selection?.type === 'wall' ? standaloneOf(selection.id) : null), 16 * upp() * hs(), grid ? snapStep() : 0, wallFace());
     return clampPt(sn.to === 'corner' || sn.to === 'edge' ? sn.pt : ortho(prev, sn.pt));
   };
   /// The point a wire's next bend follows on from.
@@ -1178,8 +1669,10 @@ function mount(sec     , host     ) {
     return pts;
   };
   /// Where a wall is for a door or window: near enough to one, on it and lying along it.
+  /// Every stretch of a standalone wall, as an outline of its own, so a door or outlet finds it as it finds a room's.
+  const standaloneStretches = ()         => wallsNow().flatMap((w     ) => (w.Points || []).slice(1).map((b    , i        ) => [w.Points[i], b]));
   const wallAt = (p    ) => {
-    const w = planNearestWall(p, outlinesOf(roomsNow().filter(r => !r.Outdoor)));
+    const w = planNearestWall(p, [...outlinesOf(roomsNow().filter(r => !r.Outdoor)), ...standaloneStretches()]);
     return w && w.dist <= Math.max(0.6 * scale(), 16 * upp()) ? w : null;
   };
   const openingWidth = (kind        ) => {
@@ -1204,7 +1697,7 @@ function mount(sec     , host     ) {
   /// Where a wall-mounted item goes: on the wall, facing the side the pointer is on. Away from walls it stands free.
   const onWall = (kind        , q    , side     = q)                                 => {
     if (!snapOn || !WALL_KINDS.includes(kind)) return { ...q, facing: null };
-    const w = planNearestWall(q, outlinesOf(roomsNow().filter(r => !r.Outdoor)));
+    const w = planNearestWall(q, [...outlinesOf(roomsNow().filter(r => !r.Outdoor)), ...standaloneStretches()]);
     if (!w || w.dist > Math.max(0.3 * scale(), 10 * upp())) return { ...q, facing: null };
     // The normal toward the pointer's side of the wall; the room it is in when the pointer is on the line itself.
     let toward = { X: side.X - w.pt.X, Y: side.Y - w.pt.Y };
@@ -1217,7 +1710,7 @@ function mount(sec     , host     ) {
   /// A sized item near a wall stands with its back to it, facing the room the pointer is in; away from walls it keeps its turn.
   const fitToWall = (it     , q    , side     = q) => {
     const D = Number(it.Depth) || 0;
-    const w = snapOn ? planNearestWall(q, outlinesOf(roomsNow().filter(r => !r.Outdoor))) : null;
+    const w = snapOn ? planNearestWall(q, [...outlinesOf(roomsNow().filter(r => !r.Outdoor)), ...standaloneStretches()]) : null;
     if (!w || w.dist > D / 2 + Math.max(0.3 * scale(), 12 * upp())) { const g2 = gridSnapped(q); it.X = g2.X; it.Y = g2.Y; return; }
     let toward = { X: side.X - w.pt.X, Y: side.Y - w.pt.Y };
     if (Math.hypot(toward.X, toward.Y) < 1e-6) toward = { X: q.X - w.pt.X, Y: q.Y - w.pt.Y };
@@ -1243,11 +1736,12 @@ function mount(sec     , host     ) {
     ...openingsNow().map(o => ({ type: 'opening'           , id: o.Id })),
     ...itemsNow().map((i     ) => ({ type: 'item'           , id: i.Id })),
     ...runsNow().map(r => ({ type: 'run'           , id: r.Id })),
+    ...wallsNow().map((w     ) => ({ type: 'wall'           , id: w.Id })),
   ];
   /// Every point that moves when a set of things moves: outlines, items, doors and windows, wire bends.
   /// A room carries what is in it, the doors and windows in its walls and the bends of wires to what it holds.
   const movable = (sel                          ) => {
-    const shapes = new Set     (), items = new Set     (), openings = new Set     (), runs = new Set     ();
+    const shapes = new Set     (), items = new Set     (), openings = new Set     (), runs = new Set     (), walls = new Set     ();
     sel.forEach(x => {
       if (x.type === 'room' || x.type === 'area') {
         const s = shapeOf(x);
@@ -1261,24 +1755,29 @@ function mount(sec     , host     ) {
       } else if (x.type === 'item') { const it = itemOf(x.id); if (it) items.add(it); }
       else if (x.type === 'opening') { const o = openingOf(x.id); if (o) openings.add(o); }
       else if (x.type === 'run') { const r = runOf(x.id); if (r) runs.add(r); }
+      else if (x.type === 'wall') { const w = standaloneOf(x.id); if (w) walls.add(w); }
     });
     runsNow().forEach(r => { if ([r.From, r.To].some(id => [...items].some((it     ) => it.Id === id))) runs.add(r); });
     return {
-      shapes: [...shapes].map(sh => ({ sh, pts: sh.Shape.map((q    ) => ({ ...q })) })),
+      shapes: [...shapes].map(sh => ({ sh, pts: sh.Shape.map((q    ) => ({ ...q })), lab: sh.LabelX != null && sh.LabelY != null ? { X: Number(sh.LabelX), Y: Number(sh.LabelY) } : null })),
       items: [...items].map(it => ({ it, X: Number(it.X) || 0, Y: Number(it.Y) || 0 })),
       openings: [...openings].map(o => ({ o, X: Number(o.X) || 0, Y: Number(o.Y) || 0 })),
       runs: [...runs].map(r => ({ r, pts: (r.Points || []).map((q    ) => ({ ...q })) })),
+      walls: [...walls].map(w => ({ r: w, pts: (w.Points || []).map((q    ) => ({ ...q })) })),
     };
   };
   const shift = (m                            , dx        , dy        ) => {
-    m.shapes.forEach(x => { x.sh.Shape = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
+    m.shapes.forEach(x => {
+      x.sh.Shape = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) }));
+      if (x.lab) { x.sh.LabelX = planRound(x.lab.X + dx); x.sh.LabelY = planRound(x.lab.Y + dy); }
+    });
     m.items.forEach(x => { x.it.X = planRound(x.X + dx); x.it.Y = planRound(x.Y + dy); });
     m.openings.forEach(x => { x.o.X = planRound(x.X + dx); x.o.Y = planRound(x.Y + dy); });
-    m.runs.forEach(x => { x.r.Points = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
+    [...m.runs, ...m.walls].forEach(x => { x.r.Points = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
   };
   /// The box around a set of movable points, or null when there are none.
   const boundsOf = (m                            ) => {
-    const pts       = [...m.shapes.flatMap(x => x.pts), ...m.items.map(x => ({ X: x.X, Y: x.Y })), ...m.openings.map(x => ({ X: x.X, Y: x.Y })), ...m.runs.flatMap(x => x.pts)];
+    const pts       = [...m.shapes.flatMap(x => x.pts), ...m.items.map(x => ({ X: x.X, Y: x.Y })), ...m.openings.map(x => ({ X: x.X, Y: x.Y })), ...m.runs.flatMap(x => x.pts), ...m.walls.flatMap(x => x.pts)];
     return pts.length ? planBounds(pts) : null;
   };
   /// Is a selectable thing wholly inside a box?
@@ -1287,6 +1786,7 @@ function mount(sec     , host     ) {
     if (x.type === 'room' || x.type === 'area') return (shapeOf(x)?.Shape || []).every(inB);
     if (x.type === 'item') { const it = itemOf(x.id); return !!it && inB({ X: it.X, Y: it.Y }); }
     if (x.type === 'opening') { const o = openingOf(x.id); return !!o && inB({ X: o.X, Y: o.Y }); }
+    if (x.type === 'wall') { const w = standaloneOf(x.id); return !!w && (w.Points || []).every(inB); }
     const r = runOf(x.id);
     return !!r && runPath(r).length > 0 && runPath(r).every(inB);
   };
@@ -1296,7 +1796,9 @@ function mount(sec     , host     ) {
   const setConstraints = (list                  ) => { const f = floorNow()?.floor; if (f) f.Constraints = list; };
   /// The outlines on this floor, as the solver sees them.
   const shapesNow = () => [...roomsNow(), ...areasNow()].filter(x => (x.Shape || []).length >= 3);
-  const shapeById = (id        ) => shapesNow().find(x => x.Id === id);
+  /// What the solver holds: the outlines, and each standalone wall as an open line whose points are its corners.
+  const solverShapes = ()        => [...shapesNow(), ...wallsNow().filter((w     ) => (w.Points || []).length >= 2).map((w     ) => ({ Id: w.Id, Name: 'Wall', Shape: w.Points, Open: true }))];
+  const shapeById = (id        ) => solverShapes().find(x => x.Id === id);
   /// A corner that must stay put: its room is locked, or a locked wall ends there.
   const cornerLocked = (sh     , i        ) => {
     if (!sh) return false;
@@ -1307,23 +1809,27 @@ function mount(sec     , host     ) {
   /// A shape that cannot move as a whole: locked, or holding a locked wall.
   const shapeHeld = (sh     ) => !!sh && (sh.Locked || (sh.LockedWalls || []).length > 0);
   let lastSolve                                     = { worst: 0, unmet: [] };
-  /// Bring every constraint on this floor back into line, holding still the corners named.
-  const solve = (fixed           = []) => {
-    if (!constraintsNow().length) { lastSolve = { worst: 0, unmet: [] }; return; }
-    lastSolve = planSolve(shapesNow(), constraintsNow(), new Set(fixed));
+  /// Bring every constraint on this floor back into line, holding still the corners named. The rooms in `hold` are
+  /// the ones being reshaped, and keep their level and plumb walls so unless `free` (Shift, while dragging); the rest
+  /// follow the corners they share, keeping theirs.
+  const solve = (fixed           = [], hold           , free = false) => {
+    if (!constraintsNow().length && !hold) { lastSolve = { worst: 0, unmet: [] }; return; }
+    lastSolve = planSolve(solverShapes(), constraintsNow(), new Set(fixed), 120, { before: before || gesture?.before || undefined, hold, keep: !free });
   };
   const keysOf = (sh     ) => (sh?.Shape || []).map((_     , i        ) => `${sh.Id}#${i}`);
   const saidLocked = () => toast('That is locked. Unlock it in its panel to change it.', false);
   let cPicks            = [];
+  let consLit = '';
   const sameRef = (a         , b         ) => a.Room === b.Room && (a.Corner ?? null) === (b.Corner ?? null) && (a.Edge ?? null) === (b.Edge ?? null);
   /// The corner or wall under the pointer: a corner when one is close, else the nearest wall.
   const pickRef = (p    )                 => {
     const reach = 14 * upp() * hs();
     let best                 = null, bestD = reach;
-    shapesNow().forEach(sh => sh.Shape.forEach((q    , i        ) => { const d = Math.hypot(q.X - p.X, q.Y - p.Y); if (d <= bestD) { bestD = d; best = { Room: sh.Id, Corner: i }; } }));
+    solverShapes().forEach(sh => sh.Shape.forEach((q    , i        ) => { const d = Math.hypot(q.X - p.X, q.Y - p.Y); if (d <= bestD) { bestD = d; best = { Room: sh.Id, Corner: i }; } }));
     if (best) return best;
     bestD = reach * 0.85;
-    shapesNow().forEach(sh => sh.Shape.forEach((q    , i        ) => {
+    solverShapes().forEach(sh => sh.Shape.forEach((q    , i        ) => {
+      if (sh.Open && i === sh.Shape.length - 1) return;
       const r2 = sh.Shape[(i + 1) % sh.Shape.length];
       const n = planNearestOnSegment(p, q, r2);
       const d = Math.hypot(n.X - p.X, n.Y - p.Y);
@@ -1341,8 +1847,22 @@ function mount(sec     , host     ) {
   };
   const cornerPt = (r         ) => { const sh = shapeById(r.Room); return sh && r.Corner != null ? sh.Shape[r.Corner] : null; };
   const addConstraint = (kind        , refs           , value         ) => {
+    // The same constraint twice holds nothing more; a length or angle given again replaces the one there.
+    const same = constraintsNow().find(c => c.Kind === kind && c.Refs.length === refs.length && c.Refs.every(r => refs.some(q => sameRef(r, q))));
+    if (same && (kind === 'length' || kind === 'angle') && value != null) {
+      act(() => { same.Value = value; solve([], refs.map(r => r.Room)); cPicks = []; });
+      return;
+    }
+    if (same) { cPicks = []; drawPlan(); toast('That is already held.', false); return; }
     const id = freshIn(constraintsNow(), kind);
-    act(() => { constraintsNow().push({ Id: id, Kind: kind, Refs: refs.map(r => ({ ...r })), Value: value ?? null }); solve(); cPicks = []; });
+    // Joining, the room picked first (or the one whose wall it is) stays put; the other comes to it, stretching as a
+    // rectangle would. Anything else reshapes the rooms it names.
+    const anchor = kind === 'coincident' ? (refs.find(r => r.Edge != null) || refs[0]).Room : '';
+    act(() => {
+      constraintsNow().push({ Id: id, Kind: kind, Refs: refs.map(r => ({ ...r })), Value: value ?? null });
+      if (anchor) solve(keysOf(shapeById(anchor)), []); else solve([], refs.map(r => r.Room));
+      cPicks = [];
+    });
     if (lastSolve.unmet.includes(id)) toast('That constraint cannot hold with the others, or with what is locked. It is kept, and marked in red; Ctrl+Z takes it back.', false);
   };
 
@@ -1405,9 +1925,11 @@ function mount(sec     , host     ) {
     const max = planScaleMax(roomsNow().map(r => placeOf(r.Id)?.value));
     const font = 13 * u;
     const focus = focusCircuit();
+    // The Circuits view: every circuit in its own colour, its wires drawn bold, and the rooms left plain to trace them over.
+    const trace = mode === 'view' && period === 'circuits';
     // The rooms the focused circuit serves: the breaker's own list, and every room something on it is in.
     const focusRooms = new Set        (focus ? [...(circuitOf(focus)?.rooms || []), ...itemsIn().filter((i     ) => i.Circuit === focus).map((i     ) => i.Room).filter(Boolean)] : []);
-    // A selected GFCI shows what it protects: everything wired downstream of it, and the rest fades.
+    // A selected GFCI shows what it protects, in green, among the rest of its circuit.
     const gfci = selection?.type === 'item' && !extra.length ? itemOf(selection.id) : null;
     const downstream = gfci?.Gfci ? planDownstream(runsIn(), gfci.Id) : null;
     const isGfci = (id        ) => !!itemOf(id)?.Gfci;
@@ -1423,8 +1945,8 @@ function mount(sec     , host     ) {
       while (at < words.length - 1 && words.slice(0, at + 1).join(' ').length <= name.length / 2) at++;
       return [words.slice(0, at).join(' '), words.slice(at).join(' ')];
     };
-    const label = (poly      , given          , cls        ) => {
-      const c = planCentroid(poly), b = planBounds(poly);
+    const label = (poly      , given          , cls        , at     ) => {
+      const c = at || planLabelPoint(poly), b = planBounds(poly);
       const [name, ...rest] = given, split = broken(name);
       const tries = [given, split && [...split, ...rest], [name], split].filter(Boolean)              ;
       let lines                  = null, f = font;
@@ -1451,6 +1973,8 @@ function mount(sec     , host     ) {
       else if (room.SurfaceColor) svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-surface is-solid', fill: room.SurfaceColor }));
     });
     const labels        = [];
+    const walls = thickWalls();
+    const mass = walls ? massNow() : [];
     rooms.forEach(room => {
       const poly       = room.Shape;
       const p = placeOf(room.Id);
@@ -1459,19 +1983,36 @@ function mount(sec     , host     ) {
       const shape = svgEl('polygon', {
         points: points(poly),
         class: `fp-room ${room.Outdoor ? 'is-outdoor' : 'is-indoor'} is-${mode === 'view' ? st : 'edit'}${room.Surface ? ' has-surface' : ''}${sel ? ' is-selected' : ''}`,
-        'stroke-width': (room.Outdoor ? 1.5 : sel ? 5 : 4) * u,
+        'stroke-width': (room.Outdoor ? 1.5 : sel ? (walls ? 3 : 5) : walls ? 1 : 4) * u,
       });
       if (room.Outdoor) shape.setAttribute('stroke-dasharray', `${7 * u} ${5 * u}`);
-      if (mode === 'view' && st === 'known') shape.style.fill = shadeOf(p .value, max);
-      if (mode === 'view' && st === 'unmetered' && !room.Surface) shape.style.fill = 'url(#fp-hatch)';
-      if (focusRooms.has(room.Id)) { shape.classList.add('is-circuit'); shape.style.stroke = planCircuitColor(focus); }
+      if (mode === 'view' && !trace && st === 'known') shape.style.fill = shadeOf(p .value, max);
+      if (mode === 'view' && !trace && st === 'unmetered' && !room.Surface) shape.style.fill = 'url(#fp-hatch)';
       shape.dataset.room = room.Id;
       svg.appendChild(shape);
+      if (focusRooms.has(room.Id)) shape.classList.add('is-circuit');
+      if (focusRooms.has(room.Id)) svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-circuit-tint', fill: planCircuitColor(focus) }));
       const lines = [room.Name || room.Id];
-      if (mode === 'view') lines.push(st === 'known' ? fmt(p .value) : st === 'unknown' ? 'no data' : 'unmetered');
-      if (showSizes || (mode === 'edit' && sel)) lines.push(areaText(poly));
-      labels.push(label(poly, lines, 'fp-label' + (mode === 'view' ? ' is-' + st : '') + (room.Outdoor ? ' is-outdoor' : '')));
+      if (mode === 'view' && !trace) lines.push(st === 'known' ? fmt(p .value) : st === 'unknown' ? 'no data' : 'unmetered');
+      if (showSizes || (mode === 'edit' && sel)) lines.push(areaText(insideOf(room, mass)));
+      const moved = room.LabelX != null && room.LabelY != null ? { X: Number(room.LabelX), Y: Number(room.LabelY) } : undefined;
+      const lab = label(poly, lines, 'fp-label' + (mode === 'view' ? ' is-' + st : '') + (room.Outdoor ? ' is-outdoor' : '') + (mode === 'edit' && tool === 'select' && !room.Locked ? ' is-movable' : ''), moved);
+      if (lab) lab.dataset.label = room.Id;
+      labels.push(lab);
     });
+
+    // The walls at the floor's thickness: between rooms on their middle, outside walls beyond the rooms. The selected
+    // room's outline is drawn again over them.
+    if (walls) {
+      const iw = interiorWall(), xw = exteriorWall();
+      mass.filter(w => w.draw).forEach(w => {
+        const t = w.shared ? iw : xw;
+        if (t <= 0) return;
+        const o = w.shared ? 0 : t / 2;
+        svg.appendChild(svgEl('line', { x1: w.a.X + w.out.X * o, y1: w.a.Y + w.out.Y * o, x2: w.b.X + w.out.X * o, y2: w.b.Y + w.out.Y * o, class: 'fp-wallmass', 'stroke-width': t }));
+      });
+      rooms.filter(r => isSel('room', r.Id)).forEach(r => svg.appendChild(svgEl('polygon', { points: points(r.Shape), class: 'fp-room-sel', 'stroke-width': 3 * u })));
+    }
 
     areasNow().forEach(area => {
       const poly       = area.Shape || [];
@@ -1483,23 +2024,63 @@ function mount(sec     , host     ) {
       labels.push(label(poly, [area.Name || area.Id], 'fp-label fp-area-label'));
     });
 
+    // Standalone walls, at their thickness; a selected one shows its ends and bends to drag, and dots to add a bend.
+    wallsNow().forEach((wl     ) => {
+      const pts       = wl.Points || [];
+      if (pts.length < 2) return;
+      const sel = isSel('wall', wl.Id);
+      const g = svgEl('g', { class: 'fp-standalone' + (sel ? ' is-selected' : '') });
+      g.appendChild(svgEl('polyline', { points: points(pts), class: 'fp-standalone-line', 'stroke-width': Math.max(wallThick(wl), 3 * u) }));
+      const hit = svgEl('polyline', { points: points(pts), class: 'fp-hit', 'stroke-width': Math.max(wallThick(wl), 14 * u) });
+      hit.dataset.wall = wl.Id;
+      g.appendChild(hit);
+      svg.appendChild(g);
+      if (sel && mode === 'edit' && !extra.length) {
+        pts.forEach((q, i) => { const hd = svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u * hs(), class: 'fp-handle' + (i === selectedBend ? ' is-selected' : '') }); hd.dataset.runpt = String(i); svg.appendChild(hd); });
+        for (let i = 0; i + 1 < pts.length; i++) {
+          const m = svgEl('circle', { cx: (pts[i].X + pts[i + 1].X) / 2, cy: (pts[i].Y + pts[i + 1].Y) / 2, r: 5 * u * hs(), class: 'fp-mid' });
+          m.dataset.runmid = String(i);
+          svg.appendChild(m);
+        }
+      }
+    });
+
     // Doors and windows cut the walls they sit in.
     openingsNow().forEach(o => {
-      const g = planOpening(o, u);
+      // At the floor's wall thickness, a door cuts the whole wall, and one in an outside wall sits out in it.
+      let thick = 0, shift = { X: 0, Y: 0 };
+      if (walls) {
+        const near = mass.map(w => { const q = planNearestOnSegment(o, w.a, w.b); return { w, d: Math.hypot(q.X - o.X, q.Y - o.Y) }; }).sort((a, b) => a.d - b.d)[0];
+        if (near && near.d <= Math.max(interiorWall(), exteriorWall(), 6 * u)) {
+          thick = near.w.shared ? interiorWall() : exteriorWall();
+          if (!near.w.shared) shift = { X: near.w.out.X * thick / 2, Y: near.w.out.Y * thick / 2 };
+        }
+      }
+      const g = planOpening(o, u, thick, shift);
       if (isSel('opening', o.Id)) g.classList.add('is-selected');
       svg.appendChild(g);
     });
 
     // Cable runs, in their circuit's colour. A selected circuit comes forward and the rest fade.
-    if (showWiring || mode === 'edit') runsNow().forEach(r => {
+    // A wire is on the circuit of the outlets at its ends too, even when its own circuit was never set or is stale.
+    const onFocus = (r     ) => !!focus && (r.Circuit === focus || [r.From, r.To].some(id => id && itemOf(id)?.Circuit === focus));
+    // While viewing with the wiring hidden, the selected circuit's wires still show.
+    if (showWiring || trace || mode === 'edit' || focus || downstream) runsNow().forEach(r => {
       const path = runPath(r);
       if (path.length < 2) return;
       const sel = isSel('run', r.Id);
-      const dim = downstream ? !downstream.runs.has(r.Id) : !!focus && r.Circuit !== focus;
-      const colour = r.Kind === 'circuit' ? planCircuitColor(r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
-      const lit = downstream ? downstream.runs.has(r.Id) : !!focus && r.Circuit === focus;
-      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (downstream ? ' is-protected' : ' is-focus') : ''}${r.Circuit ? '' : ' is-unknown'}` });
-      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : 1), 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
+      const prot = !!downstream?.runs.has(r.Id);
+      const lit = prot || onFocus(r);
+      if (!showWiring && !trace && mode !== 'edit' && !lit && !sel) return;
+      const dim = !!(focus || downstream) && !lit;
+      const colour = r.Kind === 'circuit' ? planCircuitColor(lit && focus ? focus : r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
+      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit ? '' : ' is-unknown'}` });
+      const sw = (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : lit ? 2.2 : trace ? 1.8 : 1);
+      // On the circuit being looked at, a wire is cased in the page's colour so it parts from a wall it runs along.
+      if (lit || (trace && !dim)) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-case', 'stroke-width': sw + 6 * u }));
+      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': sw, 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
+      // And current is shown flowing along it, supply to load.
+      if (lit) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-flow', 'stroke-width': sw * 0.45, 'stroke-dasharray': `${3 * u} ${9 * u}`, style: `--fp-flow:${-12 * u}px` }));
       // While viewing, a branch circuit's run carries the circuit's reading at its middle.
       const cp = mode === 'view' && r.Circuit ? circuitOf(r.Circuit)?.power : undefined;
       if (mode === 'view' && r.Circuit && path.length >= 2) {
@@ -1535,27 +2116,46 @@ function mount(sec     , host     ) {
     const r = 12 * u;
     itemsNow().forEach((item     ) => {
       const sel = isSel('item', item.Id);
+      if (!sel && !shown(item)) return;
       const supply = PLAN_SUPPLY_KINDS.includes(item.Kind);
       const known = supply || (!!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true));
-      const dim = downstream ? !(downstream.items.has(item.Id) || item.Id === gfci .Id) : !!focus && item.Circuit !== focus;
-      const lit = downstream ? downstream.items.has(item.Id) : !!focus && item.Circuit === focus;
+      const prot = !!downstream?.items.has(item.Id);
+      const lit = prot || (!!focus && item.Circuit === focus);
+      const dim = !!(focus || downstream) && !lit && item.Id !== gfci?.Id;
       // Drawn at its real size when it has one: a washer is as big as a washer, turned as it stands.
       const W = Number(item.Width) || 0, D = Number(item.Depth) || 0, sized = W > 0 && D > 0;
       // A wall-mounted item sits beside its wall on the room's side, joined to it by a short stub, at any zoom.
       const facing = !sized && item.Facing != null && Number.isFinite(Number(item.Facing)) ? Number(item.Facing) * Math.PI / 180 : null;
-      const off = facing == null ? { X: 0, Y: 0 } : { X: Math.cos(facing) * (r + 3 * u), Y: Math.sin(facing) * (r + 3 * u) };
-      if (facing != null) svg.appendChild(svgEl('line', { x1: item.X, y1: item.Y, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
-      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (downstream ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
+      // At the floor's wall thickness it stands out from the face of the wall it is on, whichever side that is: an
+      // outdoor outlet beyond an outside wall, an indoor one off the middle of a wall between rooms.
+      let face = 0;
+      if (facing != null && walls) {
+        const near = mass.map(w => { const q = planNearestOnSegment(item, w.a, w.b); return { w, d: Math.hypot(q.X - item.X, q.Y - item.Y) }; }).sort((a, b) => a.d - b.d)[0];
+        if (near && near.d <= Math.max(interiorWall(), exteriorWall()) + 1)
+          face = near.w.shared ? interiorWall() / 2 : Math.cos(facing) * near.w.out.X + Math.sin(facing) * near.w.out.Y > 0 ? exteriorWall() : 0;
+      }
+      const fx = facing == null ? 0 : Math.cos(facing) * face, fy = facing == null ? 0 : Math.sin(facing) * face;
+      const off = facing == null ? { X: 0, Y: 0 } : { X: fx + Math.cos(facing) * (r + 3 * u), Y: fy + Math.sin(facing) * (r + 3 * u) };
+      if (facing != null) svg.appendChild(svgEl('line', { x1: item.X + fx, y1: item.Y + fy, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
+      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
       g.dataset.item = item.Id;
       let rr = r;
       let hasArt = false;
       if (sized) {
-        const body = svgEl('g', { class: 'fp-body' + (sel ? ' is-selected' : '') + (dim ? ' is-dim' : '') + (lit ? (downstream ? ' is-protected' : ' is-focus') : '') + (known ? '' : ' is-unknown'), transform: `translate(${item.X},${item.Y}) rotate(${Number(item.Rotation) || 0})` });
+        const body = svgEl('g', { class: 'fp-body' + (sel ? ' is-selected' : '') + (dim ? ' is-dim' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : '') + (known ? '' : ' is-unknown'), transform: `translate(${item.X},${item.Y}) rotate(${Number(item.Rotation) || 0})` });
         body.dataset.item = item.Id;
         const shape = item.Round
           ? svgEl('ellipse', { rx: W / 2, ry: D / 2, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u })
           : svgEl('rect', { x: -W / 2, y: -D / 2, width: W, height: D, rx: Math.min(W, D) * 0.07, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u });
         if (item.Circuit && (showWiring || focus)) shape.style.stroke = planCircuitColor(item.Circuit);
+        // On the circuit being looked at: ringed in its colour, well clear of the outline.
+        if (lit && !sel) {
+          const m = 6 * u;
+          const halo = item.Round ? svgEl('ellipse', { rx: W / 2 + m, ry: D / 2 + m, class: 'fp-halo', 'stroke-width': 3 * u })
+            : svgEl('rect', { x: -W / 2 - m, y: -D / 2 - m, width: W + 2 * m, height: D + 2 * m, rx: m, class: 'fp-halo', 'stroke-width': 3 * u });
+          halo.style.stroke = prot ? '' : planCircuitColor(item.Circuit);
+          body.appendChild(halo);
+        }
         body.appendChild(shape);
         // The front, where the door or the controls are.
         // The appliance itself, seen from above, when it is one we know how to draw.
@@ -1566,8 +2166,17 @@ function mount(sec     , host     ) {
         hasArt = !!art;
         rr = Math.max(6 * u, Math.min(r, Math.min(W, D) * 0.32));
       } else {
-        const disc = svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : 2) * u });
-        if (item.Circuit && (showWiring || focus)) disc.style.stroke = planCircuitColor(item.Circuit);
+        // A panel, inverter or battery is a box on the wall, not a dot.
+        const boxy = ['panel', 'inverter', 'battery', 'generator', 'transformer'].includes(item.Kind);
+        const bw = item.Kind === 'panel' ? r * 1.55 : r * 1.9, bh = item.Kind === 'panel' ? r * 2.2 : r * 1.9;
+        const disc = boxy ? svgEl('rect', { x: -bw / 2, y: -bh / 2, width: bw, height: bh, rx: r * 0.18, class: 'fp-item-disc is-box', 'stroke-width': (sel ? 3 : trace ? 4 : 2) * u })
+          : svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : trace ? 4 : 2) * u });
+        if (item.Circuit && (showWiring || focus || trace)) disc.style.stroke = planCircuitColor(item.Circuit);
+        if (lit && !sel) {
+          const halo = svgEl('circle', { r: r + 7 * u, class: 'fp-halo', 'stroke-width': 3 * u });
+          halo.style.stroke = prot ? '' : planCircuitColor(item.Circuit);
+          g.appendChild(halo);
+        }
         g.appendChild(disc);
       }
       // An appliance drawn as itself needs no icon on top.
@@ -1576,13 +2185,17 @@ function mount(sec     , host     ) {
         glyph.setAttribute('stroke-width', 1.4 * u);
         g.appendChild(glyph);
       }
-      // A GFCI wears a G; anything it protects, when the wiring is shown, a small green shield dot.
+      // A GFCI is plain to see: a green ring round it, a G on it, and GFCI written under it. Anything it protects, when
+      // the wiring or circuits are shown, wears a small green dot.
       if (item.Gfci) {
-        const b = svgEl('g', { class: 'fp-gfci', transform: `translate(${-r * 0.85},${-r * 0.8})` });
-        b.appendChild(svgEl('circle', { r: r * 0.45, 'stroke-width': u }));
-        const t = svgEl('text', { y: r * 0.03, 'font-size': r * 0.6 }); t.textContent = 'G'; b.appendChild(t);
+        g.insertBefore(svgEl('circle', { r: r + 4 * u, class: 'fp-gfci-ring', 'stroke-width': 2.5 * u }), g.firstChild);
+        const b = svgEl('g', { class: 'fp-gfci', transform: `translate(${-r * 0.9},${-r * 0.85})` });
+        b.appendChild(svgEl('circle', { r: r * 0.55, 'stroke-width': u }));
+        const t = svgEl('text', { y: r * 0.04, 'font-size': r * 0.75 }); t.textContent = 'G'; b.appendChild(t);
         g.appendChild(b);
-      } else if (showWiring && planProtectedBy(runsIn(), isGfci, item.Id)) {
+        const tag = svgEl('text', { y: r + 13 * u, class: 'fp-gfci-tag', 'font-size': font * 0.7 }); tag.textContent = 'GFCI';
+        g.appendChild(tag);
+      } else if ((showWiring || trace) && planProtectedBy(runsIn(), isGfci, item.Id)) {
         g.appendChild(svgEl('circle', { cx: r * 0.8, cy: r * 0.75, r: r * 0.28, class: 'fp-protected-dot', 'stroke-width': u }));
       }
       if (!known) {
@@ -1613,17 +2226,21 @@ function mount(sec     , host     ) {
     const dimsFor = rooms.filter(rm => showSizes || (mode === 'edit' && selection?.type === 'room' && selection.id === rm.Id));
     dimsFor.forEach(rm => {
       const poly       = rm.Shape;
+      const inner = insideOf(rm, mass);
       const sign = planArea(poly) >= 0 ? 1 : -1;
       poly.forEach((a, i) => {
         const b = poly[(i + 1) % poly.length];
         const L = Math.hypot(b.X - a.X, b.Y - a.Y);
+        // Read inside the walls, as a tape measure would.
+        const ia = inner[i], ib = inner[(i + 1) % inner.length];
+        const inL = Math.hypot(ib.X - ia.X, ib.Y - ia.Y);
         if (L / u < 40) return;
         const nx = -(b.Y - a.Y) / L * sign, ny = (b.X - a.X) / L * sign;
         let ang = Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI;
         if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
         const mx = (a.X + b.X) / 2 - nx * 11 * u, my = (a.Y + b.Y) / 2 - ny * 11 * u;
         const t = svgEl('text', { x: mx, y: my, class: 'fp-dim', 'font-size': font * 0.85, transform: `rotate(${ang} ${mx} ${my})` });
-        t.textContent = len(L);
+        t.textContent = len(inL);
         svg.appendChild(t);
       });
     });
@@ -1674,34 +2291,63 @@ function mount(sec     , host     ) {
         svg.appendChild(lk);
       }
     });
-    // Constraints, where they hold: a pill on each wall or corner, red where they cannot.
+    // Constraints: only the selected room's (every one, with the Constrain tool), and any that cannot hold. Each says
+    // in a word what it holds; the walls it pairs are lit and joined.
     if (consShown()) {
       const pill = (at    , text        , unmet         ) => {
-        const w = (text.length * 6.5 + 10) * u, hh = 15 * u;
+        const w = (text.length * 6.2 + 12) * u, hh = 16 * u;
         const g = svgEl('g', { class: 'fp-cons' + (unmet ? ' is-unmet' : ''), transform: `translate(${at.X},${at.Y})` });
         g.appendChild(svgEl('rect', { x: -w / 2, y: -hh / 2, width: w, height: hh, rx: hh / 2, 'stroke-width': u }));
         const t = svgEl('text', { y: u, 'font-size': 10.5 * u }); t.textContent = text; g.appendChild(t);
         svg.appendChild(g);
       };
+      const wall = (m     , unmet         ) => svg.appendChild(svgEl('line', { x1: m.a.X, y1: m.a.Y, x2: m.b.X, y2: m.b.Y, class: 'fp-cons-wall' + (unmet ? ' is-unmet' : ''), 'stroke-width': 4 * u }));
       const inward = (m     , px        ) => { const dx = m.centre.X - m.mid.X, dy = m.centre.Y - m.mid.Y, d = Math.hypot(dx, dy) || 1; return { X: m.mid.X + dx / d * px * u, Y: m.mid.Y + dy / d * px * u }; };
-      let pair = 0;
+      /// The square or arc a draughtsman marks a held corner with, drawn along its two walls.
+      const cornerMark = (sh     , i        , unmet         ) => {
+        const n = sh.Shape.length, B = sh.Shape[i], A = sh.Shape[(i - 1 + n) % n], C = sh.Shape[(i + 1) % n];
+        const ua = { X: A.X - B.X, Y: A.Y - B.Y }, uc = { X: C.X - B.X, Y: C.Y - B.Y };
+        const la = Math.hypot(ua.X, ua.Y) || 1, lc = Math.hypot(uc.X, uc.Y) || 1;
+        const m = Math.min(10 * u, la / 3, lc / 3);
+        const a = { X: B.X + ua.X / la * m, Y: B.Y + ua.Y / la * m }, c2 = { X: B.X + uc.X / lc * m, Y: B.Y + uc.Y / lc * m };
+        const square = Math.abs(Math.abs(planCornerAngle(sh, i)) - 90) <= 0.5;
+        const d = square ? `M${a.X} ${a.Y} L${a.X + c2.X - B.X} ${a.Y + c2.Y - B.Y} L${c2.X} ${c2.Y}` : `M${a.X} ${a.Y} A${m} ${m} 0 0 ${planCornerAngle(sh, i) > 0 ? 1 : 0} ${c2.X} ${c2.Y}`;
+        svg.appendChild(svgEl('path', { d, class: 'fp-cons-mark' + (unmet ? ' is-unmet' : ''), 'stroke-width': 1.6 * u }));
+      };
+      const all = mode === 'edit' && tool === 'constrain';
       constraintsNow().forEach(c => {
         const unmet = lastSolve.unmet.includes(c.Id);
+        if (!(unmet || all || c.Id === consLit || c.Refs.some(r => r.Room === selection?.id))) return;
         if (c.Kind === 'length' || c.Kind === 'horizontal' || c.Kind === 'vertical') {
           const m = edgeMid(c.Refs[0]);
-          if (m) pill(inward(m, c.Kind === 'length' ? 16 : 34), c.Kind === 'length' ? len(Number(c.Value) || 0) : c.Kind === 'horizontal' ? 'H' : 'V', unmet);
+          if (m) { wall(m, unmet); pill(inward(m, 16), c.Kind === 'length' ? len(Number(c.Value) || 0) : c.Kind === 'horizontal' ? 'level' : 'plumb', unmet); }
         } else if (c.Kind === 'angle') {
           const q = cornerPt(c.Refs[0]); const sh = shapeById(c.Refs[0].Room);
-          if (q && sh) { const cc = planCentroid(sh.Shape); const dx = cc.X - q.X, dy = cc.Y - q.Y, d = Math.hypot(dx, dy) || 1; pill({ X: q.X + dx / d * 22 * u, Y: q.Y + dy / d * 22 * u }, `${Math.round(Math.abs(Number(c.Value) || 0))}°`, unmet); }
+          if (q && sh) {
+            cornerMark(sh, c.Refs[0].Corner , unmet);
+            // Where it cannot hold, the pill says what the corner is, beside what it should be.
+            const want = Math.round(Math.abs(Number(c.Value) || 0)), now = Math.round(Math.abs(planCornerAngle(sh, c.Refs[0].Corner )));
+            const cc = planCentroid(sh.Shape); const dx = cc.X - q.X, dy = cc.Y - q.Y, d = Math.hypot(dx, dy) || 1;
+            pill({ X: q.X + dx / d * 26 * u, Y: q.Y + dy / d * 26 * u }, unmet && now !== want ? `${now}° ≠ ${want}°` : `${want}°`, unmet);
+          }
         } else if (c.Kind === 'coincident') {
-          const q = cornerPt(c.Refs[0]);
+          const q = cornerPt(c.Refs[0]) || cornerPt(c.Refs[1]);
           if (q) svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u, class: 'fp-cons-ring' + (unmet ? ' is-unmet' : ''), 'stroke-width': 2 * u }));
+          const m = c.Refs[1] && edgeMid(c.Refs[1]); if (m) wall(m, unmet);
         } else {
-          pair++;
-          const sym = c.Kind === 'parallel' ? '∥' : c.Kind === 'perpendicular' ? '⊥' : '≡';
-          c.Refs.forEach(r => { const m = edgeMid(r); if (m) pill(inward(m, 34), `${sym}${pair}`, unmet); });
+          const ms = c.Refs.map(edgeMid).filter(Boolean)         ;
+          ms.forEach(m => wall(m, unmet));
+          if (ms.length === 2) svg.appendChild(svgEl('line', { x1: ms[0].mid.X, y1: ms[0].mid.Y, x2: ms[1].mid.X, y2: ms[1].mid.Y, class: 'fp-cons-link' + (unmet ? ' is-unmet' : ''), 'stroke-width': 1.5 * u, 'stroke-dasharray': `${4 * u} ${3 * u}` }));
+          const at = ms.length === 2 ? { X: (ms[0].mid.X + ms[1].mid.X) / 2, Y: (ms[0].mid.Y + ms[1].mid.Y) / 2 } : ms[0] && inward(ms[0], 16);
+          if (at) pill(at, c.Kind === 'parallel' ? 'parallel' : c.Kind === 'perpendicular' ? 'square' : 'in line', unmet);
         }
       });
+    }
+    // The wall or corner a drag would take hold of.
+    if (grabLit && !dragging && mode === 'edit') {
+      const g = grabLit, cls = 'fp-grab' + (g.locked ? ' is-locked' : '');
+      if (g.corner != null) { const q = g.sh.Shape[g.corner]; if (q) svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: 8 * u * hs(), class: cls, 'stroke-width': 3 * u })); }
+      else { const [i, j] = planEdgeCorners(g.sh, g.edge ); const a = g.sh.Shape[i], b = g.sh.Shape[j]; if (a && b) svg.appendChild(svgEl('line', { x1: a.X, y1: a.Y, x2: b.X, y2: b.Y, class: cls, 'stroke-width': 5 * u })); }
     }
     // What the Constrain tool has picked.
     if (mode === 'edit' && tool === 'constrain') cPicks.forEach(r => {
@@ -1735,7 +2381,7 @@ function mount(sec     , host     ) {
     }
     if (draft.length) {
       const pts = hover ? [...draft, hover] : draft;
-      svg.appendChild(svgEl('polyline', { points: points(pts), class: 'fp-draft', 'stroke-width': 2 * u }));
+      svg.appendChild(svgEl('polyline', { points: points(pts), class: 'fp-draft' + (tool === 'wall' ? ' is-wall' : ''), 'stroke-width': tool === 'wall' ? Math.max(0.1143 * scale(), 3 * u) : 2 * u }));
       draft.forEach((q, i) => svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: (i === 0 ? 9 : 6) * u, class: 'fp-draft-pt' + (i === 0 ? ' is-first' : '') })));
     }
     if (wireDraft) {
@@ -1758,7 +2404,7 @@ function mount(sec     , host     ) {
     }
 
     // The scale the shading is on, with what the unshaded rooms mean.
-    if (mode === 'view' && rooms.length) {
+    if (mode === 'view' && !trace && rooms.length) {
       legend.append(
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch fp-grad' }), `0 – ${max > 0 ? fmt(max) : 'no readings yet'}`),
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch is-unmetered' }), 'unmetered'),
@@ -1766,7 +2412,7 @@ function mount(sec     , host     ) {
     }
     // The circuits on this floor, each a way to bring that circuit forward and fade the rest.
     const refs = [...new Set([...itemsNow().map((i     ) => i.Circuit), ...runsNow().map(r => r.Circuit)].filter(Boolean))]            ;
-    if (showWiring && refs.length) {
+    if ((showWiring || trace) && refs.length) {
       const box = el('div', { class: 'fp-circuits' }, el('span', { class: 'fp-circuits-k', text: 'Circuits' }));
       refs.sort().forEach(ref => {
         const b = el('button', { class: 'fp-chip' + (focused === ref ? ' is-on' : ''), type: 'button', title: 'Bring this circuit forward; tap again to show them all.' },
@@ -1790,6 +2436,10 @@ function mount(sec     , host     ) {
     (scaleBar.children[0]       ).style.width = `${Math.round(px)}px`;
     scaleBar.children[1].textContent = bar.label;
     scaleBar.hidden = !floorNow();
+    const north = Number(floorNow()?.floor.North) || 0;
+    compass.hidden = !floorNow() || hidden.has('compass');
+    needle.style.transform = `rotate(${north}deg)`;
+    points4.forEach(q => q.el.setAttribute('transform', `rotate(${-north} ${q.x} ${q.y})`));
   };
 
   // --- Pointer handling ----------------------------------------------------------------------------
@@ -1810,14 +2460,15 @@ function mount(sec     , host     ) {
       if (d.item) return { item: d.item           };
       if (d.opening) return { opening: d.opening           };
       if (d.run) return { run: d.run           };
+      if (d.wall) return { wall: d.wall           };
       if (d.area) return { area: d.area           };
-      if (d.room) return { room: d.room           };
+      if (d.room || d.label) return { room: (d.room || d.label)           };
     }
     return {}       ;
   };
   /// Select what was hit. With Shift, Ctrl or ⌘ it is added to the selection, or taken out if already in it.
   const selectHit = (hit     , additive = false) => {
-    const next            = hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening } : hit.run ? { type: 'run', id: hit.run }
+    const next            = hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening } : hit.run ? { type: 'run', id: hit.run } : hit.wall ? { type: 'wall', id: hit.wall }
       : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
     selectedCorner = -1; selectedBend = -1;
     if (!additive) { selection = next; extra = []; return; }
@@ -1829,8 +2480,92 @@ function mount(sec     , host     ) {
     extra = all.slice(1);
   };
   const hitSel = (hit     )                                => hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening }
-    : hit.run ? { type: 'run', id: hit.run } : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
+    : hit.run ? { type: 'run', id: hit.run } : hit.wall ? { type: 'wall', id: hit.wall } : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
 
+  /// The tools a wall or corner can be dragged from without going back to Select: those that act on a tap, not a drag.
+  const GRAB_TOOLS = new Set(['select', 'constrain', 'door', 'window', 'item', 'measure']);
+  /// The corner or wall a drag here would take hold of, on any room or area, selected or not: a corner when one is
+  /// close, else a wall. The selected shape wins where they meet, then rooms over areas.
+  const grabAt = (p    )                                                                      => {
+    if (mode !== 'edit' || !GRAB_TOOLS.has(tool) || extra.length) return null;
+    const sel = shapeOf(selection);
+    const order = [...(sel ? [sel] : []), ...roomsNow().filter(r => r !== sel && (r.Shape || []).length >= 3), ...areasNow().filter(a => a !== sel && (a.Shape || []).length >= 3)];
+    const cReach = 10 * upp() * hs(), wReach = 7 * upp() * hs();
+    let best      = null, bestD = cReach;
+    order.forEach(sh => sh.Shape.forEach((q    , i        ) => { const d = Math.hypot(q.X - p.X, q.Y - p.Y); if (d < bestD - 1e-9) { bestD = d; best = { sh, corner: i }; } }));
+    if (!best) {
+      bestD = wReach;
+      order.forEach(sh => sh.Shape.forEach((q    , i        ) => {
+        const n = planNearestOnSegment(p, q, sh.Shape[(i + 1) % sh.Shape.length]);
+        const d = Math.hypot(n.X - p.X, n.Y - p.Y);
+        if (d < bestD - 1e-9) { bestD = d; best = { sh, edge: i }; }
+      }));
+    }
+    if (!best) return null;
+    const ks = best.corner != null ? [best.corner] : planEdgeCorners(best.sh, best.edge);
+    best.locked = ks.some((k        ) => cornerLocked(best.sh, k) || planSharedCorners(shapesNow(), best.sh.Id, k).some(l => cornerLocked(shapeById(l.room), l.corner)));
+    return best;
+  };
+  /// Take hold of a corner or a wall of `target` for dragging.
+  const holdCorner = (target     , index        , apart         ) => {
+    gesture.kind = 'corner'; gesture.index = index; selectedCorner = index;
+    // A corner shared with a neighbour moves in both rooms, unless Alt pulls it apart.
+    gesture.linked = apart ? [] : planSharedCorners(shapesNow(), target.Id, index);
+    const held = cornerLocked(target, index) || gesture.linked.some((l     ) => cornerLocked(shapeById(l.room), l.corner));
+    if (held) { gesture.kind = 'none'; saidLocked(); }
+  };
+  const holdWall = (target     , edge        , apart         ) => {
+    // Dragging a wall slides the whole wall, keeping its direction; its neighbours stretch to follow.
+    const [i, j] = planEdgeCorners(target, edge);
+    gesture.kind = 'wall'; gesture.index = edge;
+    gesture.ends = [i, j].map(k => ({ k, X: target.Shape[k].X, Y: target.Shape[k].Y, linked: apart ? [] : planSharedCorners(shapesNow(), target.Id, k) }));
+    const held = gesture.ends.some((x     ) => cornerLocked(target, x.k) || x.linked.some((l     ) => cornerLocked(shapeById(l.room), l.corner)));
+    if (held) { gesture.kind = 'none'; saidLocked(); }
+  };
+  /// Grabbed without being selected first: it is selected, then held.
+  const holdGrab = (g                                        , apart         ) => {
+    const type          = roomsNow().includes(g.sh) ? 'room' : 'area';
+    if (!(selection?.type === type && selection.id === g.sh.Id)) { selection = { type, id: g.sh.Id }; extra = []; selectedBend = -1; drawSide(); }
+    if (g.corner != null) holdCorner(g.sh, g.corner, apart); else holdWall(g.sh, g.edge , apart);
+  };
+
+  /// What a drag from under the pointer would do, before it starts: the cursor says it, and the wall or corner it would
+  /// take hold of is lit.
+  let grabLit                                                                      = null;
+  const cursorFor = (e     )         => {
+    if (mode !== 'edit' || spaceDown) return '';
+    const g = grabLit;
+    if (g) {
+      if (g.locked) return 'not-allowed';
+      if (g.corner != null) return 'move';
+      const [i, j] = planEdgeCorners(g.sh, g.edge );
+      const a = g.sh.Shape[i], b = g.sh.Shape[j];
+      // The wall slides across itself, so the arrows point across it.
+      const t = ((Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI + 90) % 180 + 180) % 180;
+      return t < 22.5 || t >= 157.5 ? 'ew-resize' : t < 67.5 ? 'nwse-resize' : t < 112.5 ? 'ns-resize' : 'nesw-resize';
+    }
+    if (tool !== 'select') return '';
+    const hit = hitOf(e);
+    if (hit.resize) return 'nwse-resize';
+    if (hit.rotate) return 'grab';
+    if (hit.corner != null || hit.mid != null || hit.runpt != null || hit.runmid != null) return 'move';
+    const under = hitSel(hit);
+    if (!under) return '';
+    if (under.type === 'room' || under.type === 'area') return shapeHeld(shapeOf(under)) ? 'not-allowed' : 'move';
+    return 'move';
+  };
+  const showGrab = (e     ) => {
+    const g = grabAt(toPlan(e));
+    const key = (x          ) => x ? `${x.sh.Id}:${x.corner ?? ''}:${x.edge ?? ''}` : '';
+    const changed = key(g) !== key(grabLit);
+    grabLit = g;
+    svg.style.cursor = cursorFor(e);
+    if (changed) drawPlan();
+  };
+  svg.addEventListener('pointerleave', () => { if (grabLit) { grabLit = null; drawPlan(); } svg.style.cursor = ''; });
+
+  /// The room whose name was pressed, if it was one.
+  const labelOf = (e     )         => { for (let n = e.target; n && n !== svg; n = n.parentNode || n.parent) if (n.dataset?.label) return n.dataset.label          ; return ''; };
   svg.addEventListener('pointerdown', (e     ) => {
     // The middle button pans in every tool, as it does in drawing programs; the right button is left to the browser.
     if (e.button != null && e.button > 1) return;
@@ -1857,29 +2592,27 @@ function mount(sec     , host     ) {
       gesture.orig = { w: Number(f.Width) || 1000, h: Number(f.Height) || 700 };
       gesture.all = movable(everything());
       gesture.box = boundsOf(gesture.all);
+    } else if (mode === 'edit' && tool === 'select' && labelOf(e) && !additive) {
+      // A room's name drags on its own, to wherever in the room reads best.
+      const room = roomsNow().find(r => r.Id === labelOf(e));
+      if (room?.Locked) { gesture.kind = 'none'; saidLocked(); }
+      else if (room) {
+        const at = room.LabelX != null && room.LabelY != null ? { X: Number(room.LabelX), Y: Number(room.LabelY) } : planLabelPoint(room.Shape);
+        gesture.kind = 'label'; gesture.room = room; gesture.off = { X: at.X - p.X, Y: at.Y - p.Y };
+      }
     } else if (mode === 'edit' && tool === 'select') {
       const target = extra.length ? null : shapeOf(selection);
-      const run = !extra.length && selection?.type === 'run' ? runOf(selection.id) : null;
+      const run = lineSel();
       const under = hitSel(hit);
-      if (hit.corner != null && target) {
-        gesture.kind = 'corner'; gesture.index = hit.corner; selectedCorner = hit.corner;
-        // A corner shared with a neighbour moves in both rooms, unless Alt pulls it apart.
-        gesture.linked = e.altKey ? [] : planSharedCorners(shapesNow(), target.Id, hit.corner);
-        const held = cornerLocked(target, hit.corner) || gesture.linked.some((l     ) => cornerLocked(shapeById(l.room), l.corner));
-        if (held) { gesture.kind = 'none'; saidLocked(); }
-      }
-      else if (hit.mid != null && target) {
-        // Dragging a wall's middle slides the whole wall, keeping its direction; its neighbours stretch to follow.
-        const [i, j] = planEdgeCorners(target, hit.mid);
-        gesture.kind = 'wall'; gesture.index = hit.mid;
-        gesture.ends = [i, j].map(k => ({ k, X: target.Shape[k].X, Y: target.Shape[k].Y, linked: e.altKey ? [] : planSharedCorners(shapesNow(), target.Id, k) }));
-        const held = gesture.ends.some((x     ) => cornerLocked(target, x.k) || x.linked.some((l     ) => cornerLocked(shapeById(l.room), l.corner)));
-        if (held) { gesture.kind = 'none'; saidLocked(); }
-      }
+      // Near a wall or corner, a drag takes hold of it, selected or not; items, doors and wires on it come first.
+      const grab = under && under.type !== 'room' && under.type !== 'area' ? null : grabAt(p);
+      if (hit.corner != null && target) holdCorner(target, hit.corner, !!e.altKey);
+      else if (hit.mid != null && target) holdWall(target, hit.mid, !!e.altKey);
       else if (hit.runpt != null && run) { gesture.kind = 'runpt'; gesture.index = hit.runpt; selectedBend = hit.runpt; }
       else if (hit.runmid != null && run) { gesture.kind = 'runinsert'; gesture.index = hit.runmid; }
       else if (hit.resize) { gesture.kind = 'resize'; }
       else if (hit.rotate) { gesture.kind = 'rotate'; }
+      else if (grab && !additive) holdGrab(grab, !!e.altKey);
       else if (under && additive) { gesture.kind = 'none'; }
       else if (under) {
         // Dragging anything already selected moves the whole selection; anything else is selected first.
@@ -1887,7 +2620,7 @@ function mount(sec     , host     ) {
         gesture.kind = 'group';
         gesture.members = movable(selected());
         const m0 = gesture.members;
-        if (!m0.shapes.length && !m0.items.length && !m0.openings.length && !m0.runs.length) { gesture.kind = 'none'; saidLocked(); }
+        if (!m0.shapes.length && !m0.items.length && !m0.openings.length && !m0.runs.length && !m0.walls.length) { gesture.kind = 'none'; saidLocked(); }
         gesture.single = selected().length === 1 ? selection : null;
       } else {
         gesture.kind = 'marquee';
@@ -1896,6 +2629,9 @@ function mount(sec     , host     ) {
       gesture.kind = 'rect'; rectStart = snapped(p); rectEnd = rectStart;
     } else if (mode === 'edit' && tool !== 'pan') {
       gesture.kind = 'tap';
+      // A tap does what the tool does; a drag from a wall or corner reshapes it, without going back to Select.
+      gesture.grab = grabAt(p);
+      gesture.apart = !!e.altKey;
     }
     dragging = true;
     drawPlan();
@@ -1905,6 +2641,7 @@ function mount(sec     , host     ) {
     if (!pointers.has(e.pointerId)) {
       // Hovering: the next corner, bend or measuring point follows the pointer.
       if (draft.length || wireDraft || (measure && !measure.b)) { hover = tool === 'wire' ? drawSnap(wireLast(), toPlan(e)) : tool === 'measure' ? drawSnap(measure?.a, toPlan(e)) : drawSnap(draft[draft.length - 1], toPlan(e)); drawPlan(); }
+      else if (e.pointerType !== 'touch') showGrab(e);
       return;
     }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1925,8 +2662,9 @@ function mount(sec     , host     ) {
     gesture.moved = true;
     const p = toPlan(e);
     // A drag is one change: remembered once, as it starts.
-    const begin = () => { if (!gesture.pushed) { history.push(); gesture.pushed = true; } };
+    const begin = () => { if (!gesture.pushed) { history.push(); gesture.pushed = true; gesture.before = outlines(); } };
     const { w, h } = floorSize();
+    if (gesture.kind === 'tap' && gesture.grab) holdGrab(gesture.grab, gesture.apart);
     const k = gesture.kind;
     if (k === 'pan' || k === 'tap' || k === 'none') {
       if (k !== 'pan' && mode === 'edit' && tool !== 'pan') { gesture.kind = 'pan'; }
@@ -1935,6 +2673,9 @@ function mount(sec     , host     ) {
       vb = { ...gesture.vb, x: gesture.vb.x - (e.clientX - gesture.sx) / sc, y: gesture.vb.y - (e.clientY - gesture.sy) / sc };
     } else if (k === 'marquee') {
       marquee = { a: gesture.start, b: p };
+    } else if (k === 'label') {
+      begin();
+      gesture.room.LabelX = planRound(p.X + gesture.off.X); gesture.room.LabelY = planRound(p.Y + gesture.off.Y);
     } else if (k === 'plot') {
       begin();
       // Growing to the left or top moves everything drawn along with the edge, so the drawing stays put on screen.
@@ -1983,7 +2724,12 @@ function mount(sec     , host     ) {
         const box = boundsOf(m);
         if (box) { dx = Math.max(-box.x, Math.min(w - box.x - box.w, dx)); dy = Math.max(-box.y, Math.min(h - box.y - box.h, dy)); }
         shift(m, dx, dy);
-        if (m.shapes.length) solve(m.shapes.flatMap((x     ) => keysOf(x.sh)));
+        // Moved, a room leaves the rooms it only touched; those joined to it by a constraint come along.
+        if (m.shapes.length || m.walls.length) {
+          gesture.before = null;
+          const moved = [...m.shapes.map((x     ) => x.sh), ...m.walls.map((x     ) => shapeById(x.r.Id))];
+          solve(moved.flatMap((x     ) => keysOf(x)), moved.map((x     ) => x.Id));
+        }
       }
     } else if (k === 'resize' || k === 'rotate') {
       begin();
@@ -2019,7 +2765,7 @@ function mount(sec     , host     ) {
           s.Shape[x.k] = q; fixed.push(`${s.Id}#${x.k}`);
           x.linked.forEach((l     ) => { const o = shapeById(l.room); if (o) { o.Shape[l.corner] = { ...q }; fixed.push(`${o.Id}#${l.corner}`); } });
         });
-        solve(fixed);
+        solve(fixed, [s.Id], !!e.shiftKey);
       }
     } else if (k === 'corner') {
       begin();
@@ -2029,21 +2775,24 @@ function mount(sec     , host     ) {
         s.Shape[gesture.index] = q;
         const fixed = [`${s.Id}#${gesture.index}`];
         (gesture.linked || []).forEach((l     ) => { const o = shapeById(l.room); if (o) { o.Shape[l.corner] = { ...q }; fixed.push(`${o.Id}#${l.corner}`); } });
-        solve(fixed);
+        solve(fixed, [s.Id], !!e.shiftKey);
       }
     } else if (k === 'rect') {
       rectEnd = snapped(p);
     } else if (k === 'runpt' || k === 'runinsert') {
       begin();
-      const r = runOf(selection .id);
+      const r = lineSel();
       if (r) {
         const pts = ensure(r, 'Points', []);
         if (k === 'runinsert') {
           // Bends are stored between the ends; a midpoint before the first bend inserts at the front.
           const at = Math.max(0, Math.min(pts.length, gesture.index - (r.From ? 1 : 0) + 1));
           pts.splice(at, 0, drawSnap(null, p));
+          if (selection .type === 'wall') planRefsAfterInsert(constraintsNow(), r.Id, at);
           gesture.kind = 'runpt'; gesture.index = at;
         } else pts[gesture.index] = drawSnap(null, p);
+        // A wall's point is a corner the constraints hold, as a room's is.
+        if (selection .type === 'wall') solve([`${r.Id}#${gesture.index}`], [r.Id], !!e.shiftKey);
       }
     }
     drawPlan();
@@ -2076,7 +2825,8 @@ function mount(sec     , host     ) {
     if (g.kind === 'rect' && rectStart && rectEnd) {
       const poly = planRect(rectStart, rectEnd);
       rectStart = null; rectEnd = null;
-      if (Math.abs(planArea(poly)) > (0.3 * scale()) ** 2) finishOutline(poly);
+      if (Math.abs(planArea(poly)) > (0.3 * scale()) ** 2) { if (claimFor && tool === 'room') claimSpace(claimFor, poly); else finishOutline(poly); }
+      else if (!claimFor && tool !== 'area') { const gap = gapAt(p); if (gap) finishOutline(gap); else render(); }
       else render();
       return;
     }
@@ -2107,7 +2857,12 @@ function mount(sec     , host     ) {
   svg.addEventListener('pointerup', endPointer);
   svg.addEventListener('pointercancel', (e     ) => { pointers.delete(e.pointerId); gesture = null; pinch = null; marquee = null; dragging = false; rectStart = null; rectEnd = null; drawPlan(); });
   svg.addEventListener('pointerleave', () => { if (hover) { hover = null; drawPlan(); } });
-  svg.addEventListener('dblclick', () => { if (wireDraft) finishWire(''); else if (draft.length >= 3) finishOutline(draft); });
+  svg.addEventListener('dblclick', (e     ) => {
+    // Double-clicking a moved name puts it back where the room would put it.
+    const id = mode === 'edit' && tool === 'select' ? labelOf(e) : '';
+    const room = id && roomsNow().find(r => r.Id === id);
+    if (room && room.LabelX != null && !room.Locked) { act(() => { delete room.LabelX; delete room.LabelY; }); return; }
+    if (wireDraft) finishWire(''); else if (tool === 'wall' && draft.length >= 2) finishWall(draft); else if (draft.length >= 3) finishOutline(draft); });
 
   // --- The menu a right-click opens, over whatever it was aimed at ----------------------------------
 
@@ -2115,7 +2870,9 @@ function mount(sec     , host     ) {
   const openMenu = (e     , entries         ) => fpMenu.open(e, entries);
   /// What a right-click offers, by what it landed on.
   /// A menu choice that edits: it turns Edit on first, so nothing in the menu is dead while viewing.
-  const onEdit = (fn            ) => () => { if (mode !== 'edit') { mode = 'edit'; tool = 'select'; } fn(); };
+  const onEdit = (fn            ) => { const run = () => { if (mode !== 'edit') { mode = 'edit'; tool = 'select'; } fn(); }; editOnly.add(run); return run; };
+  /// What changes the floor: left out of the menu while viewing, which offers only looking and Edit this floor.
+  const editOnly = new WeakSet            ();
   const menuFor = (hit     , p    )          => {
     const editing = mode === 'edit';
     const toEdit        = { label: 'Edit this floor', run: () => { mode = 'edit'; tool = 'select'; render(); } };
@@ -2124,11 +2881,12 @@ function mount(sec     , host     ) {
     const many = selected().length > 1;
     if (many) return [
       { label: `${selected().length} selected`, head: true },
+      ...(roomsPicked().length > 1 ? [{ label: 'Merge rooms', run: onEdit(() => mergeRooms()) }] : []),
       { label: 'Delete them', danger: true, run: onEdit(() => deleteSelection())},
       { label: 'Select none', run: () => { selection = null; extra = []; render(); } },
     ];
     if (hit.corner != null) return [{ label: 'Corner', head: true }, { label: 'Remove corner', danger: true, run: onEdit(() => { selectedCorner = hit.corner; removeCorner(); })}];
-    if (hit.runpt != null) return [{ label: 'Wire bend', head: true }, { label: 'Remove bend', danger: true, run: onEdit(() => { selectedBend = hit.runpt; removeBend(); })}];
+    if (hit.runpt != null) return [{ label: selection?.type === 'wall' ? 'Wall point' : 'Wire bend', head: true }, { label: selection?.type === 'wall' ? 'Remove point' : 'Remove bend', danger: true, run: onEdit(() => { selectedBend = hit.runpt; removeBend(); })}];
     if (hit.mid != null) {
       const sh = shapeOf(selection);
       const locked = !!sh && ((sh.LockedWalls || []).includes(hit.mid) || sh.Locked);
@@ -2169,6 +2927,7 @@ function mount(sec     , host     ) {
         { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())},
       ];
     }
+    if (hit.wall) return [{ label: 'Wall', head: true }, ...(wallSplits(hit.wall).length ? [{ label: 'Split the room with it', run: onEdit(() => splitByWall(hit.wall)) }] : []), { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())}];
     if (hit.run) {
       const r = runOf(hit.run);
       return [
@@ -2185,6 +2944,7 @@ function mount(sec     , host     ) {
         { label: sh.Name || sh.Id, head: true },
         { label: sh.Locked ? 'Unlock it' : 'Lock it', run: onEdit(() => act(() => { if (sh.Locked) delete sh.Locked; else sh.Locked = true; }))},
         { label: 'Redraw its outline', disabled: !!sh.Locked, run: onEdit(() => { act(() => { sh.Shape = []; setConstraints(planRefsWithout(constraintsNow(), sh.Id)); }); tool = hit.area ? 'area' : sh.Outdoor ? 'zone' : 'room'; render(); })},
+        ...(hit.room ? [{ label: 'Take in space…', disabled: !!sh.Locked, run: onEdit(() => { pickTool('room'); claimFor = sh.Id; render(); })}] : []),
         { label: 'Duplicate', disabled: !!hit.area, run: onEdit(() => duplicate())},
         { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())},
         ...(editing ? [] : [toEdit]),
@@ -2193,9 +2953,10 @@ function mount(sec     , host     ) {
     // Bare plot.
     return [
       { label: 'Here', head: true },
-      { label: 'Add a room here', disabled: !floorNow(), run: () => { mode = 'edit'; tool = 'room'; render(); roomBySize(false); } },
-      { label: `Place ${kindName(itemKind).toLowerCase()} here`, disabled: !floorNow(), run: () => { mode = 'edit'; tool = 'item'; render(); tap({ hit: {}, additive: false }, p); } },
-      { label: 'Background image…', disabled: !floorNow(), run: () => backgroundSheet() },
+      ...(gapAt(p) ? [{ label: 'Make this space a room', run: onEdit(() => { tool = 'room'; const gap = gapAt(p); if (gap) finishOutline(gap); }) }] : []),
+      { label: 'Add a room here', disabled: !floorNow(), run: onEdit(() => { tool = 'room'; render(); roomBySize(false); }) },
+      { label: `Place ${kindName(itemKind).toLowerCase()} here`, disabled: !floorNow(), run: onEdit(() => { tool = 'item'; render(); tap({ hit: {}, additive: false }, p); }) },
+      { label: 'Background image…', disabled: !floorNow(), run: onEdit(() => backgroundSheet()) },
       { label: 'Fit the floor in view', run: () => { fit(); drawPlan(); } },
       ...(editing ? [] : [toEdit]),
     ];
@@ -2203,7 +2964,11 @@ function mount(sec     , host     ) {
   svg.addEventListener('contextmenu', (e     ) => {
     e.preventDefault?.();
     const p = toPlan(e);
-    const entries = menuFor(hitOf(e), p);
+    let entries = menuFor(hitOf(e), p);
+    if (mode !== 'edit') {
+      entries = entries.filter(x => !x.run || !editOnly.has(x.run));
+      if (!entries.some(x => x.label === 'Edit this floor')) entries.push({ label: 'Edit this floor', run: () => { mode = 'edit'; tool = 'select'; render(); } });
+    }
     render();
     openMenu(e, entries);
   });
@@ -2257,6 +3022,14 @@ function mount(sec     , host     ) {
       const q = drawSnap(draft[draft.length - 1], p);
       const first = draft[0];
       if (first && draft.length >= 3 && Math.hypot(q.X - first.X, q.Y - first.Y) <= 14 * upp()) finishOutline(draft);
+      else { draft.push(q); render(); }
+      return;
+    }
+    if (tool === 'wall') {
+      const q = drawSnap(draft[draft.length - 1], p);
+      const last = draft[draft.length - 1];
+      // Tapping the last point again finishes the wall.
+      if (last && draft.length >= 2 && Math.hypot(q.X - last.X, q.Y - last.Y) <= 14 * upp()) finishWall(draft);
       else { draft.push(q); render(); }
       return;
     }
@@ -2321,6 +3094,58 @@ function mount(sec     , host     ) {
     }
   };
 
+  /// The empty space enclosed by rooms around a point, as an outline: tapping it with the Room tool makes it a room.
+  const gapAt = (p    )              => {
+    const rooms = roomsNow().filter(r => (r.Shape || []).length >= 3);
+    if (planShapeAt(rooms, p)) return null;
+    const gaps = planFaces(rooms.map(r => r.Shape)).filter(f => planContains(f.shape, p) && !planShapeAt(rooms, f.at));
+    gaps.sort((a, b) => planArea(a.shape) - planArea(b.shape));
+    return gaps[0]?.shape || null;
+  };
+
+  /// A room grown over a drawn rectangle: the space is cut out of the rooms it covered, and what stood there moves in.
+  const claimSpace = (id        , rect      ) => {
+    const keep = roomsNow().find(r => r.Id === id);
+    claimFor = ''; tool = 'select';
+    if (!keep) return render();
+    const box = (poly      ) => planBounds(poly);
+    const hits = (a     , b     ) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    const area = box([...keep.Shape, ...rect]);
+    const near = roomsNow().filter(r => r !== keep && (r.Shape || []).length >= 3 && hits(box(r.Shape), area));
+    const faces = planFaces([keep.Shape, rect, ...near.map(r => r.Shape)]);
+    const inRect = (f     ) => planContains(rect, f.at);
+    const changed = near.filter(r => faces.some(f => inRect(f) && planContains(r.Shape, f.at)));
+    if (changed.some(r => r.Locked) || keep.Locked) return toast('Unlock the rooms involved to move space between them.', false);
+    const grown = planJoin(faces.filter(f => inRect(f) || planContains(keep.Shape, f.at)).map(f => f.shape));
+    if (!grown) return toast(`That space does not join on to ${keep.Name || keep.Id}, so it was not added.`, false);
+    const rest = new Map                  ();
+    for (const r of changed) {
+      const left = faces.filter(f => !inRect(f) && planContains(r.Shape, f.at)).map(f => f.shape);
+      const shape = left.length ? planJoin(left) : null;
+      if (left.length && !shape) return toast(`That would split ${r.Name || r.Id} in two, so nothing was changed.`, false);
+      rest.set(r, shape);
+    }
+    act(() => {
+      let cons = constraintsNow();
+      const reshape = (r     , shape      ) => {
+        cons = planRefsAfterMerge(cons, r.Id, '', { [r.Id]: r.Shape }, shape).constraints;
+        r.Shape = shape.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) }));
+        delete r.LockedWalls;
+      };
+      reshape(keep, grown);
+      rest.forEach((shape, r) => {
+        if (shape) return reshape(r, shape);
+        cons = planRefsWithout(cons, r.Id);
+        roomsNow().splice(roomsNow().indexOf(r), 1);
+        areasNow().forEach(ar => { if ((ar.Rooms || []).includes(r.Id)) ar.Rooms = [...new Set((ar.Rooms            ).map(x => x === r.Id ? keep.Id : x))]; });
+      });
+      setConstraints(cons);
+      itemsIn().forEach((it     ) => { if (it.Room && it.Room !== keep.Id && changed.some(r => r.Id === it.Room) && planContains(rect, { X: it.X, Y: it.Y })) it.Room = keep.Id; });
+      itemsIn().forEach((it     ) => { if (it.Room && !roomsNow().some(r => r.Id === it.Room) && changed.some(r => r.Id === it.Room)) it.Room = keep.Id; });
+      selection = { type: 'room', id: keep.Id }; extra = [];
+    });
+  };
+
   /// A drawn outline becomes the selected room or area when it has none yet, and a new one otherwise.
   const finishOutline = (poly      ) => {
     const { w, h } = floorSize();
@@ -2351,6 +3176,67 @@ function mount(sec     , host     ) {
     render();
     // Straight to its name: nobody wants to live with "Room 4".
     setTimeout(() => (side.querySelector?.('.fp-name')       )?.focus?.(), 0);
+  };
+
+  /// A standalone wall from the points tapped, selected so its thickness can be set.
+  const finishWall = (pts      ) => {
+    draft = []; hover = null;
+    const clean = pts.filter((q, i) => i === 0 || Math.hypot(q.X - pts[i - 1].X, q.Y - pts[i - 1].Y) > 1e-6);
+    if (clean.length < 2) { render(); return; }
+    tool = 'select';
+    // Drawn right across a room, wall to wall, it splits the room in two instead of standing in it.
+    const cuts = roomsNow().filter(r => (r.Shape || []).length >= 3 && !r.Locked).map(r => ({ r, parts: planSplit(r.Shape, clean) })).filter(x => x.parts.length > 1);
+    if (cuts.length) return splitRooms(cuts);
+    const id = freshIn(wallsNow(), 'wall');
+    act(() => { wallsNow().push({ Id: id, Points: clean.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) })), Thickness: 0 }); selection = { type: 'wall', id }; });
+  };
+  /// A wall already standing across a room, drawn before walls split rooms, can still split it.
+  const wallSplits = (id        ) => {
+    const w = standaloneOf(id);
+    const pts       = w?.Points || [];
+    return pts.length < 2 ? [] : roomsNow().filter(r => (r.Shape || []).length >= 3 && !r.Locked).map(r => ({ r, parts: planSplit(r.Shape, pts) })).filter(x => x.parts.length > 1);
+  };
+  const splitByWall = (id        ) => {
+    const cuts = wallSplits(id);
+    if (!cuts.length) return;
+    splitRooms(cuts, id);
+  };
+  /// Each room cut keeps its name and the largest piece; the others become new rooms beside it, taking what stands
+  /// in them, and the areas and breakers that took in the room take them in too.
+  const splitRooms = (cuts                             , wall = '') => {
+    act(() => {
+      const w = wall ? standaloneOf(wall) : null;
+      if (w) wallsNow().splice(wallsNow().indexOf(w), 1);
+      let cons = w ? planRefsWithout(constraintsNow(), w.Id) : constraintsNow();
+      const round = (shape      ) => shape.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) }));
+      const born = new Map                  ();
+      cuts.forEach(({ r, parts }) => {
+        cons = planRefsAfterMerge(cons, r.Id, '', { [r.Id]: r.Shape }, parts[0]).constraints;
+        r.Shape = round(parts[0]);
+        delete r.LockedWalls;
+        const ids           = [];
+        parts.slice(1).forEach((shape, i) => {
+          const name = `${r.Name || r.Id} ${i + 2}`;
+          const id = freshId(name);
+          roomsNow().push({ Id: id, Name: name, Shape: round(shape), Outdoor: !!r.Outdoor, Surface: r.Surface || '' });
+          ids.push(id);
+          itemsIn().forEach((it     ) => { if (it.Room === r.Id && planContains(shape, { X: it.X, Y: it.Y })) it.Room = id; });
+        });
+        born.set(r.Id, ids);
+      });
+      setConstraints(cons);
+      const grow = (list          ) => [...new Set(list.flatMap(id => [id, ...(born.get(id) || [])]))];
+      areasNow().forEach(ar => { if ((ar.Rooms || []).some((id        ) => born.has(id))) ar.Rooms = grow(ar.Rooms); });
+      const walk = (o     ) => {
+        if (!o || typeof o !== 'object') return;
+        const loc = o.Ext?.locations;
+        if (loc && Array.isArray(loc.Rooms) && loc.Rooms.some((id        ) => born.has(id))) loc.Rooms = grow(loc.Rooms);
+        Object.values(o).forEach(walk);
+      };
+      walk(flowIn());
+      selection = { type: 'room', id: cuts[0].r.Id }; extra = [];
+    });
+    toast(cuts.length === 1 ? `Split ${cuts[0].r.Name || cuts[0].r.Id} in two.` : `Split ${cuts.length} rooms.`, true);
   };
 
   /// A wire drawn between two items, or out to a bare point. Its circuit comes from whichever end knows one.
@@ -2396,17 +3282,30 @@ function mount(sec     , host     ) {
     subBar.innerHTML = '';
     Object.entries(modeBtns).forEach(([m, b]) => { b.classList.toggle('is-on', m === mode); b.setAttribute('aria-selected', String(m === mode)); });
     if (mode === 'view') {
-      subBar.appendChild(seg([['now', 'Power now'], ['today', 'Today'], ['week', 'This week']], period, v => { period = v; remember('period', v); load(); },
-        'Shade by what each room is drawing now, or by the energy it has used over a period.'));
+      subBar.appendChild(seg([['now', 'Power now'], ['today', 'Today'], ['week', 'This week'], ['circuits', 'Circuits']], period, v => { period = v; remember('period', v); load(); },
+        'Shade by what each room is drawing now, or by the energy it has used over a period; or show every circuit in its own colour, to trace where each goes.'));
     }
     subBar.appendChild(check('Wiring', showWiring, v => { showWiring = v; remember('wiring', v ? '1' : '0'); drawPlan(); }, 'Show cable runs, and ring each item in its circuit’s colour.'));
     if (constraintsNow().length && !(mode === 'view' && window.matchMedia?.('(max-width: 560px)').matches)) subBar.appendChild(check('Constraints', showCons, v => { showCons = v; remember('cons', v ? '1' : '0'); drawPlan(); }, 'Show the constraints held on this floor: fixed lengths, angles, parallel and square walls.'));
+    const show = el('details', { class: 'fp-show' })                      ;
+    const pick = el('div', { class: 'fp-show-menu' });
+    [...SHOW_GROUPS.map(g => [g[0], g[1]]), ['compass', 'Compass']].forEach(([k, label]) => pick.appendChild(check(label, !hidden.has(k), v => {
+      if (v) hidden.delete(k); else hidden.add(k);
+      remember('hide', [...hidden].join(',')); drawPlan();
+    })));
+    show.append(el('summary', { class: 'ld-inst', text: hidden.size ? `Show (${hidden.size} hidden)` : 'Show', title: 'Choose which kinds of item the plan draws, and whether it shows the compass.' }), pick);
+    show.addEventListener('toggle', () => { if (!show.open) drawSub(); });
+    subBar.appendChild(show);
     subBar.appendChild(check('Sizes', showSizes, v => { showSizes = v; remember('sizes', v ? '1' : '0'); drawPlan(); }, 'Show every wall’s length and each room’s floor area.'));
     if (mode === 'edit' && floorBelow()) subBar.appendChild(check('Floor below', showBelow, v => { showBelow = v; remember('below', v ? '1' : '0'); drawPlan(); }, 'Show the floor beneath this one faintly, to line this one up with it.'));
     if (mode === 'edit') subBar.appendChild(check('Snap', snapOn, v => { snapOn = v; remember('snap', v ? '1' : '0'); }, 'Corners snap to other rooms’ corners and edges, and everything to a fine grid.'));
 
     palette.hidden = mode !== 'edit';
+    // What changes the floor shows only while editing; what takes it away only while viewing.
+    [addBtn, floorBtn, bgBtn, toolsBtn].forEach(b => b.classList.toggle('fp-off', mode !== 'edit'));
+    [exportBtn, printBtn].forEach(b => b.classList.toggle('fp-off', mode === 'edit'));
     body.classList.toggle('is-editing', mode === 'edit');
+    sec.classList.toggle('is-editing', mode === 'edit');
     Object.entries(toolBtns).forEach(([t, b]) => { b.classList.toggle('is-on', mode === 'edit' && t === tool); b.setAttribute('aria-pressed', String(mode === 'edit' && t === tool)); });
     undoBtn.disabled = !history.canUndo();
     redoBtn.disabled = !history.canRedo();
@@ -2414,18 +3313,25 @@ function mount(sec     , host     ) {
     opts.innerHTML = '';
     opts.hidden = mode !== 'edit';
     if (mode === 'edit') drawOpts();
-    const how = mode === 'view' ? 'Tap a room or item for its detail. Drag to pan, pinch or Ctrl+wheel to zoom.'
-      : FP_TOOLS.find(t => t[0] === tool)?.[3] || '';
+    // In Edit the options bar says what the tool does, so nothing sits over the plan being drawn on.
+    const what = FP_TOOLS.find(t => t[0] === tool)?.[3] || '';
+    if (mode === 'edit' && what && !opts.querySelector('.fp-opts-note')) opts.appendChild(el('span', { class: 'fp-opts-note', text: what }));
+    const how = mode === 'view' ? 'Tap a room or item for its detail. Drag to pan, pinch or Ctrl+wheel to zoom.' : '';
     hint.textContent = how;
     hint.hidden = !how || (mode === 'view' && (!!selection || viewHintSeen));
   };
 
   const drawOpts = () => {
     const add = (...n       ) => n.forEach(x => opts.appendChild(x));
-    if (tool === 'room' || tool === 'zone') {
+    if (tool === 'room' && claimFor) {
+      const who = roomsNow().find(r => r.Id === claimFor);
+      const cancel = btn('Cancel');
+      cancel.onclick = () => pickTool('select');
+      add(el('span', { class: 'fp-opts-note', text: `Drag over the space ${who?.Name || 'the room'} should take in. It is cut out of the rooms there.` }), cancel);
+    } else if (tool === 'room' || tool === 'zone') {
       const bySize = btn(tool === 'zone' ? 'Add an outdoor zone by size…' : 'Add a room by size…', 'primary');
       bySize.onclick = () => roomBySize(tool === 'zone');
-      add(bySize, el('span', { class: 'fp-opts-note', text: 'or drag across the plan.' }));
+      add(bySize, el('span', { class: 'fp-opts-note', text: 'or drag across the plan, or tap an empty space between rooms to fill it.' }));
     } else if (tool === 'outline') {
       if (draft.length) {
         const done = btn('Finish outline', 'primary');
@@ -2437,6 +3343,17 @@ function mount(sec     , host     ) {
         cancel.onclick = () => { draft = []; render(); };
         add(done, back, cancel, el('span', { class: 'fp-opts-note', text: `${draft.length} corner${draft.length === 1 ? '' : 's'}` }));
       } else add(el('span', { class: 'fp-opts-note', text: 'Tap the first corner. Double-tap or tap the first corner again to close.' }));
+    } else if (tool === 'wall') {
+      if (draft.length) {
+        const done = btn('Finish wall', 'primary');
+        done.disabled = draft.length < 2;
+        done.onclick = () => finishWall(draft);
+        const back = btn('Undo point');
+        back.onclick = () => { draft.pop(); render(); };
+        const cancel = btn('Cancel');
+        cancel.onclick = () => { draft = []; render(); };
+        add(done, back, cancel, el('span', { class: 'fp-opts-note', text: draft.length >= 2 ? len(planPathLength(draft)) : 'Tap where it goes next.' }));
+      } else add(el('span', { class: 'fp-opts-note', text: 'Tap one end of the wall, each bend, then the other end; tap it again or double-tap to finish.' }));
     } else if (tool === 'door') {
       add(seg(PLAN_OPENINGS.filter(o => o[0] !== 'window'), doorKind, v => { doorKind = v; render(); }));
     } else if (tool === 'item') {
@@ -2504,7 +3421,9 @@ function mount(sec     , host     ) {
         go('Hold angle', () => { const v = Math.max(1, Math.min(179.9, Number(deg.value) || 90)); addConstraint('angle', corners, Math.sign(cur || 1) * v); }, 'Hold the corner at this angle.');
         go('Square', () => addConstraint('angle', corners, Math.sign(cur || 1) * 90), 'Hold the corner at 90°.');
       } else if (corners.length === 2) {
-        go('Coincident', () => addConstraint('coincident', corners), 'Make the two corners one: a shared corner.');
+        go('Join', () => addConstraint('coincident', corners), 'Coincident: the two corners become one, and stay together as either room is moved or resized. The second comes to the first.');
+      } else if (corners.length === 1 && edges.length === 1) {
+        go('On wall', () => addConstraint('coincident', [corners[0], edges[0]]), 'Coincident: the corner stays on the wall’s line as either room is moved or resized.');
       } else if (edges.length === 2) {
         go('In line', () => addConstraint('colinear', edges), 'Colinear: the two walls lie along one line.');
         go('Parallel', () => addConstraint('parallel', edges));
@@ -2512,7 +3431,7 @@ function mount(sec     , host     ) {
         const a = edgeMid(edges[0]) , b = edgeMid(edges[1]) ;
         go('Same length', () => { addConstraint('length', [edges[1]], Math.round(a.len * 10) / 10); }, `Fix the second wall at the first one’s length, ${len(a.len)} (it is ${len(b.len)} now).`);
       } else if (cPicks.length === 2) {
-        add(el('span', { class: 'fp-opts-note', text: 'Pick two corners, or two walls.' }));
+        add(el('span', { class: 'fp-opts-note', text: 'Pick two corners, two walls, or a corner and a wall.' }));
       }
       if (cPicks.length) { const clear = btn('Clear'); clear.onclick = () => { cPicks = []; render(); }; add(clear); }
     } else if (tool === 'measure') {
@@ -2531,7 +3450,7 @@ function mount(sec     , host     ) {
         add(el('span', { class: 'fp-measure-read', text: len(d) }), el('span', { class: 'fp-opts-note', text: 'It is really' }), real, set);
       } else add(el('span', { class: 'fp-opts-note', text: measure ? 'Tap the second point.' : 'Tap the first point.' }));
     } else if (tool === 'select') {
-      add(el('span', { class: 'fp-opts-note', text: 'Drag to move; drag a box to select several. Double-click a corner or bend to remove it. Delete removes; Ctrl+Z undoes.' }));
+      add(el('span', { class: 'fp-opts-note', text: touch ? 'Drag to move; drag across empty space to select several; pinch to zoom. What is selected opens below.' : 'Drag to move; drag a box to select several. Double-click a corner or bend to remove it. Delete removes; Ctrl+Z undoes.' }));
     } else {
       add(el('span', { class: 'fp-opts-note', text: FP_TOOLS.find(t => t[0] === tool)?.[3] || '' }));
     }
@@ -2565,6 +3484,11 @@ function mount(sec     , host     ) {
   // --- Side panel ----------------------------------------------------------------------------------
   const row = (label        , value     , cls = '') => el('div', { class: 'fp-row ' + cls }, el('span', { class: 'fp-row-k', text: label }), typeof value === 'string' ? el('span', { class: 'fp-row-v', text: value }) : value);
   const field = (label        , input     , hintText = '') => el('label', { class: 'fp-field' }, el('span', { class: 'fp-field-k', text: label }), input, ...(hintText ? [el('span', { class: 'fp-field-hint', text: hintText })] : []));
+  const northChoices = (f     )                     => {
+    const c                     = [['0', 'Up'], ['45', 'Up and right'], ['90', 'Right'], ['135', 'Down and right'], ['180', 'Down'], ['225', 'Down and left'], ['270', 'Left'], ['315', 'Up and left']];
+    const now = String(Number(f.North) || 0);
+    return c.some(x => x[0] === now) ? c : [...c, [now, `${now}\u00b0`]];
+  };
   const select = (choices                    , value        , onPick                     ) => {
     const s = el('select', {})                     ;
     choices.forEach(([v, t]) => s.appendChild(el('option', { value: v, text: t })));
@@ -2639,8 +3563,24 @@ function mount(sec     , host     ) {
     return out;
   };
 
+  /// On a phone, what is selected in Edit opens in a sheet over the foot of the plan, so the plan stays in sight:
+  /// a peek at first, all of it on a tap of its grip.
+  let sheetFull = false;
+  const narrow = () => !!window.matchMedia?.('(max-width: 560px)').matches;
+  const asSheet = () => mode === 'edit' && !!selection && narrow();
   const drawSide = () => {
     side.innerHTML = '';
+    const sheet = asSheet();
+    side.classList.toggle('is-sheet', sheet);
+    side.classList.toggle('is-full', sheet && sheetFull);
+    sec.classList.toggle('has-sheet', sheet);
+    if (sheet) {
+      const grip = el('button', { class: 'fp-grip', type: 'button', title: sheetFull ? 'Show less' : 'Show more' });
+      grip.setAttribute('aria-label', sheetFull ? 'Show less' : 'Show more');
+      grip.setAttribute('aria-expanded', String(sheetFull));
+      grip.onclick = () => { sheetFull = !sheetFull; drawSide(); };
+      side.appendChild(grip);
+    }
     const fl = floorNow();
     if (!fl) {
       side.appendChild(el('h3', { text: 'Start with a floor' }));
@@ -2664,6 +3604,7 @@ function mount(sec     , host     ) {
     if (selection?.type === 'item') return drawItem(itemOf(selection.id), editing);
     if (selection?.type === 'opening') return drawOpening(openingOf(selection.id), editing);
     if (selection?.type === 'run') return drawRun(runOf(selection.id), editing);
+    if (selection?.type === 'wall') return drawWall(standaloneOf(selection.id), editing);
     if (selection && shapeOf(selection)) return drawShape(selection.type                   , shapeOf(selection), editing);
     drawFloorSummary(fl);
   };
@@ -2707,7 +3648,7 @@ function mount(sec     , host     ) {
       case 'angle': return `${refName(a)} at ${Math.round(Math.abs(Number(c.Value) || 0) * 10) / 10}°`;
       case 'horizontal': return `${refName(a)} level`;
       case 'vertical': return `${refName(a)} plumb`;
-      case 'coincident': return `${refName(a)} on ${refName(b)}`;
+      case 'coincident': return b?.Edge != null ? `${refName(a)} on ${refName(b)}` : `${refName(a)} joined to ${refName(b)}`;
       case 'colinear': return `${refName(a)} in line with ${refName(b)}`;
       case 'parallel': return `${refName(a)} parallel to ${refName(b)}`;
       case 'perpendicular': return `${refName(a)} square to ${refName(b)}`;
@@ -2715,6 +3656,29 @@ function mount(sec     , host     ) {
     return c.Kind;
   };
 
+  /// Square up: straightens a nearly square room, once. Nothing is stored; dragging it after keeps its level and plumb
+  /// walls anyway (#601).
+  const squareUp = (sh     ) => {
+    const poly       = sh.Shape;
+    const n = poly.length;
+    const tilt = (i        ) => { const a = poly[i], b = poly[(i + 1) % n]; return Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI; };
+    const off = (i        ) => Math.min(Math.abs(norm90(tilt(i))), Math.abs(Math.abs(norm90(tilt(i))) - 90));
+    const axis = poly.every((_, i) => off(i) <= 10);
+    const square = poly.every((_, i) => Math.abs(Math.abs(planCornerAngle(sh, i)) - 90) <= 15);
+    const done = poly.every((_, i) => off(i) <= 0.1) || poly.every((_, i) => Math.abs(Math.abs(planCornerAngle(sh, i)) - 90) <= 0.5);
+    const b = btn('Square up');
+    b.title = done ? 'It is square.' : axis || square ? 'Straighten its walls and corners to 90°.' : 'Only a room whose corners are all near 90° can be squared up.';
+    b.disabled = done || !!sh.Locked || !(axis || square);
+    b.onclick = () => act(() => {
+      const temp                   = axis
+        ? poly.map((_, i) => ({ Id: `squareup${i}`, Kind: Math.abs(norm90(tilt(i))) <= 10 ? 'horizontal' : 'vertical', Refs: [{ Room: sh.Id, Edge: i }], Value: null }))
+        : poly.slice(0, n - 1).map((_, i) => ({ Id: `squareup${i}`, Kind: 'angle', Refs: [{ Room: sh.Id, Corner: i }], Value: Math.sign(planCornerAngle(sh, i) || 1) * 90 }));
+      const first = poly.findIndex((_, i) => !cornerLocked(sh, i));
+      planSolve(solverShapes(), [...constraintsNow(), ...temp], new Set(first >= 0 && !(sh.LockedWalls || []).length ? [`${sh.Id}#${first}`] : []), 120, { before: before || undefined, hold: [sh.Id] });
+      solve([], [sh.Id]);
+    });
+    return b;
+  };
   const drawShape = (type                 , s     , editing         ) => {
     const p = placeOf(s.Id);
     const name = el('input', { type: 'text', class: 'fp-name', value: s.Name || '' })                    ;
@@ -2731,7 +3695,12 @@ function mount(sec     , host     ) {
       const lock = el('button', { class: 'small fp-lock' + (held ? ' is-on' : ''), type: 'button', title: held ? 'Unlock it, so it can be changed again.' : 'Lock it in place.' }, fpToolIcon('lock'), held ? ' Locked' : ' Lock');
       lock.setAttribute('aria-pressed', String(held));
       lock.onclick = () => act(() => { if (s.Locked) delete s.Locked; else s.Locked = true; });
-      side.appendChild(actions(lock));
+      const sq = poly.length >= 3 ? squareUp(s) : null;
+      const grow = btn('Take in space');
+      grow.title = 'Drag a rectangle over space this room should cover; it is cut out of the rooms there.';
+      grow.disabled = !!s.Locked || type !== 'room' || poly.length < 3;
+      grow.onclick = () => { pickTool('room'); claimFor = s.Id; render(); };
+      side.appendChild(actions(lock, ...(sq ? [sq] : []), grow));
     }
     /// A length typed for a wall keeps any length it is fixed at in step, then the rest of the plan follows.
     const settle = () => {
@@ -2741,17 +3710,19 @@ function mount(sec     , host     ) {
         const [i, j] = planEdgeCorners(s, c.Refs[0].Edge);
         if (i < n && j < n) c.Value = Math.round(Math.hypot(s.Shape[j].X - s.Shape[i].X, s.Shape[j].Y - s.Shape[i].Y) * 10) / 10;
       });
-      solve(keysOf(s));
+      solve(keysOf(s), [s.Id]);
     };
     const lengthFix = (edge        ) => constraintsNow().find(c => c.Kind === 'length' && c.Refs[0]?.Room === s.Id && c.Refs[0].Edge === edge);
     if (poly.length >= 3) {
       side.appendChild(el('h4', { text: 'Size' }));
-      side.appendChild(row('Floor area', areaText(poly)));
+      // Sizes read inside the walls when the floor gives them a thickness.
+      const inner = type === 'room' ? insideOf(s) : poly;
+      side.appendChild(row('Floor area', areaText(inner)));
       if (editing && type === 'room' && planIsBox(poly)) {
         // A rectangle is sized by its inside measurements; its top-left corner stays put.
-        const b = planBounds(poly);
-        const setBox = (w        , h        ) => { if (held || (s.LockedWalls || []).length) { saidLocked(); render(); return; } act(() => { s.Shape = planClamp(planRect({ X: b.x, Y: b.y }, { X: b.x + w, Y: b.y + h }), floorSize().w, floorSize().h); settle(); }); };
-        const wi = lenInput(b.w, w => setBox(w, b.h)), di = lenInput(b.h, h => setBox(b.w, h));
+        const b = planBounds(poly), ib = planBounds(inner);
+        const setBox = (w        , h        ) => { if (held || (s.LockedWalls || []).length) { saidLocked(); render(); return; } act(() => { s.Shape = planClamp(planRect({ X: b.x, Y: b.y }, { X: b.x + w + (b.w - ib.w), Y: b.y + h + (b.h - ib.h) }), floorSize().w, floorSize().h); settle(); }); };
+        const wi = lenInput(ib.w, w => setBox(w, ib.h)), di = lenInput(ib.h, h => setBox(ib.w, h));
         if (held) { wi.disabled = true; di.disabled = true; }
         side.appendChild(el('div', { class: 'fp-two' }, field('Width', wi), field('Depth', di)));
       }
@@ -2760,17 +3731,20 @@ function mount(sec     , host     ) {
       poly.forEach((a, i) => {
         const bpt = poly[(i + 1) % poly.length];
         const L = Math.hypot(bpt.X - a.X, bpt.Y - a.Y);
+        const ia = inner[i], ibp = inner[(i + 1) % inner.length];
+        const inL = inner === poly ? L : Math.hypot(ibp.X - ia.X, ibp.Y - ia.Y);
         const wallLocked = (s.LockedWalls || []).includes(i);
-        if (!editing) { walls.appendChild(row(`Wall ${i + 1}`, len(L) + (wallLocked ? ' · locked' : '') + (lengthFix(i) ? ' · fixed' : ''))); return; }
+        if (!editing) { walls.appendChild(row(`Wall ${i + 1}`, len(inL) + (wallLocked ? ' · locked' : '') + (lengthFix(i) ? ' · fixed' : ''))); return; }
         // Typing a wall's length moves the corner at its far end along the wall.
-        const inp = lenInput(L, want => {
+        const inp = lenInput(inL, wantIn => {
           if (held || cornerLocked(s, (i + 1) % poly.length)) { saidLocked(); render(); return; }
+          const want = wantIn + (L - inL);
           act(() => {
             if (!L) return;
             const k = want / L;
             s.Shape[(i + 1) % poly.length] = { X: planRound(a.X + (bpt.X - a.X) * k), Y: planRound(a.Y + (bpt.Y - a.Y) * k) };
             const fix = lengthFix(i); if (fix) fix.Value = Math.round(want * 10) / 10;
-            solve([`${s.Id}#${i}`, `${s.Id}#${(i + 1) % poly.length}`]);
+            solve([`${s.Id}#${i}`, `${s.Id}#${(i + 1) % poly.length}`], [s.Id]);
           });
         });
         inp.disabled = held;
@@ -2788,7 +3762,7 @@ function mount(sec     , host     ) {
         walls.appendChild(el('div', { class: 'fp-wall-row' + (selectedCorner === i ? ' is-picked' : '') }, el('span', { class: 'fp-wall-k', text: `Wall ${i + 1}` }), inp, fixBtn, lockBtn));
       });
       side.appendChild(walls);
-      if (editing) side.appendChild(el('div', { class: 'desc', text: 'Drag a wall’s middle dot to slide the wall; double-click it to add a corner. A corner shared with the next room moves in both — hold Alt to pull it apart.' }));
+      if (editing) side.appendChild(el('div', { class: 'desc', text: touch ? 'Drag a wall’s middle dot to slide the wall. A corner shared with the next room moves in both.' : 'Drag a wall’s middle dot to slide the wall; double-click it to add a corner. A corner shared with the next room moves in both — hold Alt to pull it apart.' }));
     }
 
     if (editing && type === 'room') {
@@ -2807,17 +3781,20 @@ function mount(sec     , host     ) {
     }
 
     // The constraints that hold this room, each removable.
-    const mine = constraintsNow().filter(c => c.Refs.some(r => r.Room === s.Id));
+    const mine                               = constraintsNow().filter(c => c.Refs.some(r => r.Room === s.Id)).map(c => [describeConstraint(c), [c]]);
     if (mine.length) {
       side.appendChild(el('h4', { text: 'Constraints' }));
       const cl2 = el('div', { class: 'fp-list' });
-      mine.forEach(c => {
-        const unmet = lastSolve.unmet.includes(c.Id);
-        const rowEl = el('div', { class: 'fp-list-row is-static' + (unmet ? ' is-unmet' : '') }, el('span', { class: 'fp-list-name', text: describeConstraint(c) }),
+      mine.forEach(([text, cs]) => {
+        const unmet = cs.some(c => lastSolve.unmet.includes(c.Id));
+        const rowEl = el('div', { class: 'fp-list-row is-static' + (unmet ? ' is-unmet' : '') }, el('span', { class: 'fp-list-name', text }),
           el('span', { class: 'fp-list-val' + (unmet ? ' is-nodata' : ''), text: unmet ? 'cannot hold' : 'holds' }));
+        // Pointing at one shows it on the plan.
+        rowEl.onmouseenter = () => { consLit = cs[0].Id; drawPlan(); };
+        rowEl.onmouseleave = () => { consLit = ''; drawPlan(); };
         if (editing) {
           const x = el('button', { class: 'fp-chip-x', type: 'button', text: '×', title: 'Remove this constraint' });
-          x.onclick = () => act(() => { setConstraints(constraintsNow().filter(k => k !== c)); });
+          x.onclick = () => act(() => { setConstraints(constraintsNow().filter(k => !cs.includes(k))); });
           rowEl.appendChild(x);
         }
         cl2.appendChild(rowEl);
@@ -2885,7 +3862,7 @@ function mount(sec     , host     ) {
       if (selectedCorner >= 0 && poly.length > 3) {
         side.appendChild(el('div', { class: 'desc', text: 'Double-click a corner to remove it, or drag a small dot to add one.' }));
         const dropCorner = btn('Remove corner');
-        dropCorner.onclick = () => act(() => { s.Shape.splice(selectedCorner, 1); selectedCorner = -1; });
+        dropCorner.onclick = () => { removeCorner(); };
         btns.push(dropCorner);
       }
       if (type === 'room' && poly.length >= 3) { const copy = btn('Duplicate'); copy.title = 'A copy beside it (Ctrl+D).'; copy.onclick = () => duplicate(); btns.push(copy); }
@@ -3094,6 +4071,21 @@ function mount(sec     , host     ) {
     if (c) side.appendChild(circuitRow(c));
   };
 
+  const drawWall = (w     , editing         ) => {
+    if (!w) { selection = null; return drawSide(); }
+    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: 'Wall' }), el('span', { class: 'fp-pill', text: 'standalone' })));
+    side.appendChild(row('Length', len(planPathLength(w.Points || []))));
+    if (!editing) { side.appendChild(row('Thickness', len(wallThick(w)))); return; }
+    side.appendChild(field('Thickness', lenInput(wallThick(w), v => act(() => { w.Thickness = planRound(v); })), 'An interior wall is about 4½ in; an exterior one about 6 in.'));
+    const del = btn('Delete', 'danger');
+    del.onclick = () => deleteSelection();
+    const btns2        = [];
+    if (selectedBend >= 0 && selectedBend < (w.Points || []).length) { const rb = btn('Remove point'); rb.onclick = () => removeBend(); btns2.push(rb); }
+    if (wallSplits(w.Id).length) { const sp = btn('Split the room', 'primary'); sp.title = 'It runs right across a room: make it the wall between two rooms.'; sp.onclick = () => splitByWall(w.Id); btns2.unshift(sp); }
+    side.appendChild(actions(...btns2, del));
+    side.appendChild(el('div', { class: 'desc', text: 'Drag an end or bend to move it, a small dot to add a bend; double-click a point to remove it.' }));
+  };
+
   /// A copy of the selection beside it, selected: an item, a door or window, or a room with nothing in it.
   const duplicate = () => {
     if (!selection) return;
@@ -3132,7 +4124,7 @@ function mount(sec     , host     ) {
       sh.Shape.splice(at, 1); selectedCorner = -1;
       setConstraints(planRefsAfterRemove(constraintsNow(), sh.Id, at, count));
       sh.LockedWalls = (sh.LockedWalls || []).filter((e        ) => e !== at && e !== (at - 1 + count) % count).map((e        ) => e > at ? e - 1 : e);
-      solve();
+      solve([], [sh.Id]);
     });
     return true;
   };
@@ -3151,15 +4143,60 @@ function mount(sec     , host     ) {
   };
   /// Take out the selected bend of a wire; its path joins straight across.
   const removeBend = () => {
-    const r = !extra.length && selection?.type === 'run' ? runOf(selection.id) : null;
+    const r = lineSel();
     if (!r || selectedBend < 0 || selectedBend >= (r.Points || []).length) return false;
-    if ((r.From ? 1 : 0) + (r.To ? 1 : 0) + r.Points.length <= 2) { toast('A wire needs two ends.', false); return true; }
-    const at = selectedBend;
-    act(() => { r.Points.splice(at, 1); selectedBend = -1; });
+    if ((r.From ? 1 : 0) + (r.To ? 1 : 0) + r.Points.length <= 2) { toast(selection?.type === 'wall' ? 'A wall needs two ends.' : 'A wire needs two ends.', false); return true; }
+    const at = selectedBend, count = r.Points.length, wall = selection?.type === 'wall';
+    act(() => { r.Points.splice(at, 1); selectedBend = -1; if (wall) { setConstraints(planRefsAfterRemove(constraintsNow(), r.Id, at, count)); solve([], [r.Id]); } });
     return true;
   };
 
   /// Remove everything selected in one undoable step. A room's items stay, outdoors; a wire to a removed item keeps its path.
+  /// Rooms that meet along a wall, made one: the first picked keeps its name, and everything in or served by the
+  /// others comes with it.
+  const roomsPicked = () => selected().filter(x => x.type === 'room').map(x => shapeOf(x)).filter(Boolean);
+  const mergeRooms = () => {
+    const rooms = roomsPicked();
+    if (rooms.length < 2) return;
+    if (rooms.some((r     ) => r.Locked)) return toast('Unlock the rooms to merge them.', false);
+    let shape       = rooms[0].Shape, cons = constraintsNow(), locked           = [...(rooms[0].LockedWalls || [])];
+    const keep = rooms[0], merged        = [];
+    let rest = rooms.slice(1);
+    for (let progress = true; progress && rest.length;) {
+      progress = false;
+      for (const r of [...rest]) {
+        const next = planUnion(shape, r.Shape);
+        if (!next) continue;
+        const m = planRefsAfterMerge(cons, keep.Id, r.Id, { [keep.Id]: shape, [r.Id]: r.Shape }, next);
+        locked = [...new Set([...locked.map(e => m.edge(keep.Id, e)), ...(r.LockedWalls || []).map((e        ) => m.edge(r.Id, e))].filter((e)              => e != null))];
+        shape = next; cons = m.constraints; merged.push(r); rest = rest.filter(x => x !== r); progress = true;
+      }
+    }
+    if (!merged.length) return toast('Those rooms do not share a wall, so they cannot be merged.', false);
+    act(() => {
+      const ids = new Set(merged.map(r => r.Id));
+      keep.Shape = shape.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) }));
+      if (locked.length) keep.LockedWalls = locked; else delete keep.LockedWalls;
+      setConstraints(cons);
+      merged.forEach(r => roomsNow().splice(roomsNow().indexOf(r), 1));
+      itemsIn().forEach((it     ) => { if (ids.has(it.Room)) it.Room = keep.Id; });
+      areasNow().forEach(ar => { if ((ar.Rooms || []).some((id        ) => ids.has(id))) ar.Rooms = [...new Set((ar.Rooms            ).map(id => ids.has(id) ? keep.Id : id))]; });
+      // Breakers that serve a merged room, and nodes placed in one, now name the room it became.
+      const walk = (o     ) => {
+        if (!o || typeof o !== 'object') return;
+        const loc = o.Ext?.locations;
+        if (loc) {
+          if (Array.isArray(loc.Rooms) && loc.Rooms.some((id        ) => ids.has(id))) loc.Rooms = [...new Set((loc.Rooms            ).map(id => ids.has(id) ? keep.Id : id))];
+          if (ids.has(loc.Location)) loc.Location = keep.Id;
+        }
+        Object.values(o).forEach(walk);
+      };
+      walk(flowIn());
+      selection = { type: 'room', id: keep.Id }; extra = [];
+    });
+    if (rest.length) toast(`${rest.length} room${rest.length > 1 ? 's' : ''} did not share a wall and stayed separate.`, false);
+  };
+
   const deleteSelection = () => {
     const chosen = selected();
     if (!chosen.length) return;
@@ -3178,6 +4215,7 @@ function mount(sec     , host     ) {
           runsIn().forEach((r     ) => { if (r.From === it.Id) { ensure(r, 'Points', []).unshift({ X: it.X, Y: it.Y }); r.From = ''; } if (r.To === it.Id) { ensure(r, 'Points', []).push({ X: it.X, Y: it.Y }); r.To = ''; } });
         } else if (x.type === 'opening') { const o = openingOf(x.id); if (o) openingsNow().splice(openingsNow().indexOf(o), 1); }
         else if (x.type === 'run') { const r = runOf(x.id); if (r) runsIn().splice(runsIn().indexOf(r), 1); }
+        else if (x.type === 'wall') { const w = standaloneOf(x.id); if (w) { setConstraints(planRefsWithout(constraintsNow(), w.Id)); wallsNow().splice(wallsNow().indexOf(w), 1); } }
         else {
           const sh = shapeOf(x);
           if (!sh || sh.Locked) return;
@@ -3196,7 +4234,7 @@ function mount(sec     , host     ) {
   const drawMany = (editing         ) => {
     const all = selected();
     const count = (t         ) => all.filter(x => x.type === t).length;
-    const words = ([['room', 'room', 'rooms'], ['area', 'area', 'areas'], ['item', 'item', 'items'], ['opening', 'door or window', 'doors and windows'], ['run', 'wire', 'wires']]                               )
+    const words = ([['room', 'room', 'rooms'], ['area', 'area', 'areas'], ['item', 'item', 'items'], ['opening', 'door or window', 'doors and windows'], ['run', 'wire', 'wires'], ['wall', 'wall', 'walls']]                               )
       .map(([t, one, many]) => { const n = count(t); return n ? `${n} ${n > 1 ? many : one}` : ''; }).filter(Boolean);
     side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: `${all.length} selected` })));
     side.appendChild(el('div', { class: 'desc', text: words.join(', ') + '. Drag any of them to move them all; arrow keys nudge them; Shift-click adds or removes one.' }));
@@ -3210,6 +4248,12 @@ function mount(sec     , host     ) {
       }, { placeholder: 'Search circuits…' }), 'Puts every selected outlet, light and device on one breaker.'));
     }
     const btns        = [];
+    if (editing && count('room') > 1) {
+      const merge = btn('Merge rooms', 'primary');
+      merge.title = 'Makes the selected rooms one room. They must share a wall; the first picked keeps its name.';
+      merge.onclick = () => mergeRooms();
+      btns.push(merge);
+    }
     if (editing) {
       const del = btn(`Delete ${all.length}`, 'danger');
       del.onclick = () => deleteSelection();
@@ -3375,6 +4419,55 @@ function mount(sec     , host     ) {
   };
   addBtn.onclick = addSheet;
 
+  /// Rooms drawn apart, a wall's thickness between them, brought together on the middle of each wall; what stands on
+  /// a wall that moves moves with it. Gaps up to half again the wall's thickness are taken as walls.
+  const closeGaps = () => {
+    const f = floorNow()?.floor;
+    if (!f) return;
+    const t = interiorWall() || 0.1143 * scale();
+    const rooms = roomsNow().filter(r => !r.Outdoor && (r.Shape || []).length >= 3);
+
+    const sides         = [];
+    rooms.forEach(r => {
+      const poly       = r.Shape, sign = Math.sign(planArea(poly));
+      poly.forEach((a, i) => {
+        const b = poly[(i + 1) % poly.length];
+        if (Math.abs(a.X - b.X) < 0.01 && Math.abs(a.Y - b.Y) > 1) sides.push({ r, i, at: a.X, lo: Math.min(a.Y, b.Y), hi: Math.max(a.Y, b.Y), dir: sign * Math.sign(b.Y - a.Y), upright: true });
+        else if (Math.abs(a.Y - b.Y) < 0.01 && Math.abs(a.X - b.X) > 1) sides.push({ r, i, at: a.Y, lo: Math.min(a.X, b.X), hi: Math.max(a.X, b.X), dir: -sign * Math.sign(b.X - a.X), upright: false });
+      });
+    });
+    // A locked room stays put: the room across the gap comes all the way to it, and two locked rooms are left be.
+    const moves = new Map                ();
+    const move = (sd      , to        ) => { if (!moves.has(sd)) moves.set(sd, []); moves.get(sd) .push(to); };
+    let held = 0;
+    sides.forEach(p => sides.forEach(q => {
+      if (p.r === q.r || p.upright !== q.upright || p.dir <= 0 || q.dir >= 0) return;
+      const gap = q.at - p.at;
+      if (gap <= 0.5 || gap > t * 1.5 || Math.min(p.hi, q.hi) - Math.max(p.lo, q.lo) <= 1) return;
+      if (p.r.Locked && q.r.Locked) { held++; return; }
+      if (p.r.Locked) move(q, p.at);
+      else if (q.r.Locked) move(p, q.at);
+      else { const mid = (p.at + q.at) / 2; move(p, mid); move(q, mid); }
+    }));
+    const heldNote = held ? ` ${held} between locked rooms ${held > 1 ? 'were' : 'was'} left; unlock them and close the gaps again.` : '';
+    if (!moves.size) return toast((held ? 'Every gap found is between locked rooms.' : 'No gaps the width of a wall were found between rooms.') + heldNote, false);
+    act(() => {
+      moves.forEach((mids, sd) => {
+        const to = planRound(mids.reduce((a, b) => a + b, 0) / mids.length), from = sd.at;
+        const poly       = sd.r.Shape, n = poly.length;
+        [poly[sd.i], poly[(sd.i + 1) % n]].forEach(q => { if (sd.upright) q.X = to; else q.Y = to; });
+        itemsIn().forEach((it     ) => {
+          if (it.Room !== sd.r.Id) return;
+          const on = sd.upright ? Math.abs(it.X - from) < 1 && it.Y >= sd.lo - 1 && it.Y <= sd.hi + 1 : Math.abs(it.Y - from) < 1 && it.X >= sd.lo - 1 && it.X <= sd.hi + 1;
+          if (on) { if (sd.upright) it.X = to; else it.Y = to; }
+        });
+      });
+      if (!(Number(f.InteriorWall) > 0)) f.InteriorWall = planRound(t);
+      if (!(Number(f.ExteriorWall) > 0)) f.ExteriorWall = planRound(t);
+    });
+    toast(`Closed ${moves.size} wall gaps; walls are drawn ${len(interiorWall())} thick.${heldNote}`, true);
+  };
+
   const floorSheet = () => {
     const fl = floorNow();
     if (!fl) return addSheet();
@@ -3392,6 +4485,13 @@ function mount(sec     , host     ) {
         field('Plot width', lenInput(w, v => act(() => { f.Width = Math.max(100, Math.round(v)); viewFor = ''; }))),
         field('Plot depth', lenInput(h, v => act(() => { f.Height = Math.max(100, Math.round(v)); viewFor = ''; })))),
       field('Ground', select(PLAN_GROUNDS, f.Ground || '', v => act(() => { f.Ground = v; })), 'What is drawn around the rooms: a lawn, a slab, gravel.'),
+      field('North points', select(northChoices(f), String(Number(f.North) || 0), v => act(() => { f.North = Number(v); })), 'Which way north is on this drawing. The compass on the plan follows it.'),
+      el('h4', { text: 'Walls' }),
+      el('div', { class: 'fp-two' },
+        field('Interior walls', lenInput(Number(f.InteriorWall) || 0, v => act(() => { f.InteriorWall = Math.max(0, planRound(v)); }), '4½ in')),
+        field('Exterior walls', lenInput(Number(f.ExteriorWall) || 0, v => act(() => { f.ExteriorWall = Math.max(0, planRound(v)); }), '6 in'))),
+      el('div', { class: 'desc', text: 'With a thickness, rooms are drawn touching: to the middle of the walls between them and the inside of the outside walls. The walls are drawn at their thickness and sizes read inside them. A 2x4 wall with drywall both sides is 4½ in.' }),
+      actions((() => { const b = btn('Close the gaps between rooms'); b.title = 'For rooms drawn with a gap where each wall stands: meet them in the middle of it, and set the wall thickness from it.'; b.onclick = () => { closeGaps(); closeSheet(); }; return b; })()),
       el('h4', { text: 'Arrange' }),
       actions(
         (() => { const b = btn('Centre the drawing'); b.title = 'Move everything drawn on this floor to the middle of the plot.'; b.onclick = () => { arrange('centre'); closeSheet(); }; return b; })(),
@@ -3719,7 +4819,7 @@ function mount(sec     , host     ) {
   let pending      = null;
   const schedule = () => { clearTimeout(pending); pending = setTimeout(load, 600); };
   const load = async () => {
-    const q = period === 'now' ? '' : `?period=${period}`;
+    const q = period === 'now' || period === 'circuits' ? '' : `?period=${period}`;
     let r     ;
     try { r = await call('totals', q); }
     catch (e     ) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
@@ -3808,6 +4908,7 @@ function mount(sec     , host     ) {
       return;
     }
     if (k === 'Enter' && wireDraft) { finishWire(''); return; }
+    if (k === 'Enter' && tool === 'wall' && draft.length >= 2) { finishWall(draft); return; }
     if (k === 'Enter' && draft.length >= 3) { finishOutline(draft); return; }
     if (k === '+' || k === '=') { zoomAt(centre(), 1.4); return; }
     if (k === '-' || k === '_') { zoomAt(centre(), 1 / 1.4); return; }
@@ -3839,7 +4940,7 @@ function mount(sec     , host     ) {
   window.addEventListener('keyup', (e     ) => { if (e.key === ' ' && spaceDown) { spaceDown = false; svg.classList.remove('is-panning'); } });
 
   // The live view keeps up with the house while it is on screen.
-  setInterval(() => { if (sec.classList.contains('active') && !dragging && mode === 'view' && period === 'now') load(); }, 10000);
+  setInterval(() => { if (sec.classList.contains('active') && !dragging && mode === 'view' && (period === 'now' || period === 'circuits')) load(); }, 10000);
   return { show: () => { render(); load(); readStorage(); } };
 }
 

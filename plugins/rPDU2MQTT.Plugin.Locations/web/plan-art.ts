@@ -108,13 +108,15 @@ export function planGlyph(kind: string, r: number): any {
     case 'hvac': rect(-0.9, -0.9, 1.8, 1.8, 0.2); circle(0, 0, 0.6); line(-0.42, -0.42, 0.42, 0.42); line(-0.42, 0.42, 0.42, -0.42); break;
     case 'junction': rect(-0.75, -0.75, 1.5, 1.5, 0.1); circle(0, 0, 0.3); break;
     case 'ev-charger': rect(-0.6, -0.9, 1.2, 1.8, 0.25); path('M0.12 -0.6 L-0.25 0.08 L0.05 0.08 L-0.12 0.6 L0.28 -0.12 L-0.02 -0.12 Z'); break;
-    case 'panel': rect(-0.6, -0.95, 1.2, 1.9, 0.1); [-0.5, -0.15, 0.2, 0.55].forEach(y => line(-0.35, y, 0.35, y)); break;
+    // A breaker panel: the bus down the middle and a row of breakers either side of it.
+    case 'panel': line(0, -1.25, 0, 1.25); [-0.95, -0.5, -0.05, 0.4, 0.85].forEach(y => { line(-0.75, y, -0.2, y); line(0.2, y, 0.75, y); }); break;
     case 'meter': circle(0, 0, 0.85); line(0, 0.2, 0.45, -0.35); circle(0, 0.2, 0.08); break;
     case 'pole': line(0, -0.95, 0, 0.95); line(-0.75, -0.55, 0.75, -0.55); circle(-0.6, -0.72, 0.1); circle(0.6, -0.72, 0.1); break;
     case 'transformer': circle(-0.3, 0, 0.5); circle(0.3, 0, 0.5); break;
     case 'solar': rect(-0.95, -0.65, 1.9, 1.3, 0.05); line(-0.95, 0, 0.95, 0); line(-0.32, -0.65, -0.32, 0.65); line(0.32, -0.65, 0.32, 0.65); break;
     case 'battery': rect(-0.8, -0.5, 1.5, 1.0, 0.12); rect(0.7, -0.2, 0.2, 0.4, 0.05); line(-0.45, 0, -0.1, 0); line(-0.275, -0.18, -0.275, 0.18); break;
-    case 'inverter': rect(-0.85, -0.85, 1.7, 1.7, 0.15); path('M-0.55 0 Q-0.28 -0.5 0 0 T0.55 0'); break;
+    // The drawing symbol: a box cut corner to corner, DC (=) in one half and AC (~) in the other.
+    case 'inverter': rect(-0.85, -0.85, 1.7, 1.7, 0.15); line(-0.85, 0.85, 0.85, -0.85); line(-0.62, -0.5, -0.12, -0.5); line(-0.62, -0.26, -0.12, -0.26); path('M0.08 0.42 Q0.22 0.14 0.36 0.42 T0.64 0.42'); break;
     case 'generator': circle(0, 0, 0.85); text('G'); break;
     default: rect(-0.9, -0.65, 1.8, 1.3, 0.2); line(-0.4, 0.9, 0.4, 0.9); break;
   }
@@ -123,18 +125,22 @@ export function planGlyph(kind: string, r: number): any {
 
 /// A door, window or opening: the wall cut, and what fills it, lying along the wall at its angle.
 /// `u` is drawing units per screen pixel; the wall is drawn a few pixels thick at any zoom.
-export function planOpening(o: any, u: number): any {
+/// `thick`: the wall's thickness when the floor gives one, so the gap cuts it through; `shift` moves the opening out
+/// into an outside wall drawn beyond its room.
+export function planOpening(o: any, u: number, thick = 0, shift: { X: number; Y: number } = { X: 0, Y: 0 }): any {
   const w = Math.max(1, Number(o.Width) || 90);
   const half = w / 2;
-  const g = svgEl('g', { class: 'fp-op is-' + (o.Kind || 'door'), transform: `translate(${o.X},${o.Y}) rotate(${Number(o.Angle) || 0})` });
-  const wall = 5 * u;
+  const g = svgEl('g', { class: 'fp-op is-' + (o.Kind || 'door'), transform: `translate(${o.X + shift.X},${o.Y + shift.Y}) rotate(${Number(o.Angle) || 0})` });
+  const wall = Math.max(5 * u, thick);
   g.appendChild(svgEl('line', { x1: -half, y1: 0, x2: half, y2: 0, class: 'fp-op-gap', 'stroke-width': wall + 2 * u }));
   const dir = o.Flip ? -1 : 1;
   const stroke = 1.6 * u;
+  // A leaf hangs from the face of the wall it swings out of.
+  const face = dir * thick / 2;
   const leaf = (hx: number, ox: number, len: number, left: boolean) => {
-    g.appendChild(svgEl('line', { x1: hx, y1: 0, x2: hx, y2: dir * len, class: 'fp-op-leaf', 'stroke-width': stroke * 1.4 }));
+    g.appendChild(svgEl('line', { x1: hx, y1: face, x2: hx, y2: face + dir * len, class: 'fp-op-leaf', 'stroke-width': stroke * 1.4 }));
     const sweep = left === (dir > 0) ? 0 : 1;
-    g.appendChild(svgEl('path', { d: `M ${hx} ${dir * len} A ${len} ${len} 0 0 ${sweep} ${ox} 0`, class: 'fp-op-arc', 'stroke-width': stroke }));
+    g.appendChild(svgEl('path', { d: `M ${hx} ${face + dir * len} A ${len} ${len} 0 0 ${sweep} ${ox} ${face}`, class: 'fp-op-arc', 'stroke-width': stroke }));
   };
   const kind = o.Kind || 'door';
   if (kind === 'door') {

@@ -51,15 +51,18 @@ Click an item for its circuit, meter, reading and what it is wired to.
 | Pan | H | Drag to pan |
 | Room | R | Drag a rectangle, or **Add a room by size** |
 | Outline | P | Click each corner; click the first to close |
+| Wall | E | A wall on its own: click each end and bend, then the last point again |
 | Outdoor | O | Yard, porch, patio, driveway, deck |
 | Area | A | Area spanning rooms |
 | Door / Window | D / W | Click a wall. Door, double, sliding, garage, window, opening |
 | Item | I | Place an item |
 | Wire | L | From the supply item, each bend, to the load item |
-| Constrain | K | Coincident, in line, parallel, square, level, plumb, fixed length, angle |
+| Constrain | K | Join, on wall, in line, parallel, square, level, plumb, fixed length, angle |
 | Measure | M | Measure, or set the scale from a known distance |
 
 Keys: Ctrl+Z / Ctrl+Y undo / redo, Delete removes, Esc stops drawing, `+` `−` `0` zoom.
+
+On a phone, every tool shows in two rows, the plan fills the screen and fits what is drawn, and what is selected opens in a sheet over the foot of the plan (tap its grip for all of it). The floor's settings, background, tools, export and print are under **More…**.
 
 ![Tools menu](../assets/screenshots/floor-plan-tools.webp)
 

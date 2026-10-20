@@ -18,9 +18,9 @@ type Live = {
   places: Record<string, Place>; nodes: PlanNode[]; circuits: Circuit[]; placements: Record<string, { value: number | null; circuitKnown: boolean }>;
   units: string; problems: string[]; message: string | null;
 };
-type SelType = 'room' | 'area' | 'item' | 'opening' | 'run';
+type SelType = 'room' | 'area' | 'item' | 'opening' | 'run' | 'wall';
 type Selection = { type: SelType; id: string } | null;
-type Tool = 'select' | 'pan' | 'room' | 'outline' | 'zone' | 'area' | 'door' | 'window' | 'item' | 'wire' | 'constrain' | 'measure';
+type Tool = 'select' | 'pan' | 'room' | 'outline' | 'wall' | 'zone' | 'area' | 'door' | 'window' | 'item' | 'wire' | 'constrain' | 'measure';
 
 /// Why a place has no total, in the words the page uses. Never a zero.
 const FP_STATE_TEXT: Record<string, string> = {
@@ -34,13 +34,14 @@ const FP_TOOLS: [Tool, string, string, string][] = [
   ['pan', 'Pan', 'H', 'Drag to move around the plan. Two fingers or the wheel with Ctrl also pan and zoom.'],
   ['room', 'Room', 'R', 'Drag a rectangle to draw a room, or add one by its measurements.'],
   ['outline', 'Outline', 'P', 'Tap each corner of an odd-shaped room; tap the first corner again to close it.'],
+  ['wall', 'Wall', 'E', 'Draw a wall on its own: tap each end and bend, then tap the last point again or double-tap to finish.'],
   ['zone', 'Outdoor', 'O', 'Drag out a yard, porch, patio, driveway or deck.'],
   ['area', 'Area', 'A', 'Drag out an area that may span rooms, such as upstairs or the server corner.'],
   ['door', 'Door', 'D', 'Tap a wall to put a door in it.'],
   ['window', 'Window', 'W', 'Tap a wall to put a window in it.'],
   ['item', 'Item', 'I', 'Tap to place an outlet, light, appliance, panel, meter, pole or anything else.'],
   ['wire', 'Wire', 'L', 'Draw a cable run from the supply side: tap the panel or outlet feeding it, each bend, then the item it goes to.'],
-  ['constrain', 'Constrain', 'K', 'Tap corners or walls, then hold them: coincident, colinear, parallel, perpendicular, level, plumb, an angle or a length.'],
+  ['constrain', 'Constrain', 'K', 'Tap corners or walls, then hold them: joined, on a wall, colinear, parallel, perpendicular, level, plumb, an angle or a length.'],
   ['measure', 'Measure', 'M', 'Tap two points to measure between them, and set the plan’s scale from a distance you know.'],
 ];
 
@@ -53,6 +54,7 @@ function fpToolIcon(tool: string): any {
     case 'pan': p('M12 3 V21 M3 12 H21 M12 3 L9.5 5.5 M12 3 L14.5 5.5 M12 21 L9.5 18.5 M12 21 L14.5 18.5 M3 12 L5.5 9.5 M3 12 L5.5 14.5 M21 12 L18.5 9.5 M21 12 L18.5 14.5'); break;
     case 'room': p('M4 5 H20 V19 H4 Z M4 12 H10'); break;
     case 'outline': p('M4 7 L11 4 L20 8 L18 19 L6 18 Z'); break;
+    case 'wall': p('M3 18 L10 11 L21 11 M3 15 L10 8 L21 8'); break;
     case 'zone': p('M12 3 L7 11 H10 L6 17 H18 L14 11 H17 Z M12 17 V21'); break;
     case 'area': p('M4 5 H7 M10 5 H14 M17 5 H20 V8 M20 11 V14 M20 17 V19 H17 M14 19 H10 M7 19 H4 V16 M4 13 V10 M4 7 V5'); break;
     case 'door': p('M4 20 H20 M6 20 V6 M6 6 A14 14 0 0 1 20 20'); break;
@@ -73,10 +75,9 @@ export default function mount(sec: any, host: any) {
   ({ api, btn, closeSheet, el, ensure, openSheet, svgEl, toast, formatMeasure, state, refreshDirty, sparkline, analyse, circuitSession, searchSelect, makeMenu } = host);
   sec.classList.add('fp');
   sec.appendChild(el('h2', { text: 'Floor Plans' }));
-  sec.appendChild(el('div', { class: 'desc' },
-    'Each floor at real size: rooms and outdoor zones, doors and windows, and the outlets, lights, panels, meters '
-    + 'and devices on it with the cable runs between them. View shades each room by what it draws — a room with '
-    + 'nothing metered reads unmetered, never zero. Edit draws and moves everything; Ctrl+Z undoes.'));
+  sec.appendChild(el('div', { class: 'desc fp-intro' },
+    'Each floor at real size, with its rooms, doors and windows, and everything wired on it. View shades each room by '
+    + 'what it draws (a room with nothing metered reads unmetered, never zero); Edit draws and moves it all.'));
 
   // Where things are kept, and whether they will survive a restart: said loudly, above everything, when they will not.
   const banner = el('div', { class: 'fp-banner' });
@@ -138,12 +139,21 @@ export default function mount(sec: any, host: any) {
   let floorId = remembered('floor', '');
   let mode: 'view' | 'edit' = 'view';
   let tool: Tool = 'select';
+  /// The room a rectangle drawn with the Room tool is added to, taking the space from the rooms under it.
+  let claimFor = '';
   let itemKind = remembered('kind', 'outlet');
   let doorKind = 'door';
   let wireKind = 'circuit';
   let snapOn = remembered('snap', '1') === '1';
   let showWiring = remembered('wiring', '1') === '1';
   let showSizes = remembered('sizes', '0') === '1';
+  /// What the plan leaves out, by kind of item, and the compass: chosen under Show and kept per browser.
+  const SHOW_GROUPS: [string, string, string[]][] = [
+    ['outlets', 'Outlets and switches', ['outlet', 'switch', 'junction']], ['lights', 'Lights and fans', ['fixture', 'fan']],
+    ['appliances', 'Appliances and devices', ['appliance', 'device', 'hvac', 'ev-charger']], ['power', 'Panels and power', PLAN_SUPPLY_KINDS],
+  ];
+  const hidden = new Set(remembered('hide', '').split(',').filter(Boolean));
+  const shown = (item: any) => !hidden.has((SHOW_GROUPS.find(g => g[2].includes(item.Kind)) || SHOW_GROUPS[2])[0]);
   let period = remembered('period', 'now');
   let selection: Selection = null;
   /// Everything else selected with it: Shift, Ctrl or ⌘ adds to a selection, and a box drag selects all it holds.
@@ -179,6 +189,13 @@ export default function mount(sec: any, host: any) {
   const roomsNow = (): any[] => { const f = floorNow(); return f ? ensure(f.floor, 'Rooms', []) : []; };
   const areasNow = (): any[] => { const f = floorNow(); return f ? ensure(f.floor, 'Areas', []) : []; };
   const openingsNow = (): any[] => { const f = floorNow(); return f ? ensure(f.floor, 'Openings', []) : []; };
+  /// Walls drawn on their own, not as the side of a room: a half wall, a partition, a wall still to be closed in.
+  const wallsNow = (): any[] => { const f = floorNow(); return f ? ensure(f.floor, 'Walls', []) : []; };
+  const standaloneOf = (id: string) => wallsNow().find((w: any) => w.Id === id);
+  /// A standalone wall's thickness: its own, or an interior wall's 4½ inches.
+  const wallThick = (w: any) => Number(w.Thickness) > 0 ? Number(w.Thickness) : 0.1143 * scale();
+  /// The wire or standalone wall selected on its own, whose bends can be dragged.
+  const lineSel = () => extra.length ? null : selection?.type === 'run' ? runOf(selection.id) : selection?.type === 'wall' ? standaloneOf(selection.id) : null;
   const shapeOf = (sel: Selection) => sel?.type === 'room' ? roomsNow().find(r => r.Id === sel.id)
     : sel?.type === 'area' ? areasNow().find(a => a.Id === sel.id) : null;
   const itemOf = (id: string) => itemsIn().find((p: any) => p.Id === id);
@@ -229,11 +246,14 @@ export default function mount(sec: any, host: any) {
   const restore = (cur: any, v: any) => { Object.keys(cur).forEach(k => delete cur[k]); Object.assign(cur, v); };
   const history = planHistory(() => ({ flow: flowIn(), loc: locIn() }), v => { restore(flowIn(), v.flow); restore(locIn(), v.loc); });
   const changed = () => { refreshDirty(); schedule(); };
+  /// The outlines as they were when the change under way began: what was shared then stays shared (#602).
+  let before: PlanShape[] | null = null;
+  const outlines = () => JSON.parse(JSON.stringify(solverShapes().map(x => ({ Id: x.Id, Shape: x.Shape })))) as PlanShape[];
   /// One undoable change: remember what was, make the change, redraw.
-  const act = (fn: () => void) => { history.push(); fn(); changed(); render(); };
+  const act = (fn: () => void) => { history.push(); before = outlines(); try { fn(); } finally { before = null; } changed(); render(); };
   const undo = () => { if (history.undo()) { cleanSelection(); changed(); render(); } };
   const redo = () => { if (history.redo()) { cleanSelection(); changed(); render(); } };
-  const exists = (x: NonNullable<Selection>) => x.type === 'item' ? !!itemOf(x.id) : x.type === 'run' ? !!runOf(x.id)
+  const exists = (x: NonNullable<Selection>) => x.type === 'item' ? !!itemOf(x.id) : x.type === 'run' ? !!runOf(x.id) : x.type === 'wall' ? !!standaloneOf(x.id)
     : x.type === 'opening' ? !!openingOf(x.id) : !!shapeOf(x);
   /// Everything selected, the primary first.
   const selected = (): NonNullable<Selection>[] => [...(selection ? [selection] : []), ...extra];
@@ -241,7 +261,7 @@ export default function mount(sec: any, host: any) {
   const cleanSelection = () => {
     extra = extra.filter(exists);
     if (!selection) return;
-    const gone = selection.type === 'item' ? !itemOf(selection.id) : selection.type === 'run' ? !runOf(selection.id)
+    const gone = selection.type === 'item' ? !itemOf(selection.id) : selection.type === 'run' ? !runOf(selection.id) : selection.type === 'wall' ? !standaloneOf(selection.id)
       : selection.type === 'opening' ? !openingOf(selection.id) : !shapeOf(selection);
     if (gone) selection = null;
     selectedCorner = -1;
@@ -268,15 +288,36 @@ export default function mount(sec: any, host: any) {
   redoBtn.setAttribute('aria-label', 'Redo');
   redoBtn.onclick = () => redo();
   const status = el('span', { class: 'ld-count fp-status' });
+  // On a phone the floor's own settings fold into one menu, so the bar is one line: the floor, More, undo and redo.
+  [addBtn, floorBtn, bgBtn, toolsBtn, exportBtn, printBtn].forEach(b => b.classList.add('fp-wide-only'));
+  const moreBtn = btn('More…');
+  moreBtn.classList.add('fp-narrow-only');
+  moreBtn.title = 'Floor settings, background, tools, export and print.';
+  moreBtn.onclick = () => {
+    const body = el('div', { class: 'fp-sheet fp-more' });
+    ([[addBtn, 'Add a floor'], [floorBtn, 'Floor settings'], [bgBtn, 'Background'], [toolsBtn, 'Tools…'], [exportBtn, 'Export…'], [printBtn, 'Print']] as [any, string][]).forEach(([b, label]) => {
+      if (b.classList.contains('fp-off')) return;
+      const go = btn(label);
+      go.disabled = b.disabled;
+      go.onclick = () => { closeSheet(); b.onclick(); };
+      body.appendChild(go);
+    });
+    openSheet({ title: floorNow()?.floor.Name || 'Floor', body });
+  };
   sec.appendChild(el('div', { class: 'ld-toolbar fp-bar' }, el('label', { class: 'ld-inst' }, 'Floor ', floorSel), addBtn, floorBtn, bgBtn, toolsBtn,
-    exportBtn, printBtn, el('span', { class: 'fp-undo' }, undoBtn, redoBtn), status));
+    exportBtn, printBtn, moreBtn, el('span', { class: 'fp-undo' }, undoBtn, redoBtn), status));
 
   const modeBar = el('div', { class: 'fp-seg', role: 'tablist' });
   const modeBtns: Record<string, any> = {};
   ([['view', 'View'], ['edit', 'Edit']] as const).forEach(([m, label]) => {
     const b = el('button', { class: 'fp-seg-btn', text: label, type: 'button' });
     b.setAttribute('role', 'tab');
-    b.onclick = () => { mode = m; tool = 'select'; draft = []; rectStart = null; wireDraft = null; measure = null; selectedCorner = -1; render(); };
+    b.onclick = () => {
+      const entering = m === 'edit' && mode !== 'edit';
+      mode = m; tool = 'select'; draft = []; rectStart = null; wireDraft = null; measure = null; selectedCorner = -1; render();
+      // On a phone, Edit brings the tools and the plan up to fill the screen.
+      if (entering && narrow()) palette.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    };
     modeBtns[m] = b;
     modeBar.appendChild(b);
   });
@@ -310,7 +351,17 @@ export default function mount(sec: any, host: any) {
   const empty = el('div', { class: 'fp-empty' });
   const fpMenu = makeMenu(() => stage, 'fp-menu');
   const menu = fpMenu.el;
-  const stage = el('div', { class: 'fp-stage' }, svg, menu, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), scaleBar, hint, empty);
+  const compass = el('div', { class: 'fp-compass', title: 'North. Set which way it points in Floor settings.' });
+  // The four points ride round the ring with north; each letter is turned back upright as it goes.
+  const points4 = (['N', 'E', 'S', 'W'] as const).map((t, i) => {
+    const a = i * Math.PI / 2, x = Math.round(Math.sin(a) * 20.5 * 10) / 10, y = Math.round(-Math.cos(a) * 20.5 * 10) / 10;
+    return { x, y, el: Object.assign(svgEl('text', { x, y, class: 'fp-compass-text' + (t === 'N' ? ' is-n' : '') }), { textContent: t }) };
+  });
+  const needle = svgEl('svg', { viewBox: '-30 -30 60 60', 'aria-hidden': 'true' });
+  needle.append(svgEl('circle', { r: 28, class: 'fp-compass-ring' }), svgEl('path', { d: 'M0 -14 L4 0 L0 -2 L-4 0 Z', class: 'fp-compass-n' }),
+    svgEl('path', { d: 'M0 14 L4 0 L0 2 L-4 0 Z', class: 'fp-compass-s' }), ...points4.map(q => q.el));
+  compass.append(needle);
+  const stage = el('div', { class: 'fp-stage' }, svg, menu, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), compass, scaleBar, hint, empty);
   const side = el('aside', { class: 'fp-side' });
   const legend = el('div', { class: 'fp-legend' });
   const body = el('div', { class: 'fp-body' }, palette, el('div', { class: 'fp-main' }, opts, stage, legend), side);
@@ -318,7 +369,7 @@ export default function mount(sec: any, host: any) {
 
   const pickTool = (t: Tool) => {
     if (mode !== 'edit') mode = 'edit';
-    tool = t; draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; selectedCorner = -1;
+    tool = t; claimFor = ''; draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; selectedCorner = -1;
     render();
   };
 
@@ -336,7 +387,18 @@ export default function mount(sec: any, host: any) {
     const ox = (r.width - vb.w * k) / 2, oy = (r.height - vb.h * k) / 2;
     return { X: vb.x + (e.clientX - r.left - ox) / k, Y: vb.y + (e.clientY - r.top - oy) / k };
   };
-  const fit = () => { const { w, h } = floorSize(); const pad = Math.max(w, h) * 0.03; vb = { x: -pad, y: -pad, w: w + pad * 2, h: h + pad * 2 }; };
+  const fit = () => {
+    const { w, h } = floorSize();
+    // A phone's plan is narrow: it fits what is drawn rather than the whole plot, so the rooms are big enough to work on.
+    const drawn: Pt[] = window.matchMedia?.('(max-width: 560px)').matches ? [...shapesNow().flatMap(x => x.Shape as Pt[]), ...itemsNow().map((it: any) => ({ X: it.X, Y: it.Y }))] : [];
+    if (drawn.length >= 3) {
+      const b = planBounds(drawn);
+      const pad = Math.max(b.w, b.h) * 0.08 + 10;
+      vb = { x: b.x - pad, y: b.y - pad, w: b.w + pad * 2, h: b.h + pad * 2 };
+      return;
+    }
+    const pad = Math.max(w, h) * 0.03; vb = { x: -pad, y: -pad, w: w + pad * 2, h: h + pad * 2 };
+  };
   const zoomAt = (p: Pt, factor: number) => {
     const { w } = floorSize();
     const nw = Math.max(w * 0.02, Math.min(w * 4, vb.w / factor));
@@ -350,12 +412,34 @@ export default function mount(sec: any, host: any) {
   zoomFit.onclick = () => { fit(); drawPlan(); };
 
   const outlinesOf = (list: any[]) => list.filter(s => (s.Shape || []).length >= 3).map(s => s.Shape as Pt[]);
-  const othersFor = (exclude: any) => outlinesOf([...roomsNow(), ...areasNow()].filter(s => s !== exclude));
+  // Standalone walls snap too, each stretch a line of its own: their ends, along them, and level with them.
+  const othersFor = (exclude: any) => [...outlinesOf([...roomsNow(), ...areasNow()].filter(s => s !== exclude)),
+    ...wallsNow().filter((w: any) => w !== exclude).flatMap((w: any) => (w.Points || []).slice(1).map((q: Pt, i: number) => [w.Points[i], q]))];
   const snapStep = () => planSnapStep(sys()) * scale();
+  /// The floor's wall thicknesses. With either set, rooms are drawn touching, to the middle of the walls between them
+  /// and the inside face of the outside walls, and the walls are drawn at their thickness.
+  const interiorWall = () => Math.max(0, Number(floorNow()?.floor.InteriorWall) || 0);
+  const exteriorWall = () => Math.max(0, Number(floorNow()?.floor.ExteriorWall) || 0);
+  const thickWalls = () => interiorWall() > 0 || exteriorWall() > 0;
+  const massNow = () => planWallMass(roomsNow().filter(r => !r.Outdoor));
+  /// A room's inside: each wall it shares moved in by half the interior wall. Its outline when walls are thin lines.
+  const insideOf = (room: any, mass = massNow()): Pt[] => {
+    const poly: Pt[] = room.Shape || [];
+    if (!thickWalls() || room.Outdoor || poly.length < 3) return poly;
+    const half = interiorWall() / 2;
+    return planInset(poly, poly.map((a, i) => {
+      const b = poly[(i + 1) % poly.length], L = Math.hypot(b.X - a.X, b.Y - a.Y) || 1;
+      const shared = mass.filter(w => w.room === room.Id && w.edge === i && w.shared).reduce((t, w) => t + Math.hypot(w.b.X - w.a.X, w.b.Y - w.a.Y), 0);
+      return shared / L > 0.5 ? half : 0;
+    }));
+  };
+  /// A 2x4 wall with drywall both sides, 4½ in: drawn as gaps between rooms, the far face of a room's wall is a snap
+  /// line too. With the floor's wall thickness set, rooms touch and there is no far face to find.
+  const wallFace = () => thickWalls() ? 0 : 0.1143 * scale();
   const clampPt = (p: Pt) => { const { w, h } = floorSize(); return { X: planRound(Math.max(0, Math.min(w, p.X))), Y: planRound(Math.max(0, Math.min(h, p.Y))) }; };
   const snapped = (p: Pt, exclude: any = null) => {
     if (!snapOn) return clampPt(p);
-    return clampPt(planSnap(p, othersFor(exclude), 12 * upp(), snapStep()).pt);
+    return clampPt(planSnap(p, othersFor(exclude), 12 * upp(), snapStep(), wallFace()).pt);
   };
   /// Within a few degrees of level or plumb from the last point, a line is made exactly so.
   const ortho = (prev: Pt | null | undefined, q: Pt) => {
@@ -369,7 +453,7 @@ export default function mount(sec: any, host: any) {
   /// A drawn point: onto a wall corner or edge when one is near, else level or plumb from the last point, else the grid.
   const drawSnap = (prev: Pt | null | undefined, p: Pt, grid = true) => {
     if (!snapOn) return clampPt(p);
-    const sn = planSnap(p, othersFor(null), 16 * upp() * hs(), grid ? snapStep() : 0);
+    const sn = planSnap(p, othersFor(selection?.type === 'wall' ? standaloneOf(selection.id) : null), 16 * upp() * hs(), grid ? snapStep() : 0, wallFace());
     return clampPt(sn.to === 'corner' || sn.to === 'edge' ? sn.pt : ortho(prev, sn.pt));
   };
   /// The point a wire's next bend follows on from.
@@ -388,8 +472,10 @@ export default function mount(sec: any, host: any) {
     return pts;
   };
   /// Where a wall is for a door or window: near enough to one, on it and lying along it.
+  /// Every stretch of a standalone wall, as an outline of its own, so a door or outlet finds it as it finds a room's.
+  const standaloneStretches = (): Pt[][] => wallsNow().flatMap((w: any) => (w.Points || []).slice(1).map((b: Pt, i: number) => [w.Points[i], b]));
   const wallAt = (p: Pt) => {
-    const w = planNearestWall(p, outlinesOf(roomsNow().filter(r => !r.Outdoor)));
+    const w = planNearestWall(p, [...outlinesOf(roomsNow().filter(r => !r.Outdoor)), ...standaloneStretches()]);
     return w && w.dist <= Math.max(0.6 * scale(), 16 * upp()) ? w : null;
   };
   const openingWidth = (kind: string) => {
@@ -414,7 +500,7 @@ export default function mount(sec: any, host: any) {
   /// Where a wall-mounted item goes: on the wall, facing the side the pointer is on. Away from walls it stands free.
   const onWall = (kind: string, q: Pt, side: Pt = q): Pt & { facing: number | null } => {
     if (!snapOn || !WALL_KINDS.includes(kind)) return { ...q, facing: null };
-    const w = planNearestWall(q, outlinesOf(roomsNow().filter(r => !r.Outdoor)));
+    const w = planNearestWall(q, [...outlinesOf(roomsNow().filter(r => !r.Outdoor)), ...standaloneStretches()]);
     if (!w || w.dist > Math.max(0.3 * scale(), 10 * upp())) return { ...q, facing: null };
     // The normal toward the pointer's side of the wall; the room it is in when the pointer is on the line itself.
     let toward = { X: side.X - w.pt.X, Y: side.Y - w.pt.Y };
@@ -427,7 +513,7 @@ export default function mount(sec: any, host: any) {
   /// A sized item near a wall stands with its back to it, facing the room the pointer is in; away from walls it keeps its turn.
   const fitToWall = (it: any, q: Pt, side: Pt = q) => {
     const D = Number(it.Depth) || 0;
-    const w = snapOn ? planNearestWall(q, outlinesOf(roomsNow().filter(r => !r.Outdoor))) : null;
+    const w = snapOn ? planNearestWall(q, [...outlinesOf(roomsNow().filter(r => !r.Outdoor)), ...standaloneStretches()]) : null;
     if (!w || w.dist > D / 2 + Math.max(0.3 * scale(), 12 * upp())) { const g2 = gridSnapped(q); it.X = g2.X; it.Y = g2.Y; return; }
     let toward = { X: side.X - w.pt.X, Y: side.Y - w.pt.Y };
     if (Math.hypot(toward.X, toward.Y) < 1e-6) toward = { X: q.X - w.pt.X, Y: q.Y - w.pt.Y };
@@ -453,11 +539,12 @@ export default function mount(sec: any, host: any) {
     ...openingsNow().map(o => ({ type: 'opening' as SelType, id: o.Id })),
     ...itemsNow().map((i: any) => ({ type: 'item' as SelType, id: i.Id })),
     ...runsNow().map(r => ({ type: 'run' as SelType, id: r.Id })),
+    ...wallsNow().map((w: any) => ({ type: 'wall' as SelType, id: w.Id })),
   ];
   /// Every point that moves when a set of things moves: outlines, items, doors and windows, wire bends.
   /// A room carries what is in it, the doors and windows in its walls and the bends of wires to what it holds.
   const movable = (sel: NonNullable<Selection>[]) => {
-    const shapes = new Set<any>(), items = new Set<any>(), openings = new Set<any>(), runs = new Set<any>();
+    const shapes = new Set<any>(), items = new Set<any>(), openings = new Set<any>(), runs = new Set<any>(), walls = new Set<any>();
     sel.forEach(x => {
       if (x.type === 'room' || x.type === 'area') {
         const s = shapeOf(x);
@@ -471,24 +558,29 @@ export default function mount(sec: any, host: any) {
       } else if (x.type === 'item') { const it = itemOf(x.id); if (it) items.add(it); }
       else if (x.type === 'opening') { const o = openingOf(x.id); if (o) openings.add(o); }
       else if (x.type === 'run') { const r = runOf(x.id); if (r) runs.add(r); }
+      else if (x.type === 'wall') { const w = standaloneOf(x.id); if (w) walls.add(w); }
     });
     runsNow().forEach(r => { if ([r.From, r.To].some(id => [...items].some((it: any) => it.Id === id))) runs.add(r); });
     return {
-      shapes: [...shapes].map(sh => ({ sh, pts: sh.Shape.map((q: Pt) => ({ ...q })) })),
+      shapes: [...shapes].map(sh => ({ sh, pts: sh.Shape.map((q: Pt) => ({ ...q })), lab: sh.LabelX != null && sh.LabelY != null ? { X: Number(sh.LabelX), Y: Number(sh.LabelY) } : null })),
       items: [...items].map(it => ({ it, X: Number(it.X) || 0, Y: Number(it.Y) || 0 })),
       openings: [...openings].map(o => ({ o, X: Number(o.X) || 0, Y: Number(o.Y) || 0 })),
       runs: [...runs].map(r => ({ r, pts: (r.Points || []).map((q: Pt) => ({ ...q })) })),
+      walls: [...walls].map(w => ({ r: w, pts: (w.Points || []).map((q: Pt) => ({ ...q })) })),
     };
   };
   const shift = (m: ReturnType<typeof movable>, dx: number, dy: number) => {
-    m.shapes.forEach(x => { x.sh.Shape = x.pts.map((q: Pt) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
+    m.shapes.forEach(x => {
+      x.sh.Shape = x.pts.map((q: Pt) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) }));
+      if (x.lab) { x.sh.LabelX = planRound(x.lab.X + dx); x.sh.LabelY = planRound(x.lab.Y + dy); }
+    });
     m.items.forEach(x => { x.it.X = planRound(x.X + dx); x.it.Y = planRound(x.Y + dy); });
     m.openings.forEach(x => { x.o.X = planRound(x.X + dx); x.o.Y = planRound(x.Y + dy); });
-    m.runs.forEach(x => { x.r.Points = x.pts.map((q: Pt) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
+    [...m.runs, ...m.walls].forEach(x => { x.r.Points = x.pts.map((q: Pt) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
   };
   /// The box around a set of movable points, or null when there are none.
   const boundsOf = (m: ReturnType<typeof movable>) => {
-    const pts: Pt[] = [...m.shapes.flatMap(x => x.pts), ...m.items.map(x => ({ X: x.X, Y: x.Y })), ...m.openings.map(x => ({ X: x.X, Y: x.Y })), ...m.runs.flatMap(x => x.pts)];
+    const pts: Pt[] = [...m.shapes.flatMap(x => x.pts), ...m.items.map(x => ({ X: x.X, Y: x.Y })), ...m.openings.map(x => ({ X: x.X, Y: x.Y })), ...m.runs.flatMap(x => x.pts), ...m.walls.flatMap(x => x.pts)];
     return pts.length ? planBounds(pts) : null;
   };
   /// Is a selectable thing wholly inside a box?
@@ -497,6 +589,7 @@ export default function mount(sec: any, host: any) {
     if (x.type === 'room' || x.type === 'area') return (shapeOf(x)?.Shape || []).every(inB);
     if (x.type === 'item') { const it = itemOf(x.id); return !!it && inB({ X: it.X, Y: it.Y }); }
     if (x.type === 'opening') { const o = openingOf(x.id); return !!o && inB({ X: o.X, Y: o.Y }); }
+    if (x.type === 'wall') { const w = standaloneOf(x.id); return !!w && (w.Points || []).every(inB); }
     const r = runOf(x.id);
     return !!r && runPath(r).length > 0 && runPath(r).every(inB);
   };
@@ -506,7 +599,9 @@ export default function mount(sec: any, host: any) {
   const setConstraints = (list: PlanConstraint[]) => { const f = floorNow()?.floor; if (f) f.Constraints = list; };
   /// The outlines on this floor, as the solver sees them.
   const shapesNow = () => [...roomsNow(), ...areasNow()].filter(x => (x.Shape || []).length >= 3);
-  const shapeById = (id: string) => shapesNow().find(x => x.Id === id);
+  /// What the solver holds: the outlines, and each standalone wall as an open line whose points are its corners.
+  const solverShapes = (): any[] => [...shapesNow(), ...wallsNow().filter((w: any) => (w.Points || []).length >= 2).map((w: any) => ({ Id: w.Id, Name: 'Wall', Shape: w.Points, Open: true }))];
+  const shapeById = (id: string) => solverShapes().find(x => x.Id === id);
   /// A corner that must stay put: its room is locked, or a locked wall ends there.
   const cornerLocked = (sh: any, i: number) => {
     if (!sh) return false;
@@ -517,23 +612,27 @@ export default function mount(sec: any, host: any) {
   /// A shape that cannot move as a whole: locked, or holding a locked wall.
   const shapeHeld = (sh: any) => !!sh && (sh.Locked || (sh.LockedWalls || []).length > 0);
   let lastSolve: { worst: number; unmet: string[] } = { worst: 0, unmet: [] };
-  /// Bring every constraint on this floor back into line, holding still the corners named.
-  const solve = (fixed: string[] = []) => {
-    if (!constraintsNow().length) { lastSolve = { worst: 0, unmet: [] }; return; }
-    lastSolve = planSolve(shapesNow(), constraintsNow(), new Set(fixed));
+  /// Bring every constraint on this floor back into line, holding still the corners named. The rooms in `hold` are
+  /// the ones being reshaped, and keep their level and plumb walls so unless `free` (Shift, while dragging); the rest
+  /// follow the corners they share, keeping theirs.
+  const solve = (fixed: string[] = [], hold?: string[], free = false) => {
+    if (!constraintsNow().length && !hold) { lastSolve = { worst: 0, unmet: [] }; return; }
+    lastSolve = planSolve(solverShapes(), constraintsNow(), new Set(fixed), 120, { before: before || gesture?.before || undefined, hold, keep: !free });
   };
   const keysOf = (sh: any) => (sh?.Shape || []).map((_: any, i: number) => `${sh.Id}#${i}`);
   const saidLocked = () => toast('That is locked. Unlock it in its panel to change it.', false);
   let cPicks: PlanRef[] = [];
+  let consLit = '';
   const sameRef = (a: PlanRef, b: PlanRef) => a.Room === b.Room && (a.Corner ?? null) === (b.Corner ?? null) && (a.Edge ?? null) === (b.Edge ?? null);
   /// The corner or wall under the pointer: a corner when one is close, else the nearest wall.
   const pickRef = (p: Pt): PlanRef | null => {
     const reach = 14 * upp() * hs();
     let best: PlanRef | null = null, bestD = reach;
-    shapesNow().forEach(sh => sh.Shape.forEach((q: Pt, i: number) => { const d = Math.hypot(q.X - p.X, q.Y - p.Y); if (d <= bestD) { bestD = d; best = { Room: sh.Id, Corner: i }; } }));
+    solverShapes().forEach(sh => sh.Shape.forEach((q: Pt, i: number) => { const d = Math.hypot(q.X - p.X, q.Y - p.Y); if (d <= bestD) { bestD = d; best = { Room: sh.Id, Corner: i }; } }));
     if (best) return best;
     bestD = reach * 0.85;
-    shapesNow().forEach(sh => sh.Shape.forEach((q: Pt, i: number) => {
+    solverShapes().forEach(sh => sh.Shape.forEach((q: Pt, i: number) => {
+      if (sh.Open && i === sh.Shape.length - 1) return;
       const r2 = sh.Shape[(i + 1) % sh.Shape.length];
       const n = planNearestOnSegment(p, q, r2);
       const d = Math.hypot(n.X - p.X, n.Y - p.Y);
@@ -551,8 +650,22 @@ export default function mount(sec: any, host: any) {
   };
   const cornerPt = (r: PlanRef) => { const sh = shapeById(r.Room); return sh && r.Corner != null ? sh.Shape[r.Corner] : null; };
   const addConstraint = (kind: string, refs: PlanRef[], value?: number) => {
+    // The same constraint twice holds nothing more; a length or angle given again replaces the one there.
+    const same = constraintsNow().find(c => c.Kind === kind && c.Refs.length === refs.length && c.Refs.every(r => refs.some(q => sameRef(r, q))));
+    if (same && (kind === 'length' || kind === 'angle') && value != null) {
+      act(() => { same.Value = value; solve([], refs.map(r => r.Room)); cPicks = []; });
+      return;
+    }
+    if (same) { cPicks = []; drawPlan(); toast('That is already held.', false); return; }
     const id = freshIn(constraintsNow(), kind);
-    act(() => { constraintsNow().push({ Id: id, Kind: kind, Refs: refs.map(r => ({ ...r })), Value: value ?? null }); solve(); cPicks = []; });
+    // Joining, the room picked first (or the one whose wall it is) stays put; the other comes to it, stretching as a
+    // rectangle would. Anything else reshapes the rooms it names.
+    const anchor = kind === 'coincident' ? (refs.find(r => r.Edge != null) || refs[0]).Room : '';
+    act(() => {
+      constraintsNow().push({ Id: id, Kind: kind, Refs: refs.map(r => ({ ...r })), Value: value ?? null });
+      if (anchor) solve(keysOf(shapeById(anchor)), []); else solve([], refs.map(r => r.Room));
+      cPicks = [];
+    });
     if (lastSolve.unmet.includes(id)) toast('That constraint cannot hold with the others, or with what is locked. It is kept, and marked in red; Ctrl+Z takes it back.', false);
   };
 
@@ -615,9 +728,11 @@ export default function mount(sec: any, host: any) {
     const max = planScaleMax(roomsNow().map(r => placeOf(r.Id)?.value));
     const font = 13 * u;
     const focus = focusCircuit();
+    // The Circuits view: every circuit in its own colour, its wires drawn bold, and the rooms left plain to trace them over.
+    const trace = mode === 'view' && period === 'circuits';
     // The rooms the focused circuit serves: the breaker's own list, and every room something on it is in.
     const focusRooms = new Set<string>(focus ? [...(circuitOf(focus)?.rooms || []), ...itemsIn().filter((i: any) => i.Circuit === focus).map((i: any) => i.Room).filter(Boolean)] : []);
-    // A selected GFCI shows what it protects: everything wired downstream of it, and the rest fades.
+    // A selected GFCI shows what it protects, in green, among the rest of its circuit.
     const gfci = selection?.type === 'item' && !extra.length ? itemOf(selection.id) : null;
     const downstream = gfci?.Gfci ? planDownstream(runsIn(), gfci.Id) : null;
     const isGfci = (id: string) => !!itemOf(id)?.Gfci;
@@ -633,8 +748,8 @@ export default function mount(sec: any, host: any) {
       while (at < words.length - 1 && words.slice(0, at + 1).join(' ').length <= name.length / 2) at++;
       return [words.slice(0, at).join(' '), words.slice(at).join(' ')];
     };
-    const label = (poly: Pt[], given: string[], cls: string) => {
-      const c = planCentroid(poly), b = planBounds(poly);
+    const label = (poly: Pt[], given: string[], cls: string, at?: Pt) => {
+      const c = at || planLabelPoint(poly), b = planBounds(poly);
       const [name, ...rest] = given, split = broken(name);
       const tries = [given, split && [...split, ...rest], [name], split].filter(Boolean) as string[][];
       let lines: string[] | null = null, f = font;
@@ -661,6 +776,8 @@ export default function mount(sec: any, host: any) {
       else if (room.SurfaceColor) svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-surface is-solid', fill: room.SurfaceColor }));
     });
     const labels: any[] = [];
+    const walls = thickWalls();
+    const mass = walls ? massNow() : [];
     rooms.forEach(room => {
       const poly: Pt[] = room.Shape;
       const p = placeOf(room.Id);
@@ -669,19 +786,36 @@ export default function mount(sec: any, host: any) {
       const shape = svgEl('polygon', {
         points: points(poly),
         class: `fp-room ${room.Outdoor ? 'is-outdoor' : 'is-indoor'} is-${mode === 'view' ? st : 'edit'}${room.Surface ? ' has-surface' : ''}${sel ? ' is-selected' : ''}`,
-        'stroke-width': (room.Outdoor ? 1.5 : sel ? 5 : 4) * u,
+        'stroke-width': (room.Outdoor ? 1.5 : sel ? (walls ? 3 : 5) : walls ? 1 : 4) * u,
       });
       if (room.Outdoor) shape.setAttribute('stroke-dasharray', `${7 * u} ${5 * u}`);
-      if (mode === 'view' && st === 'known') shape.style.fill = shadeOf(p!.value, max);
-      if (mode === 'view' && st === 'unmetered' && !room.Surface) shape.style.fill = 'url(#fp-hatch)';
-      if (focusRooms.has(room.Id)) { shape.classList.add('is-circuit'); shape.style.stroke = planCircuitColor(focus); }
+      if (mode === 'view' && !trace && st === 'known') shape.style.fill = shadeOf(p!.value, max);
+      if (mode === 'view' && !trace && st === 'unmetered' && !room.Surface) shape.style.fill = 'url(#fp-hatch)';
       shape.dataset.room = room.Id;
       svg.appendChild(shape);
+      if (focusRooms.has(room.Id)) shape.classList.add('is-circuit');
+      if (focusRooms.has(room.Id)) svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-circuit-tint', fill: planCircuitColor(focus) }));
       const lines = [room.Name || room.Id];
-      if (mode === 'view') lines.push(st === 'known' ? fmt(p!.value) : st === 'unknown' ? 'no data' : 'unmetered');
-      if (showSizes || (mode === 'edit' && sel)) lines.push(areaText(poly));
-      labels.push(label(poly, lines, 'fp-label' + (mode === 'view' ? ' is-' + st : '') + (room.Outdoor ? ' is-outdoor' : '')));
+      if (mode === 'view' && !trace) lines.push(st === 'known' ? fmt(p!.value) : st === 'unknown' ? 'no data' : 'unmetered');
+      if (showSizes || (mode === 'edit' && sel)) lines.push(areaText(insideOf(room, mass)));
+      const moved = room.LabelX != null && room.LabelY != null ? { X: Number(room.LabelX), Y: Number(room.LabelY) } : undefined;
+      const lab = label(poly, lines, 'fp-label' + (mode === 'view' ? ' is-' + st : '') + (room.Outdoor ? ' is-outdoor' : '') + (mode === 'edit' && tool === 'select' && !room.Locked ? ' is-movable' : ''), moved);
+      if (lab) lab.dataset.label = room.Id;
+      labels.push(lab);
     });
+
+    // The walls at the floor's thickness: between rooms on their middle, outside walls beyond the rooms. The selected
+    // room's outline is drawn again over them.
+    if (walls) {
+      const iw = interiorWall(), xw = exteriorWall();
+      mass.filter(w => w.draw).forEach(w => {
+        const t = w.shared ? iw : xw;
+        if (t <= 0) return;
+        const o = w.shared ? 0 : t / 2;
+        svg.appendChild(svgEl('line', { x1: w.a.X + w.out.X * o, y1: w.a.Y + w.out.Y * o, x2: w.b.X + w.out.X * o, y2: w.b.Y + w.out.Y * o, class: 'fp-wallmass', 'stroke-width': t }));
+      });
+      rooms.filter(r => isSel('room', r.Id)).forEach(r => svg.appendChild(svgEl('polygon', { points: points(r.Shape), class: 'fp-room-sel', 'stroke-width': 3 * u })));
+    }
 
     areasNow().forEach(area => {
       const poly: Pt[] = area.Shape || [];
@@ -693,23 +827,63 @@ export default function mount(sec: any, host: any) {
       labels.push(label(poly, [area.Name || area.Id], 'fp-label fp-area-label'));
     });
 
+    // Standalone walls, at their thickness; a selected one shows its ends and bends to drag, and dots to add a bend.
+    wallsNow().forEach((wl: any) => {
+      const pts: Pt[] = wl.Points || [];
+      if (pts.length < 2) return;
+      const sel = isSel('wall', wl.Id);
+      const g = svgEl('g', { class: 'fp-standalone' + (sel ? ' is-selected' : '') });
+      g.appendChild(svgEl('polyline', { points: points(pts), class: 'fp-standalone-line', 'stroke-width': Math.max(wallThick(wl), 3 * u) }));
+      const hit = svgEl('polyline', { points: points(pts), class: 'fp-hit', 'stroke-width': Math.max(wallThick(wl), 14 * u) });
+      hit.dataset.wall = wl.Id;
+      g.appendChild(hit);
+      svg.appendChild(g);
+      if (sel && mode === 'edit' && !extra.length) {
+        pts.forEach((q, i) => { const hd = svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u * hs(), class: 'fp-handle' + (i === selectedBend ? ' is-selected' : '') }); hd.dataset.runpt = String(i); svg.appendChild(hd); });
+        for (let i = 0; i + 1 < pts.length; i++) {
+          const m = svgEl('circle', { cx: (pts[i].X + pts[i + 1].X) / 2, cy: (pts[i].Y + pts[i + 1].Y) / 2, r: 5 * u * hs(), class: 'fp-mid' });
+          m.dataset.runmid = String(i);
+          svg.appendChild(m);
+        }
+      }
+    });
+
     // Doors and windows cut the walls they sit in.
     openingsNow().forEach(o => {
-      const g = planOpening(o, u);
+      // At the floor's wall thickness, a door cuts the whole wall, and one in an outside wall sits out in it.
+      let thick = 0, shift = { X: 0, Y: 0 };
+      if (walls) {
+        const near = mass.map(w => { const q = planNearestOnSegment(o, w.a, w.b); return { w, d: Math.hypot(q.X - o.X, q.Y - o.Y) }; }).sort((a, b) => a.d - b.d)[0];
+        if (near && near.d <= Math.max(interiorWall(), exteriorWall(), 6 * u)) {
+          thick = near.w.shared ? interiorWall() : exteriorWall();
+          if (!near.w.shared) shift = { X: near.w.out.X * thick / 2, Y: near.w.out.Y * thick / 2 };
+        }
+      }
+      const g = planOpening(o, u, thick, shift);
       if (isSel('opening', o.Id)) g.classList.add('is-selected');
       svg.appendChild(g);
     });
 
     // Cable runs, in their circuit's colour. A selected circuit comes forward and the rest fade.
-    if (showWiring || mode === 'edit') runsNow().forEach(r => {
+    // A wire is on the circuit of the outlets at its ends too, even when its own circuit was never set or is stale.
+    const onFocus = (r: any) => !!focus && (r.Circuit === focus || [r.From, r.To].some(id => id && itemOf(id)?.Circuit === focus));
+    // While viewing with the wiring hidden, the selected circuit's wires still show.
+    if (showWiring || trace || mode === 'edit' || focus || downstream) runsNow().forEach(r => {
       const path = runPath(r);
       if (path.length < 2) return;
       const sel = isSel('run', r.Id);
-      const dim = downstream ? !downstream.runs.has(r.Id) : !!focus && r.Circuit !== focus;
-      const colour = r.Kind === 'circuit' ? planCircuitColor(r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
-      const lit = downstream ? downstream.runs.has(r.Id) : !!focus && r.Circuit === focus;
-      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (downstream ? ' is-protected' : ' is-focus') : ''}${r.Circuit ? '' : ' is-unknown'}` });
-      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : 1), 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
+      const prot = !!downstream?.runs.has(r.Id);
+      const lit = prot || onFocus(r);
+      if (!showWiring && !trace && mode !== 'edit' && !lit && !sel) return;
+      const dim = !!(focus || downstream) && !lit;
+      const colour = r.Kind === 'circuit' ? planCircuitColor(lit && focus ? focus : r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
+      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit ? '' : ' is-unknown'}` });
+      const sw = (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : lit ? 2.2 : trace ? 1.8 : 1);
+      // On the circuit being looked at, a wire is cased in the page's colour so it parts from a wall it runs along.
+      if (lit || (trace && !dim)) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-case', 'stroke-width': sw + 6 * u }));
+      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': sw, 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
+      // And current is shown flowing along it, supply to load.
+      if (lit) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-flow', 'stroke-width': sw * 0.45, 'stroke-dasharray': `${3 * u} ${9 * u}`, style: `--fp-flow:${-12 * u}px` }));
       // While viewing, a branch circuit's run carries the circuit's reading at its middle.
       const cp = mode === 'view' && r.Circuit ? circuitOf(r.Circuit)?.power : undefined;
       if (mode === 'view' && r.Circuit && path.length >= 2) {
@@ -745,27 +919,46 @@ export default function mount(sec: any, host: any) {
     const r = 12 * u;
     itemsNow().forEach((item: any) => {
       const sel = isSel('item', item.Id);
+      if (!sel && !shown(item)) return;
       const supply = PLAN_SUPPLY_KINDS.includes(item.Kind);
       const known = supply || (!!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true));
-      const dim = downstream ? !(downstream.items.has(item.Id) || item.Id === gfci!.Id) : !!focus && item.Circuit !== focus;
-      const lit = downstream ? downstream.items.has(item.Id) : !!focus && item.Circuit === focus;
+      const prot = !!downstream?.items.has(item.Id);
+      const lit = prot || (!!focus && item.Circuit === focus);
+      const dim = !!(focus || downstream) && !lit && item.Id !== gfci?.Id;
       // Drawn at its real size when it has one: a washer is as big as a washer, turned as it stands.
       const W = Number(item.Width) || 0, D = Number(item.Depth) || 0, sized = W > 0 && D > 0;
       // A wall-mounted item sits beside its wall on the room's side, joined to it by a short stub, at any zoom.
       const facing = !sized && item.Facing != null && Number.isFinite(Number(item.Facing)) ? Number(item.Facing) * Math.PI / 180 : null;
-      const off = facing == null ? { X: 0, Y: 0 } : { X: Math.cos(facing) * (r + 3 * u), Y: Math.sin(facing) * (r + 3 * u) };
-      if (facing != null) svg.appendChild(svgEl('line', { x1: item.X, y1: item.Y, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
-      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (downstream ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
+      // At the floor's wall thickness it stands out from the face of the wall it is on, whichever side that is: an
+      // outdoor outlet beyond an outside wall, an indoor one off the middle of a wall between rooms.
+      let face = 0;
+      if (facing != null && walls) {
+        const near = mass.map(w => { const q = planNearestOnSegment(item, w.a, w.b); return { w, d: Math.hypot(q.X - item.X, q.Y - item.Y) }; }).sort((a, b) => a.d - b.d)[0];
+        if (near && near.d <= Math.max(interiorWall(), exteriorWall()) + 1)
+          face = near.w.shared ? interiorWall() / 2 : Math.cos(facing) * near.w.out.X + Math.sin(facing) * near.w.out.Y > 0 ? exteriorWall() : 0;
+      }
+      const fx = facing == null ? 0 : Math.cos(facing) * face, fy = facing == null ? 0 : Math.sin(facing) * face;
+      const off = facing == null ? { X: 0, Y: 0 } : { X: fx + Math.cos(facing) * (r + 3 * u), Y: fy + Math.sin(facing) * (r + 3 * u) };
+      if (facing != null) svg.appendChild(svgEl('line', { x1: item.X + fx, y1: item.Y + fy, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
+      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
       g.dataset.item = item.Id;
       let rr = r;
       let hasArt = false;
       if (sized) {
-        const body = svgEl('g', { class: 'fp-body' + (sel ? ' is-selected' : '') + (dim ? ' is-dim' : '') + (lit ? (downstream ? ' is-protected' : ' is-focus') : '') + (known ? '' : ' is-unknown'), transform: `translate(${item.X},${item.Y}) rotate(${Number(item.Rotation) || 0})` });
+        const body = svgEl('g', { class: 'fp-body' + (sel ? ' is-selected' : '') + (dim ? ' is-dim' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : '') + (known ? '' : ' is-unknown'), transform: `translate(${item.X},${item.Y}) rotate(${Number(item.Rotation) || 0})` });
         body.dataset.item = item.Id;
         const shape = item.Round
           ? svgEl('ellipse', { rx: W / 2, ry: D / 2, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u })
           : svgEl('rect', { x: -W / 2, y: -D / 2, width: W, height: D, rx: Math.min(W, D) * 0.07, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u });
         if (item.Circuit && (showWiring || focus)) shape.style.stroke = planCircuitColor(item.Circuit);
+        // On the circuit being looked at: ringed in its colour, well clear of the outline.
+        if (lit && !sel) {
+          const m = 6 * u;
+          const halo = item.Round ? svgEl('ellipse', { rx: W / 2 + m, ry: D / 2 + m, class: 'fp-halo', 'stroke-width': 3 * u })
+            : svgEl('rect', { x: -W / 2 - m, y: -D / 2 - m, width: W + 2 * m, height: D + 2 * m, rx: m, class: 'fp-halo', 'stroke-width': 3 * u });
+          halo.style.stroke = prot ? '' : planCircuitColor(item.Circuit);
+          body.appendChild(halo);
+        }
         body.appendChild(shape);
         // The front, where the door or the controls are.
         // The appliance itself, seen from above, when it is one we know how to draw.
@@ -776,8 +969,17 @@ export default function mount(sec: any, host: any) {
         hasArt = !!art;
         rr = Math.max(6 * u, Math.min(r, Math.min(W, D) * 0.32));
       } else {
-        const disc = svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : 2) * u });
-        if (item.Circuit && (showWiring || focus)) disc.style.stroke = planCircuitColor(item.Circuit);
+        // A panel, inverter or battery is a box on the wall, not a dot.
+        const boxy = ['panel', 'inverter', 'battery', 'generator', 'transformer'].includes(item.Kind);
+        const bw = item.Kind === 'panel' ? r * 1.55 : r * 1.9, bh = item.Kind === 'panel' ? r * 2.2 : r * 1.9;
+        const disc = boxy ? svgEl('rect', { x: -bw / 2, y: -bh / 2, width: bw, height: bh, rx: r * 0.18, class: 'fp-item-disc is-box', 'stroke-width': (sel ? 3 : trace ? 4 : 2) * u })
+          : svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : trace ? 4 : 2) * u });
+        if (item.Circuit && (showWiring || focus || trace)) disc.style.stroke = planCircuitColor(item.Circuit);
+        if (lit && !sel) {
+          const halo = svgEl('circle', { r: r + 7 * u, class: 'fp-halo', 'stroke-width': 3 * u });
+          halo.style.stroke = prot ? '' : planCircuitColor(item.Circuit);
+          g.appendChild(halo);
+        }
         g.appendChild(disc);
       }
       // An appliance drawn as itself needs no icon on top.
@@ -786,13 +988,17 @@ export default function mount(sec: any, host: any) {
         glyph.setAttribute('stroke-width', 1.4 * u);
         g.appendChild(glyph);
       }
-      // A GFCI wears a G; anything it protects, when the wiring is shown, a small green shield dot.
+      // A GFCI is plain to see: a green ring round it, a G on it, and GFCI written under it. Anything it protects, when
+      // the wiring or circuits are shown, wears a small green dot.
       if (item.Gfci) {
-        const b = svgEl('g', { class: 'fp-gfci', transform: `translate(${-r * 0.85},${-r * 0.8})` });
-        b.appendChild(svgEl('circle', { r: r * 0.45, 'stroke-width': u }));
-        const t = svgEl('text', { y: r * 0.03, 'font-size': r * 0.6 }); t.textContent = 'G'; b.appendChild(t);
+        g.insertBefore(svgEl('circle', { r: r + 4 * u, class: 'fp-gfci-ring', 'stroke-width': 2.5 * u }), g.firstChild);
+        const b = svgEl('g', { class: 'fp-gfci', transform: `translate(${-r * 0.9},${-r * 0.85})` });
+        b.appendChild(svgEl('circle', { r: r * 0.55, 'stroke-width': u }));
+        const t = svgEl('text', { y: r * 0.04, 'font-size': r * 0.75 }); t.textContent = 'G'; b.appendChild(t);
         g.appendChild(b);
-      } else if (showWiring && planProtectedBy(runsIn(), isGfci, item.Id)) {
+        const tag = svgEl('text', { y: r + 13 * u, class: 'fp-gfci-tag', 'font-size': font * 0.7 }); tag.textContent = 'GFCI';
+        g.appendChild(tag);
+      } else if ((showWiring || trace) && planProtectedBy(runsIn(), isGfci, item.Id)) {
         g.appendChild(svgEl('circle', { cx: r * 0.8, cy: r * 0.75, r: r * 0.28, class: 'fp-protected-dot', 'stroke-width': u }));
       }
       if (!known) {
@@ -823,17 +1029,21 @@ export default function mount(sec: any, host: any) {
     const dimsFor = rooms.filter(rm => showSizes || (mode === 'edit' && selection?.type === 'room' && selection.id === rm.Id));
     dimsFor.forEach(rm => {
       const poly: Pt[] = rm.Shape;
+      const inner = insideOf(rm, mass);
       const sign = planArea(poly) >= 0 ? 1 : -1;
       poly.forEach((a, i) => {
         const b = poly[(i + 1) % poly.length];
         const L = Math.hypot(b.X - a.X, b.Y - a.Y);
+        // Read inside the walls, as a tape measure would.
+        const ia = inner[i], ib = inner[(i + 1) % inner.length];
+        const inL = Math.hypot(ib.X - ia.X, ib.Y - ia.Y);
         if (L / u < 40) return;
         const nx = -(b.Y - a.Y) / L * sign, ny = (b.X - a.X) / L * sign;
         let ang = Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI;
         if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
         const mx = (a.X + b.X) / 2 - nx * 11 * u, my = (a.Y + b.Y) / 2 - ny * 11 * u;
         const t = svgEl('text', { x: mx, y: my, class: 'fp-dim', 'font-size': font * 0.85, transform: `rotate(${ang} ${mx} ${my})` });
-        t.textContent = len(L);
+        t.textContent = len(inL);
         svg.appendChild(t);
       });
     });
@@ -884,34 +1094,63 @@ export default function mount(sec: any, host: any) {
         svg.appendChild(lk);
       }
     });
-    // Constraints, where they hold: a pill on each wall or corner, red where they cannot.
+    // Constraints: only the selected room's (every one, with the Constrain tool), and any that cannot hold. Each says
+    // in a word what it holds; the walls it pairs are lit and joined.
     if (consShown()) {
       const pill = (at: Pt, text: string, unmet: boolean) => {
-        const w = (text.length * 6.5 + 10) * u, hh = 15 * u;
+        const w = (text.length * 6.2 + 12) * u, hh = 16 * u;
         const g = svgEl('g', { class: 'fp-cons' + (unmet ? ' is-unmet' : ''), transform: `translate(${at.X},${at.Y})` });
         g.appendChild(svgEl('rect', { x: -w / 2, y: -hh / 2, width: w, height: hh, rx: hh / 2, 'stroke-width': u }));
         const t = svgEl('text', { y: u, 'font-size': 10.5 * u }); t.textContent = text; g.appendChild(t);
         svg.appendChild(g);
       };
+      const wall = (m: any, unmet: boolean) => svg.appendChild(svgEl('line', { x1: m.a.X, y1: m.a.Y, x2: m.b.X, y2: m.b.Y, class: 'fp-cons-wall' + (unmet ? ' is-unmet' : ''), 'stroke-width': 4 * u }));
       const inward = (m: any, px: number) => { const dx = m.centre.X - m.mid.X, dy = m.centre.Y - m.mid.Y, d = Math.hypot(dx, dy) || 1; return { X: m.mid.X + dx / d * px * u, Y: m.mid.Y + dy / d * px * u }; };
-      let pair = 0;
+      /// The square or arc a draughtsman marks a held corner with, drawn along its two walls.
+      const cornerMark = (sh: any, i: number, unmet: boolean) => {
+        const n = sh.Shape.length, B = sh.Shape[i], A = sh.Shape[(i - 1 + n) % n], C = sh.Shape[(i + 1) % n];
+        const ua = { X: A.X - B.X, Y: A.Y - B.Y }, uc = { X: C.X - B.X, Y: C.Y - B.Y };
+        const la = Math.hypot(ua.X, ua.Y) || 1, lc = Math.hypot(uc.X, uc.Y) || 1;
+        const m = Math.min(10 * u, la / 3, lc / 3);
+        const a = { X: B.X + ua.X / la * m, Y: B.Y + ua.Y / la * m }, c2 = { X: B.X + uc.X / lc * m, Y: B.Y + uc.Y / lc * m };
+        const square = Math.abs(Math.abs(planCornerAngle(sh, i)) - 90) <= 0.5;
+        const d = square ? `M${a.X} ${a.Y} L${a.X + c2.X - B.X} ${a.Y + c2.Y - B.Y} L${c2.X} ${c2.Y}` : `M${a.X} ${a.Y} A${m} ${m} 0 0 ${planCornerAngle(sh, i) > 0 ? 1 : 0} ${c2.X} ${c2.Y}`;
+        svg.appendChild(svgEl('path', { d, class: 'fp-cons-mark' + (unmet ? ' is-unmet' : ''), 'stroke-width': 1.6 * u }));
+      };
+      const all = mode === 'edit' && tool === 'constrain';
       constraintsNow().forEach(c => {
         const unmet = lastSolve.unmet.includes(c.Id);
+        if (!(unmet || all || c.Id === consLit || c.Refs.some(r => r.Room === selection?.id))) return;
         if (c.Kind === 'length' || c.Kind === 'horizontal' || c.Kind === 'vertical') {
           const m = edgeMid(c.Refs[0]);
-          if (m) pill(inward(m, c.Kind === 'length' ? 16 : 34), c.Kind === 'length' ? len(Number(c.Value) || 0) : c.Kind === 'horizontal' ? 'H' : 'V', unmet);
+          if (m) { wall(m, unmet); pill(inward(m, 16), c.Kind === 'length' ? len(Number(c.Value) || 0) : c.Kind === 'horizontal' ? 'level' : 'plumb', unmet); }
         } else if (c.Kind === 'angle') {
           const q = cornerPt(c.Refs[0]); const sh = shapeById(c.Refs[0].Room);
-          if (q && sh) { const cc = planCentroid(sh.Shape); const dx = cc.X - q.X, dy = cc.Y - q.Y, d = Math.hypot(dx, dy) || 1; pill({ X: q.X + dx / d * 22 * u, Y: q.Y + dy / d * 22 * u }, `${Math.round(Math.abs(Number(c.Value) || 0))}°`, unmet); }
+          if (q && sh) {
+            cornerMark(sh, c.Refs[0].Corner!, unmet);
+            // Where it cannot hold, the pill says what the corner is, beside what it should be.
+            const want = Math.round(Math.abs(Number(c.Value) || 0)), now = Math.round(Math.abs(planCornerAngle(sh, c.Refs[0].Corner!)));
+            const cc = planCentroid(sh.Shape); const dx = cc.X - q.X, dy = cc.Y - q.Y, d = Math.hypot(dx, dy) || 1;
+            pill({ X: q.X + dx / d * 26 * u, Y: q.Y + dy / d * 26 * u }, unmet && now !== want ? `${now}° ≠ ${want}°` : `${want}°`, unmet);
+          }
         } else if (c.Kind === 'coincident') {
-          const q = cornerPt(c.Refs[0]);
+          const q = cornerPt(c.Refs[0]) || cornerPt(c.Refs[1]);
           if (q) svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u, class: 'fp-cons-ring' + (unmet ? ' is-unmet' : ''), 'stroke-width': 2 * u }));
+          const m = c.Refs[1] && edgeMid(c.Refs[1]); if (m) wall(m, unmet);
         } else {
-          pair++;
-          const sym = c.Kind === 'parallel' ? '∥' : c.Kind === 'perpendicular' ? '⊥' : '≡';
-          c.Refs.forEach(r => { const m = edgeMid(r); if (m) pill(inward(m, 34), `${sym}${pair}`, unmet); });
+          const ms = c.Refs.map(edgeMid).filter(Boolean) as any[];
+          ms.forEach(m => wall(m, unmet));
+          if (ms.length === 2) svg.appendChild(svgEl('line', { x1: ms[0].mid.X, y1: ms[0].mid.Y, x2: ms[1].mid.X, y2: ms[1].mid.Y, class: 'fp-cons-link' + (unmet ? ' is-unmet' : ''), 'stroke-width': 1.5 * u, 'stroke-dasharray': `${4 * u} ${3 * u}` }));
+          const at = ms.length === 2 ? { X: (ms[0].mid.X + ms[1].mid.X) / 2, Y: (ms[0].mid.Y + ms[1].mid.Y) / 2 } : ms[0] && inward(ms[0], 16);
+          if (at) pill(at, c.Kind === 'parallel' ? 'parallel' : c.Kind === 'perpendicular' ? 'square' : 'in line', unmet);
         }
       });
+    }
+    // The wall or corner a drag would take hold of.
+    if (grabLit && !dragging && mode === 'edit') {
+      const g = grabLit, cls = 'fp-grab' + (g.locked ? ' is-locked' : '');
+      if (g.corner != null) { const q = g.sh.Shape[g.corner]; if (q) svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: 8 * u * hs(), class: cls, 'stroke-width': 3 * u })); }
+      else { const [i, j] = planEdgeCorners(g.sh, g.edge!); const a = g.sh.Shape[i], b = g.sh.Shape[j]; if (a && b) svg.appendChild(svgEl('line', { x1: a.X, y1: a.Y, x2: b.X, y2: b.Y, class: cls, 'stroke-width': 5 * u })); }
     }
     // What the Constrain tool has picked.
     if (mode === 'edit' && tool === 'constrain') cPicks.forEach(r => {
@@ -945,7 +1184,7 @@ export default function mount(sec: any, host: any) {
     }
     if (draft.length) {
       const pts = hover ? [...draft, hover] : draft;
-      svg.appendChild(svgEl('polyline', { points: points(pts), class: 'fp-draft', 'stroke-width': 2 * u }));
+      svg.appendChild(svgEl('polyline', { points: points(pts), class: 'fp-draft' + (tool === 'wall' ? ' is-wall' : ''), 'stroke-width': tool === 'wall' ? Math.max(0.1143 * scale(), 3 * u) : 2 * u }));
       draft.forEach((q, i) => svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: (i === 0 ? 9 : 6) * u, class: 'fp-draft-pt' + (i === 0 ? ' is-first' : '') })));
     }
     if (wireDraft) {
@@ -968,7 +1207,7 @@ export default function mount(sec: any, host: any) {
     }
 
     // The scale the shading is on, with what the unshaded rooms mean.
-    if (mode === 'view' && rooms.length) {
+    if (mode === 'view' && !trace && rooms.length) {
       legend.append(
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch fp-grad' }), `0 – ${max > 0 ? fmt(max) : 'no readings yet'}`),
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch is-unmetered' }), 'unmetered'),
@@ -976,7 +1215,7 @@ export default function mount(sec: any, host: any) {
     }
     // The circuits on this floor, each a way to bring that circuit forward and fade the rest.
     const refs = [...new Set([...itemsNow().map((i: any) => i.Circuit), ...runsNow().map(r => r.Circuit)].filter(Boolean))] as string[];
-    if (showWiring && refs.length) {
+    if ((showWiring || trace) && refs.length) {
       const box = el('div', { class: 'fp-circuits' }, el('span', { class: 'fp-circuits-k', text: 'Circuits' }));
       refs.sort().forEach(ref => {
         const b = el('button', { class: 'fp-chip' + (focused === ref ? ' is-on' : ''), type: 'button', title: 'Bring this circuit forward; tap again to show them all.' },
@@ -1000,6 +1239,10 @@ export default function mount(sec: any, host: any) {
     (scaleBar.children[0] as any).style.width = `${Math.round(px)}px`;
     scaleBar.children[1].textContent = bar.label;
     scaleBar.hidden = !floorNow();
+    const north = Number(floorNow()?.floor.North) || 0;
+    compass.hidden = !floorNow() || hidden.has('compass');
+    needle.style.transform = `rotate(${north}deg)`;
+    points4.forEach(q => q.el.setAttribute('transform', `rotate(${-north} ${q.x} ${q.y})`));
   };
 
 
@@ -1021,14 +1264,15 @@ export default function mount(sec: any, host: any) {
       if (d.item) return { item: d.item as string };
       if (d.opening) return { opening: d.opening as string };
       if (d.run) return { run: d.run as string };
+      if (d.wall) return { wall: d.wall as string };
       if (d.area) return { area: d.area as string };
-      if (d.room) return { room: d.room as string };
+      if (d.room || d.label) return { room: (d.room || d.label) as string };
     }
     return {} as any;
   };
   /// Select what was hit. With Shift, Ctrl or ⌘ it is added to the selection, or taken out if already in it.
   const selectHit = (hit: any, additive = false) => {
-    const next: Selection = hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening } : hit.run ? { type: 'run', id: hit.run }
+    const next: Selection = hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening } : hit.run ? { type: 'run', id: hit.run } : hit.wall ? { type: 'wall', id: hit.wall }
       : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
     selectedCorner = -1; selectedBend = -1;
     if (!additive) { selection = next; extra = []; return; }
@@ -1040,8 +1284,92 @@ export default function mount(sec: any, host: any) {
     extra = all.slice(1);
   };
   const hitSel = (hit: any): NonNullable<Selection> | null => hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening }
-    : hit.run ? { type: 'run', id: hit.run } : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
+    : hit.run ? { type: 'run', id: hit.run } : hit.wall ? { type: 'wall', id: hit.wall } : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
 
+  /// The tools a wall or corner can be dragged from without going back to Select: those that act on a tap, not a drag.
+  const GRAB_TOOLS = new Set(['select', 'constrain', 'door', 'window', 'item', 'measure']);
+  /// The corner or wall a drag here would take hold of, on any room or area, selected or not: a corner when one is
+  /// close, else a wall. The selected shape wins where they meet, then rooms over areas.
+  const grabAt = (p: Pt): { sh: any; corner?: number; edge?: number; locked: boolean } | null => {
+    if (mode !== 'edit' || !GRAB_TOOLS.has(tool) || extra.length) return null;
+    const sel = shapeOf(selection);
+    const order = [...(sel ? [sel] : []), ...roomsNow().filter(r => r !== sel && (r.Shape || []).length >= 3), ...areasNow().filter(a => a !== sel && (a.Shape || []).length >= 3)];
+    const cReach = 10 * upp() * hs(), wReach = 7 * upp() * hs();
+    let best: any = null, bestD = cReach;
+    order.forEach(sh => sh.Shape.forEach((q: Pt, i: number) => { const d = Math.hypot(q.X - p.X, q.Y - p.Y); if (d < bestD - 1e-9) { bestD = d; best = { sh, corner: i }; } }));
+    if (!best) {
+      bestD = wReach;
+      order.forEach(sh => sh.Shape.forEach((q: Pt, i: number) => {
+        const n = planNearestOnSegment(p, q, sh.Shape[(i + 1) % sh.Shape.length]);
+        const d = Math.hypot(n.X - p.X, n.Y - p.Y);
+        if (d < bestD - 1e-9) { bestD = d; best = { sh, edge: i }; }
+      }));
+    }
+    if (!best) return null;
+    const ks = best.corner != null ? [best.corner] : planEdgeCorners(best.sh, best.edge);
+    best.locked = ks.some((k: number) => cornerLocked(best.sh, k) || planSharedCorners(shapesNow(), best.sh.Id, k).some(l => cornerLocked(shapeById(l.room), l.corner)));
+    return best;
+  };
+  /// Take hold of a corner or a wall of `target` for dragging.
+  const holdCorner = (target: any, index: number, apart: boolean) => {
+    gesture.kind = 'corner'; gesture.index = index; selectedCorner = index;
+    // A corner shared with a neighbour moves in both rooms, unless Alt pulls it apart.
+    gesture.linked = apart ? [] : planSharedCorners(shapesNow(), target.Id, index);
+    const held = cornerLocked(target, index) || gesture.linked.some((l: any) => cornerLocked(shapeById(l.room), l.corner));
+    if (held) { gesture.kind = 'none'; saidLocked(); }
+  };
+  const holdWall = (target: any, edge: number, apart: boolean) => {
+    // Dragging a wall slides the whole wall, keeping its direction; its neighbours stretch to follow.
+    const [i, j] = planEdgeCorners(target, edge);
+    gesture.kind = 'wall'; gesture.index = edge;
+    gesture.ends = [i, j].map(k => ({ k, X: target.Shape[k].X, Y: target.Shape[k].Y, linked: apart ? [] : planSharedCorners(shapesNow(), target.Id, k) }));
+    const held = gesture.ends.some((x: any) => cornerLocked(target, x.k) || x.linked.some((l: any) => cornerLocked(shapeById(l.room), l.corner)));
+    if (held) { gesture.kind = 'none'; saidLocked(); }
+  };
+  /// Grabbed without being selected first: it is selected, then held.
+  const holdGrab = (g: NonNullable<ReturnType<typeof grabAt>>, apart: boolean) => {
+    const type: SelType = roomsNow().includes(g.sh) ? 'room' : 'area';
+    if (!(selection?.type === type && selection.id === g.sh.Id)) { selection = { type, id: g.sh.Id }; extra = []; selectedBend = -1; drawSide(); }
+    if (g.corner != null) holdCorner(g.sh, g.corner, apart); else holdWall(g.sh, g.edge!, apart);
+  };
+
+  /// What a drag from under the pointer would do, before it starts: the cursor says it, and the wall or corner it would
+  /// take hold of is lit.
+  let grabLit: { sh: any; corner?: number; edge?: number; locked: boolean } | null = null;
+  const cursorFor = (e: any): string => {
+    if (mode !== 'edit' || spaceDown) return '';
+    const g = grabLit;
+    if (g) {
+      if (g.locked) return 'not-allowed';
+      if (g.corner != null) return 'move';
+      const [i, j] = planEdgeCorners(g.sh, g.edge!);
+      const a = g.sh.Shape[i], b = g.sh.Shape[j];
+      // The wall slides across itself, so the arrows point across it.
+      const t = ((Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI + 90) % 180 + 180) % 180;
+      return t < 22.5 || t >= 157.5 ? 'ew-resize' : t < 67.5 ? 'nwse-resize' : t < 112.5 ? 'ns-resize' : 'nesw-resize';
+    }
+    if (tool !== 'select') return '';
+    const hit = hitOf(e);
+    if (hit.resize) return 'nwse-resize';
+    if (hit.rotate) return 'grab';
+    if (hit.corner != null || hit.mid != null || hit.runpt != null || hit.runmid != null) return 'move';
+    const under = hitSel(hit);
+    if (!under) return '';
+    if (under.type === 'room' || under.type === 'area') return shapeHeld(shapeOf(under)) ? 'not-allowed' : 'move';
+    return 'move';
+  };
+  const showGrab = (e: any) => {
+    const g = grabAt(toPlan(e));
+    const key = (x: typeof g) => x ? `${x.sh.Id}:${x.corner ?? ''}:${x.edge ?? ''}` : '';
+    const changed = key(g) !== key(grabLit);
+    grabLit = g;
+    svg.style.cursor = cursorFor(e);
+    if (changed) drawPlan();
+  };
+  svg.addEventListener('pointerleave', () => { if (grabLit) { grabLit = null; drawPlan(); } svg.style.cursor = ''; });
+
+  /// The room whose name was pressed, if it was one.
+  const labelOf = (e: any): string => { for (let n = e.target; n && n !== svg; n = n.parentNode || n.parent) if (n.dataset?.label) return n.dataset.label as string; return ''; };
   svg.addEventListener('pointerdown', (e: any) => {
     // The middle button pans in every tool, as it does in drawing programs; the right button is left to the browser.
     if (e.button != null && e.button > 1) return;
@@ -1068,29 +1396,27 @@ export default function mount(sec: any, host: any) {
       gesture.orig = { w: Number(f.Width) || 1000, h: Number(f.Height) || 700 };
       gesture.all = movable(everything());
       gesture.box = boundsOf(gesture.all);
+    } else if (mode === 'edit' && tool === 'select' && labelOf(e) && !additive) {
+      // A room's name drags on its own, to wherever in the room reads best.
+      const room = roomsNow().find(r => r.Id === labelOf(e));
+      if (room?.Locked) { gesture.kind = 'none'; saidLocked(); }
+      else if (room) {
+        const at = room.LabelX != null && room.LabelY != null ? { X: Number(room.LabelX), Y: Number(room.LabelY) } : planLabelPoint(room.Shape);
+        gesture.kind = 'label'; gesture.room = room; gesture.off = { X: at.X - p.X, Y: at.Y - p.Y };
+      }
     } else if (mode === 'edit' && tool === 'select') {
       const target = extra.length ? null : shapeOf(selection);
-      const run = !extra.length && selection?.type === 'run' ? runOf(selection.id) : null;
+      const run = lineSel();
       const under = hitSel(hit);
-      if (hit.corner != null && target) {
-        gesture.kind = 'corner'; gesture.index = hit.corner; selectedCorner = hit.corner;
-        // A corner shared with a neighbour moves in both rooms, unless Alt pulls it apart.
-        gesture.linked = e.altKey ? [] : planSharedCorners(shapesNow(), target.Id, hit.corner);
-        const held = cornerLocked(target, hit.corner) || gesture.linked.some((l: any) => cornerLocked(shapeById(l.room), l.corner));
-        if (held) { gesture.kind = 'none'; saidLocked(); }
-      }
-      else if (hit.mid != null && target) {
-        // Dragging a wall's middle slides the whole wall, keeping its direction; its neighbours stretch to follow.
-        const [i, j] = planEdgeCorners(target, hit.mid);
-        gesture.kind = 'wall'; gesture.index = hit.mid;
-        gesture.ends = [i, j].map(k => ({ k, X: target.Shape[k].X, Y: target.Shape[k].Y, linked: e.altKey ? [] : planSharedCorners(shapesNow(), target.Id, k) }));
-        const held = gesture.ends.some((x: any) => cornerLocked(target, x.k) || x.linked.some((l: any) => cornerLocked(shapeById(l.room), l.corner)));
-        if (held) { gesture.kind = 'none'; saidLocked(); }
-      }
+      // Near a wall or corner, a drag takes hold of it, selected or not; items, doors and wires on it come first.
+      const grab = under && under.type !== 'room' && under.type !== 'area' ? null : grabAt(p);
+      if (hit.corner != null && target) holdCorner(target, hit.corner, !!e.altKey);
+      else if (hit.mid != null && target) holdWall(target, hit.mid, !!e.altKey);
       else if (hit.runpt != null && run) { gesture.kind = 'runpt'; gesture.index = hit.runpt; selectedBend = hit.runpt; }
       else if (hit.runmid != null && run) { gesture.kind = 'runinsert'; gesture.index = hit.runmid; }
       else if (hit.resize) { gesture.kind = 'resize'; }
       else if (hit.rotate) { gesture.kind = 'rotate'; }
+      else if (grab && !additive) holdGrab(grab, !!e.altKey);
       else if (under && additive) { gesture.kind = 'none'; }
       else if (under) {
         // Dragging anything already selected moves the whole selection; anything else is selected first.
@@ -1098,7 +1424,7 @@ export default function mount(sec: any, host: any) {
         gesture.kind = 'group';
         gesture.members = movable(selected());
         const m0 = gesture.members;
-        if (!m0.shapes.length && !m0.items.length && !m0.openings.length && !m0.runs.length) { gesture.kind = 'none'; saidLocked(); }
+        if (!m0.shapes.length && !m0.items.length && !m0.openings.length && !m0.runs.length && !m0.walls.length) { gesture.kind = 'none'; saidLocked(); }
         gesture.single = selected().length === 1 ? selection : null;
       } else {
         gesture.kind = 'marquee';
@@ -1107,6 +1433,9 @@ export default function mount(sec: any, host: any) {
       gesture.kind = 'rect'; rectStart = snapped(p); rectEnd = rectStart;
     } else if (mode === 'edit' && tool !== 'pan') {
       gesture.kind = 'tap';
+      // A tap does what the tool does; a drag from a wall or corner reshapes it, without going back to Select.
+      gesture.grab = grabAt(p);
+      gesture.apart = !!e.altKey;
     }
     dragging = true;
     drawPlan();
@@ -1116,6 +1445,7 @@ export default function mount(sec: any, host: any) {
     if (!pointers.has(e.pointerId)) {
       // Hovering: the next corner, bend or measuring point follows the pointer.
       if (draft.length || wireDraft || (measure && !measure.b)) { hover = tool === 'wire' ? drawSnap(wireLast(), toPlan(e)) : tool === 'measure' ? drawSnap(measure?.a, toPlan(e)) : drawSnap(draft[draft.length - 1], toPlan(e)); drawPlan(); }
+      else if (e.pointerType !== 'touch') showGrab(e);
       return;
     }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -1136,8 +1466,9 @@ export default function mount(sec: any, host: any) {
     gesture.moved = true;
     const p = toPlan(e);
     // A drag is one change: remembered once, as it starts.
-    const begin = () => { if (!gesture.pushed) { history.push(); gesture.pushed = true; } };
+    const begin = () => { if (!gesture.pushed) { history.push(); gesture.pushed = true; gesture.before = outlines(); } };
     const { w, h } = floorSize();
+    if (gesture.kind === 'tap' && gesture.grab) holdGrab(gesture.grab, gesture.apart);
     const k = gesture.kind;
     if (k === 'pan' || k === 'tap' || k === 'none') {
       if (k !== 'pan' && mode === 'edit' && tool !== 'pan') { gesture.kind = 'pan'; }
@@ -1146,6 +1477,9 @@ export default function mount(sec: any, host: any) {
       vb = { ...gesture.vb, x: gesture.vb.x - (e.clientX - gesture.sx) / sc, y: gesture.vb.y - (e.clientY - gesture.sy) / sc };
     } else if (k === 'marquee') {
       marquee = { a: gesture.start, b: p };
+    } else if (k === 'label') {
+      begin();
+      gesture.room.LabelX = planRound(p.X + gesture.off.X); gesture.room.LabelY = planRound(p.Y + gesture.off.Y);
     } else if (k === 'plot') {
       begin();
       // Growing to the left or top moves everything drawn along with the edge, so the drawing stays put on screen.
@@ -1194,7 +1528,12 @@ export default function mount(sec: any, host: any) {
         const box = boundsOf(m);
         if (box) { dx = Math.max(-box.x, Math.min(w - box.x - box.w, dx)); dy = Math.max(-box.y, Math.min(h - box.y - box.h, dy)); }
         shift(m, dx, dy);
-        if (m.shapes.length) solve(m.shapes.flatMap((x: any) => keysOf(x.sh)));
+        // Moved, a room leaves the rooms it only touched; those joined to it by a constraint come along.
+        if (m.shapes.length || m.walls.length) {
+          gesture.before = null;
+          const moved = [...m.shapes.map((x: any) => x.sh), ...m.walls.map((x: any) => shapeById(x.r.Id))];
+          solve(moved.flatMap((x: any) => keysOf(x)), moved.map((x: any) => x.Id));
+        }
       }
     } else if (k === 'resize' || k === 'rotate') {
       begin();
@@ -1230,7 +1569,7 @@ export default function mount(sec: any, host: any) {
           s.Shape[x.k] = q; fixed.push(`${s.Id}#${x.k}`);
           x.linked.forEach((l: any) => { const o = shapeById(l.room); if (o) { o.Shape[l.corner] = { ...q }; fixed.push(`${o.Id}#${l.corner}`); } });
         });
-        solve(fixed);
+        solve(fixed, [s.Id], !!e.shiftKey);
       }
     } else if (k === 'corner') {
       begin();
@@ -1240,21 +1579,24 @@ export default function mount(sec: any, host: any) {
         s.Shape[gesture.index] = q;
         const fixed = [`${s.Id}#${gesture.index}`];
         (gesture.linked || []).forEach((l: any) => { const o = shapeById(l.room); if (o) { o.Shape[l.corner] = { ...q }; fixed.push(`${o.Id}#${l.corner}`); } });
-        solve(fixed);
+        solve(fixed, [s.Id], !!e.shiftKey);
       }
     } else if (k === 'rect') {
       rectEnd = snapped(p);
     } else if (k === 'runpt' || k === 'runinsert') {
       begin();
-      const r = runOf(selection!.id);
+      const r = lineSel();
       if (r) {
         const pts = ensure(r, 'Points', []);
         if (k === 'runinsert') {
           // Bends are stored between the ends; a midpoint before the first bend inserts at the front.
           const at = Math.max(0, Math.min(pts.length, gesture.index - (r.From ? 1 : 0) + 1));
           pts.splice(at, 0, drawSnap(null, p));
+          if (selection!.type === 'wall') planRefsAfterInsert(constraintsNow(), r.Id, at);
           gesture.kind = 'runpt'; gesture.index = at;
         } else pts[gesture.index] = drawSnap(null, p);
+        // A wall's point is a corner the constraints hold, as a room's is.
+        if (selection!.type === 'wall') solve([`${r.Id}#${gesture.index}`], [r.Id], !!e.shiftKey);
       }
     }
     drawPlan();
@@ -1287,7 +1629,8 @@ export default function mount(sec: any, host: any) {
     if (g.kind === 'rect' && rectStart && rectEnd) {
       const poly = planRect(rectStart, rectEnd);
       rectStart = null; rectEnd = null;
-      if (Math.abs(planArea(poly)) > (0.3 * scale()) ** 2) finishOutline(poly);
+      if (Math.abs(planArea(poly)) > (0.3 * scale()) ** 2) { if (claimFor && tool === 'room') claimSpace(claimFor, poly); else finishOutline(poly); }
+      else if (!claimFor && tool !== 'area') { const gap = gapAt(p); if (gap) finishOutline(gap); else render(); }
       else render();
       return;
     }
@@ -1318,7 +1661,12 @@ export default function mount(sec: any, host: any) {
   svg.addEventListener('pointerup', endPointer);
   svg.addEventListener('pointercancel', (e: any) => { pointers.delete(e.pointerId); gesture = null; pinch = null; marquee = null; dragging = false; rectStart = null; rectEnd = null; drawPlan(); });
   svg.addEventListener('pointerleave', () => { if (hover) { hover = null; drawPlan(); } });
-  svg.addEventListener('dblclick', () => { if (wireDraft) finishWire(''); else if (draft.length >= 3) finishOutline(draft); });
+  svg.addEventListener('dblclick', (e: any) => {
+    // Double-clicking a moved name puts it back where the room would put it.
+    const id = mode === 'edit' && tool === 'select' ? labelOf(e) : '';
+    const room = id && roomsNow().find(r => r.Id === id);
+    if (room && room.LabelX != null && !room.Locked) { act(() => { delete room.LabelX; delete room.LabelY; }); return; }
+    if (wireDraft) finishWire(''); else if (tool === 'wall' && draft.length >= 2) finishWall(draft); else if (draft.length >= 3) finishOutline(draft); });
 
   // --- The menu a right-click opens, over whatever it was aimed at ----------------------------------
   type Entry = { label: string; run?: () => void; danger?: boolean; disabled?: boolean; head?: boolean };
@@ -1326,7 +1674,9 @@ export default function mount(sec: any, host: any) {
   const openMenu = (e: any, entries: Entry[]) => fpMenu.open(e, entries);
   /// What a right-click offers, by what it landed on.
   /// A menu choice that edits: it turns Edit on first, so nothing in the menu is dead while viewing.
-  const onEdit = (fn: () => void) => () => { if (mode !== 'edit') { mode = 'edit'; tool = 'select'; } fn(); };
+  const onEdit = (fn: () => void) => { const run = () => { if (mode !== 'edit') { mode = 'edit'; tool = 'select'; } fn(); }; editOnly.add(run); return run; };
+  /// What changes the floor: left out of the menu while viewing, which offers only looking and Edit this floor.
+  const editOnly = new WeakSet<() => void>();
   const menuFor = (hit: any, p: Pt): Entry[] => {
     const editing = mode === 'edit';
     const toEdit: Entry = { label: 'Edit this floor', run: () => { mode = 'edit'; tool = 'select'; render(); } };
@@ -1335,11 +1685,12 @@ export default function mount(sec: any, host: any) {
     const many = selected().length > 1;
     if (many) return [
       { label: `${selected().length} selected`, head: true },
+      ...(roomsPicked().length > 1 ? [{ label: 'Merge rooms', run: onEdit(() => mergeRooms()) }] : []),
       { label: 'Delete them', danger: true, run: onEdit(() => deleteSelection())},
       { label: 'Select none', run: () => { selection = null; extra = []; render(); } },
     ];
     if (hit.corner != null) return [{ label: 'Corner', head: true }, { label: 'Remove corner', danger: true, run: onEdit(() => { selectedCorner = hit.corner; removeCorner(); })}];
-    if (hit.runpt != null) return [{ label: 'Wire bend', head: true }, { label: 'Remove bend', danger: true, run: onEdit(() => { selectedBend = hit.runpt; removeBend(); })}];
+    if (hit.runpt != null) return [{ label: selection?.type === 'wall' ? 'Wall point' : 'Wire bend', head: true }, { label: selection?.type === 'wall' ? 'Remove point' : 'Remove bend', danger: true, run: onEdit(() => { selectedBend = hit.runpt; removeBend(); })}];
     if (hit.mid != null) {
       const sh = shapeOf(selection);
       const locked = !!sh && ((sh.LockedWalls || []).includes(hit.mid) || sh.Locked);
@@ -1380,6 +1731,7 @@ export default function mount(sec: any, host: any) {
         { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())},
       ];
     }
+    if (hit.wall) return [{ label: 'Wall', head: true }, ...(wallSplits(hit.wall).length ? [{ label: 'Split the room with it', run: onEdit(() => splitByWall(hit.wall)) }] : []), { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())}];
     if (hit.run) {
       const r = runOf(hit.run);
       return [
@@ -1396,6 +1748,7 @@ export default function mount(sec: any, host: any) {
         { label: sh.Name || sh.Id, head: true },
         { label: sh.Locked ? 'Unlock it' : 'Lock it', run: onEdit(() => act(() => { if (sh.Locked) delete sh.Locked; else sh.Locked = true; }))},
         { label: 'Redraw its outline', disabled: !!sh.Locked, run: onEdit(() => { act(() => { sh.Shape = []; setConstraints(planRefsWithout(constraintsNow(), sh.Id)); }); tool = hit.area ? 'area' : sh.Outdoor ? 'zone' : 'room'; render(); })},
+        ...(hit.room ? [{ label: 'Take in space…', disabled: !!sh.Locked, run: onEdit(() => { pickTool('room'); claimFor = sh.Id; render(); })}] : []),
         { label: 'Duplicate', disabled: !!hit.area, run: onEdit(() => duplicate())},
         { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())},
         ...(editing ? [] : [toEdit]),
@@ -1404,9 +1757,10 @@ export default function mount(sec: any, host: any) {
     // Bare plot.
     return [
       { label: 'Here', head: true },
-      { label: 'Add a room here', disabled: !floorNow(), run: () => { mode = 'edit'; tool = 'room'; render(); roomBySize(false); } },
-      { label: `Place ${kindName(itemKind).toLowerCase()} here`, disabled: !floorNow(), run: () => { mode = 'edit'; tool = 'item'; render(); tap({ hit: {}, additive: false }, p); } },
-      { label: 'Background image…', disabled: !floorNow(), run: () => backgroundSheet() },
+      ...(gapAt(p) ? [{ label: 'Make this space a room', run: onEdit(() => { tool = 'room'; const gap = gapAt(p); if (gap) finishOutline(gap); }) }] : []),
+      { label: 'Add a room here', disabled: !floorNow(), run: onEdit(() => { tool = 'room'; render(); roomBySize(false); }) },
+      { label: `Place ${kindName(itemKind).toLowerCase()} here`, disabled: !floorNow(), run: onEdit(() => { tool = 'item'; render(); tap({ hit: {}, additive: false }, p); }) },
+      { label: 'Background image…', disabled: !floorNow(), run: onEdit(() => backgroundSheet()) },
       { label: 'Fit the floor in view', run: () => { fit(); drawPlan(); } },
       ...(editing ? [] : [toEdit]),
     ];
@@ -1414,7 +1768,11 @@ export default function mount(sec: any, host: any) {
   svg.addEventListener('contextmenu', (e: any) => {
     e.preventDefault?.();
     const p = toPlan(e);
-    const entries = menuFor(hitOf(e), p);
+    let entries = menuFor(hitOf(e), p);
+    if (mode !== 'edit') {
+      entries = entries.filter(x => !x.run || !editOnly.has(x.run));
+      if (!entries.some(x => x.label === 'Edit this floor')) entries.push({ label: 'Edit this floor', run: () => { mode = 'edit'; tool = 'select'; render(); } });
+    }
     render();
     openMenu(e, entries);
   });
@@ -1468,6 +1826,14 @@ export default function mount(sec: any, host: any) {
       const q = drawSnap(draft[draft.length - 1], p);
       const first = draft[0];
       if (first && draft.length >= 3 && Math.hypot(q.X - first.X, q.Y - first.Y) <= 14 * upp()) finishOutline(draft);
+      else { draft.push(q); render(); }
+      return;
+    }
+    if (tool === 'wall') {
+      const q = drawSnap(draft[draft.length - 1], p);
+      const last = draft[draft.length - 1];
+      // Tapping the last point again finishes the wall.
+      if (last && draft.length >= 2 && Math.hypot(q.X - last.X, q.Y - last.Y) <= 14 * upp()) finishWall(draft);
       else { draft.push(q); render(); }
       return;
     }
@@ -1532,6 +1898,58 @@ export default function mount(sec: any, host: any) {
     }
   };
 
+  /// The empty space enclosed by rooms around a point, as an outline: tapping it with the Room tool makes it a room.
+  const gapAt = (p: Pt): Pt[] | null => {
+    const rooms = roomsNow().filter(r => (r.Shape || []).length >= 3);
+    if (planShapeAt(rooms, p)) return null;
+    const gaps = planFaces(rooms.map(r => r.Shape)).filter(f => planContains(f.shape, p) && !planShapeAt(rooms, f.at));
+    gaps.sort((a, b) => planArea(a.shape) - planArea(b.shape));
+    return gaps[0]?.shape || null;
+  };
+
+  /// A room grown over a drawn rectangle: the space is cut out of the rooms it covered, and what stood there moves in.
+  const claimSpace = (id: string, rect: Pt[]) => {
+    const keep = roomsNow().find(r => r.Id === id);
+    claimFor = ''; tool = 'select';
+    if (!keep) return render();
+    const box = (poly: Pt[]) => planBounds(poly);
+    const hits = (a: any, b: any) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    const area = box([...keep.Shape, ...rect]);
+    const near = roomsNow().filter(r => r !== keep && (r.Shape || []).length >= 3 && hits(box(r.Shape), area));
+    const faces = planFaces([keep.Shape, rect, ...near.map(r => r.Shape)]);
+    const inRect = (f: any) => planContains(rect, f.at);
+    const changed = near.filter(r => faces.some(f => inRect(f) && planContains(r.Shape, f.at)));
+    if (changed.some(r => r.Locked) || keep.Locked) return toast('Unlock the rooms involved to move space between them.', false);
+    const grown = planJoin(faces.filter(f => inRect(f) || planContains(keep.Shape, f.at)).map(f => f.shape));
+    if (!grown) return toast(`That space does not join on to ${keep.Name || keep.Id}, so it was not added.`, false);
+    const rest = new Map<any, Pt[] | null>();
+    for (const r of changed) {
+      const left = faces.filter(f => !inRect(f) && planContains(r.Shape, f.at)).map(f => f.shape);
+      const shape = left.length ? planJoin(left) : null;
+      if (left.length && !shape) return toast(`That would split ${r.Name || r.Id} in two, so nothing was changed.`, false);
+      rest.set(r, shape);
+    }
+    act(() => {
+      let cons = constraintsNow();
+      const reshape = (r: any, shape: Pt[]) => {
+        cons = planRefsAfterMerge(cons, r.Id, '', { [r.Id]: r.Shape }, shape).constraints;
+        r.Shape = shape.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) }));
+        delete r.LockedWalls;
+      };
+      reshape(keep, grown);
+      rest.forEach((shape, r) => {
+        if (shape) return reshape(r, shape);
+        cons = planRefsWithout(cons, r.Id);
+        roomsNow().splice(roomsNow().indexOf(r), 1);
+        areasNow().forEach(ar => { if ((ar.Rooms || []).includes(r.Id)) ar.Rooms = [...new Set((ar.Rooms as string[]).map(x => x === r.Id ? keep.Id : x))]; });
+      });
+      setConstraints(cons);
+      itemsIn().forEach((it: any) => { if (it.Room && it.Room !== keep.Id && changed.some(r => r.Id === it.Room) && planContains(rect, { X: it.X, Y: it.Y })) it.Room = keep.Id; });
+      itemsIn().forEach((it: any) => { if (it.Room && !roomsNow().some(r => r.Id === it.Room) && changed.some(r => r.Id === it.Room)) it.Room = keep.Id; });
+      selection = { type: 'room', id: keep.Id }; extra = [];
+    });
+  };
+
   /// A drawn outline becomes the selected room or area when it has none yet, and a new one otherwise.
   const finishOutline = (poly: Pt[]) => {
     const { w, h } = floorSize();
@@ -1562,6 +1980,67 @@ export default function mount(sec: any, host: any) {
     render();
     // Straight to its name: nobody wants to live with "Room 4".
     setTimeout(() => (side.querySelector?.('.fp-name') as any)?.focus?.(), 0);
+  };
+
+  /// A standalone wall from the points tapped, selected so its thickness can be set.
+  const finishWall = (pts: Pt[]) => {
+    draft = []; hover = null;
+    const clean = pts.filter((q, i) => i === 0 || Math.hypot(q.X - pts[i - 1].X, q.Y - pts[i - 1].Y) > 1e-6);
+    if (clean.length < 2) { render(); return; }
+    tool = 'select';
+    // Drawn right across a room, wall to wall, it splits the room in two instead of standing in it.
+    const cuts = roomsNow().filter(r => (r.Shape || []).length >= 3 && !r.Locked).map(r => ({ r, parts: planSplit(r.Shape, clean) })).filter(x => x.parts.length > 1);
+    if (cuts.length) return splitRooms(cuts);
+    const id = freshIn(wallsNow(), 'wall');
+    act(() => { wallsNow().push({ Id: id, Points: clean.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) })), Thickness: 0 }); selection = { type: 'wall', id }; });
+  };
+  /// A wall already standing across a room, drawn before walls split rooms, can still split it.
+  const wallSplits = (id: string) => {
+    const w = standaloneOf(id);
+    const pts: Pt[] = w?.Points || [];
+    return pts.length < 2 ? [] : roomsNow().filter(r => (r.Shape || []).length >= 3 && !r.Locked).map(r => ({ r, parts: planSplit(r.Shape, pts) })).filter(x => x.parts.length > 1);
+  };
+  const splitByWall = (id: string) => {
+    const cuts = wallSplits(id);
+    if (!cuts.length) return;
+    splitRooms(cuts, id);
+  };
+  /// Each room cut keeps its name and the largest piece; the others become new rooms beside it, taking what stands
+  /// in them, and the areas and breakers that took in the room take them in too.
+  const splitRooms = (cuts: { r: any; parts: Pt[][] }[], wall = '') => {
+    act(() => {
+      const w = wall ? standaloneOf(wall) : null;
+      if (w) wallsNow().splice(wallsNow().indexOf(w), 1);
+      let cons = w ? planRefsWithout(constraintsNow(), w.Id) : constraintsNow();
+      const round = (shape: Pt[]) => shape.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) }));
+      const born = new Map<string, string[]>();
+      cuts.forEach(({ r, parts }) => {
+        cons = planRefsAfterMerge(cons, r.Id, '', { [r.Id]: r.Shape }, parts[0]).constraints;
+        r.Shape = round(parts[0]);
+        delete r.LockedWalls;
+        const ids: string[] = [];
+        parts.slice(1).forEach((shape, i) => {
+          const name = `${r.Name || r.Id} ${i + 2}`;
+          const id = freshId(name);
+          roomsNow().push({ Id: id, Name: name, Shape: round(shape), Outdoor: !!r.Outdoor, Surface: r.Surface || '' });
+          ids.push(id);
+          itemsIn().forEach((it: any) => { if (it.Room === r.Id && planContains(shape, { X: it.X, Y: it.Y })) it.Room = id; });
+        });
+        born.set(r.Id, ids);
+      });
+      setConstraints(cons);
+      const grow = (list: string[]) => [...new Set(list.flatMap(id => [id, ...(born.get(id) || [])]))];
+      areasNow().forEach(ar => { if ((ar.Rooms || []).some((id: string) => born.has(id))) ar.Rooms = grow(ar.Rooms); });
+      const walk = (o: any) => {
+        if (!o || typeof o !== 'object') return;
+        const loc = o.Ext?.locations;
+        if (loc && Array.isArray(loc.Rooms) && loc.Rooms.some((id: string) => born.has(id))) loc.Rooms = grow(loc.Rooms);
+        Object.values(o).forEach(walk);
+      };
+      walk(flowIn());
+      selection = { type: 'room', id: cuts[0].r.Id }; extra = [];
+    });
+    toast(cuts.length === 1 ? `Split ${cuts[0].r.Name || cuts[0].r.Id} in two.` : `Split ${cuts.length} rooms.`, true);
   };
 
   /// A wire drawn between two items, or out to a bare point. Its circuit comes from whichever end knows one.
@@ -1607,17 +2086,30 @@ export default function mount(sec: any, host: any) {
     subBar.innerHTML = '';
     Object.entries(modeBtns).forEach(([m, b]) => { b.classList.toggle('is-on', m === mode); b.setAttribute('aria-selected', String(m === mode)); });
     if (mode === 'view') {
-      subBar.appendChild(seg([['now', 'Power now'], ['today', 'Today'], ['week', 'This week']], period, v => { period = v; remember('period', v); load(); },
-        'Shade by what each room is drawing now, or by the energy it has used over a period.'));
+      subBar.appendChild(seg([['now', 'Power now'], ['today', 'Today'], ['week', 'This week'], ['circuits', 'Circuits']], period, v => { period = v; remember('period', v); load(); },
+        'Shade by what each room is drawing now, or by the energy it has used over a period; or show every circuit in its own colour, to trace where each goes.'));
     }
     subBar.appendChild(check('Wiring', showWiring, v => { showWiring = v; remember('wiring', v ? '1' : '0'); drawPlan(); }, 'Show cable runs, and ring each item in its circuit’s colour.'));
     if (constraintsNow().length && !(mode === 'view' && window.matchMedia?.('(max-width: 560px)').matches)) subBar.appendChild(check('Constraints', showCons, v => { showCons = v; remember('cons', v ? '1' : '0'); drawPlan(); }, 'Show the constraints held on this floor: fixed lengths, angles, parallel and square walls.'));
+    const show = el('details', { class: 'fp-show' }) as HTMLDetailsElement;
+    const pick = el('div', { class: 'fp-show-menu' });
+    [...SHOW_GROUPS.map(g => [g[0], g[1]]), ['compass', 'Compass']].forEach(([k, label]) => pick.appendChild(check(label, !hidden.has(k), v => {
+      if (v) hidden.delete(k); else hidden.add(k);
+      remember('hide', [...hidden].join(',')); drawPlan();
+    })));
+    show.append(el('summary', { class: 'ld-inst', text: hidden.size ? `Show (${hidden.size} hidden)` : 'Show', title: 'Choose which kinds of item the plan draws, and whether it shows the compass.' }), pick);
+    show.addEventListener('toggle', () => { if (!show.open) drawSub(); });
+    subBar.appendChild(show);
     subBar.appendChild(check('Sizes', showSizes, v => { showSizes = v; remember('sizes', v ? '1' : '0'); drawPlan(); }, 'Show every wall’s length and each room’s floor area.'));
     if (mode === 'edit' && floorBelow()) subBar.appendChild(check('Floor below', showBelow, v => { showBelow = v; remember('below', v ? '1' : '0'); drawPlan(); }, 'Show the floor beneath this one faintly, to line this one up with it.'));
     if (mode === 'edit') subBar.appendChild(check('Snap', snapOn, v => { snapOn = v; remember('snap', v ? '1' : '0'); }, 'Corners snap to other rooms’ corners and edges, and everything to a fine grid.'));
 
     palette.hidden = mode !== 'edit';
+    // What changes the floor shows only while editing; what takes it away only while viewing.
+    [addBtn, floorBtn, bgBtn, toolsBtn].forEach(b => b.classList.toggle('fp-off', mode !== 'edit'));
+    [exportBtn, printBtn].forEach(b => b.classList.toggle('fp-off', mode === 'edit'));
     body.classList.toggle('is-editing', mode === 'edit');
+    sec.classList.toggle('is-editing', mode === 'edit');
     Object.entries(toolBtns).forEach(([t, b]) => { b.classList.toggle('is-on', mode === 'edit' && t === tool); b.setAttribute('aria-pressed', String(mode === 'edit' && t === tool)); });
     undoBtn.disabled = !history.canUndo();
     redoBtn.disabled = !history.canRedo();
@@ -1625,18 +2117,25 @@ export default function mount(sec: any, host: any) {
     opts.innerHTML = '';
     opts.hidden = mode !== 'edit';
     if (mode === 'edit') drawOpts();
-    const how = mode === 'view' ? 'Tap a room or item for its detail. Drag to pan, pinch or Ctrl+wheel to zoom.'
-      : FP_TOOLS.find(t => t[0] === tool)?.[3] || '';
+    // In Edit the options bar says what the tool does, so nothing sits over the plan being drawn on.
+    const what = FP_TOOLS.find(t => t[0] === tool)?.[3] || '';
+    if (mode === 'edit' && what && !opts.querySelector('.fp-opts-note')) opts.appendChild(el('span', { class: 'fp-opts-note', text: what }));
+    const how = mode === 'view' ? 'Tap a room or item for its detail. Drag to pan, pinch or Ctrl+wheel to zoom.' : '';
     hint.textContent = how;
     hint.hidden = !how || (mode === 'view' && (!!selection || viewHintSeen));
   };
 
   const drawOpts = () => {
     const add = (...n: any[]) => n.forEach(x => opts.appendChild(x));
-    if (tool === 'room' || tool === 'zone') {
+    if (tool === 'room' && claimFor) {
+      const who = roomsNow().find(r => r.Id === claimFor);
+      const cancel = btn('Cancel');
+      cancel.onclick = () => pickTool('select');
+      add(el('span', { class: 'fp-opts-note', text: `Drag over the space ${who?.Name || 'the room'} should take in. It is cut out of the rooms there.` }), cancel);
+    } else if (tool === 'room' || tool === 'zone') {
       const bySize = btn(tool === 'zone' ? 'Add an outdoor zone by size…' : 'Add a room by size…', 'primary');
       bySize.onclick = () => roomBySize(tool === 'zone');
-      add(bySize, el('span', { class: 'fp-opts-note', text: 'or drag across the plan.' }));
+      add(bySize, el('span', { class: 'fp-opts-note', text: 'or drag across the plan, or tap an empty space between rooms to fill it.' }));
     } else if (tool === 'outline') {
       if (draft.length) {
         const done = btn('Finish outline', 'primary');
@@ -1648,6 +2147,17 @@ export default function mount(sec: any, host: any) {
         cancel.onclick = () => { draft = []; render(); };
         add(done, back, cancel, el('span', { class: 'fp-opts-note', text: `${draft.length} corner${draft.length === 1 ? '' : 's'}` }));
       } else add(el('span', { class: 'fp-opts-note', text: 'Tap the first corner. Double-tap or tap the first corner again to close.' }));
+    } else if (tool === 'wall') {
+      if (draft.length) {
+        const done = btn('Finish wall', 'primary');
+        done.disabled = draft.length < 2;
+        done.onclick = () => finishWall(draft);
+        const back = btn('Undo point');
+        back.onclick = () => { draft.pop(); render(); };
+        const cancel = btn('Cancel');
+        cancel.onclick = () => { draft = []; render(); };
+        add(done, back, cancel, el('span', { class: 'fp-opts-note', text: draft.length >= 2 ? len(planPathLength(draft)) : 'Tap where it goes next.' }));
+      } else add(el('span', { class: 'fp-opts-note', text: 'Tap one end of the wall, each bend, then the other end; tap it again or double-tap to finish.' }));
     } else if (tool === 'door') {
       add(seg(PLAN_OPENINGS.filter(o => o[0] !== 'window'), doorKind, v => { doorKind = v; render(); }));
     } else if (tool === 'item') {
@@ -1715,7 +2225,9 @@ export default function mount(sec: any, host: any) {
         go('Hold angle', () => { const v = Math.max(1, Math.min(179.9, Number(deg.value) || 90)); addConstraint('angle', corners, Math.sign(cur || 1) * v); }, 'Hold the corner at this angle.');
         go('Square', () => addConstraint('angle', corners, Math.sign(cur || 1) * 90), 'Hold the corner at 90°.');
       } else if (corners.length === 2) {
-        go('Coincident', () => addConstraint('coincident', corners), 'Make the two corners one: a shared corner.');
+        go('Join', () => addConstraint('coincident', corners), 'Coincident: the two corners become one, and stay together as either room is moved or resized. The second comes to the first.');
+      } else if (corners.length === 1 && edges.length === 1) {
+        go('On wall', () => addConstraint('coincident', [corners[0], edges[0]]), 'Coincident: the corner stays on the wall’s line as either room is moved or resized.');
       } else if (edges.length === 2) {
         go('In line', () => addConstraint('colinear', edges), 'Colinear: the two walls lie along one line.');
         go('Parallel', () => addConstraint('parallel', edges));
@@ -1723,7 +2235,7 @@ export default function mount(sec: any, host: any) {
         const a = edgeMid(edges[0])!, b = edgeMid(edges[1])!;
         go('Same length', () => { addConstraint('length', [edges[1]], Math.round(a.len * 10) / 10); }, `Fix the second wall at the first one’s length, ${len(a.len)} (it is ${len(b.len)} now).`);
       } else if (cPicks.length === 2) {
-        add(el('span', { class: 'fp-opts-note', text: 'Pick two corners, or two walls.' }));
+        add(el('span', { class: 'fp-opts-note', text: 'Pick two corners, two walls, or a corner and a wall.' }));
       }
       if (cPicks.length) { const clear = btn('Clear'); clear.onclick = () => { cPicks = []; render(); }; add(clear); }
     } else if (tool === 'measure') {
@@ -1742,7 +2254,7 @@ export default function mount(sec: any, host: any) {
         add(el('span', { class: 'fp-measure-read', text: len(d) }), el('span', { class: 'fp-opts-note', text: 'It is really' }), real, set);
       } else add(el('span', { class: 'fp-opts-note', text: measure ? 'Tap the second point.' : 'Tap the first point.' }));
     } else if (tool === 'select') {
-      add(el('span', { class: 'fp-opts-note', text: 'Drag to move; drag a box to select several. Double-click a corner or bend to remove it. Delete removes; Ctrl+Z undoes.' }));
+      add(el('span', { class: 'fp-opts-note', text: touch ? 'Drag to move; drag across empty space to select several; pinch to zoom. What is selected opens below.' : 'Drag to move; drag a box to select several. Double-click a corner or bend to remove it. Delete removes; Ctrl+Z undoes.' }));
     } else {
       add(el('span', { class: 'fp-opts-note', text: FP_TOOLS.find(t => t[0] === tool)?.[3] || '' }));
     }
@@ -1777,6 +2289,11 @@ export default function mount(sec: any, host: any) {
   // --- Side panel ----------------------------------------------------------------------------------
   const row = (label: string, value: any, cls = '') => el('div', { class: 'fp-row ' + cls }, el('span', { class: 'fp-row-k', text: label }), typeof value === 'string' ? el('span', { class: 'fp-row-v', text: value }) : value);
   const field = (label: string, input: any, hintText = '') => el('label', { class: 'fp-field' }, el('span', { class: 'fp-field-k', text: label }), input, ...(hintText ? [el('span', { class: 'fp-field-hint', text: hintText })] : []));
+  const northChoices = (f: any): [string, string][] => {
+    const c: [string, string][] = [['0', 'Up'], ['45', 'Up and right'], ['90', 'Right'], ['135', 'Down and right'], ['180', 'Down'], ['225', 'Down and left'], ['270', 'Left'], ['315', 'Up and left']];
+    const now = String(Number(f.North) || 0);
+    return c.some(x => x[0] === now) ? c : [...c, [now, `${now}\u00b0`]];
+  };
   const select = (choices: [string, string][], value: string, onPick: (v: string) => void) => {
     const s = el('select', {}) as HTMLSelectElement;
     choices.forEach(([v, t]) => s.appendChild(el('option', { value: v, text: t })));
@@ -1851,8 +2368,24 @@ export default function mount(sec: any, host: any) {
     return out;
   };
 
+  /// On a phone, what is selected in Edit opens in a sheet over the foot of the plan, so the plan stays in sight:
+  /// a peek at first, all of it on a tap of its grip.
+  let sheetFull = false;
+  const narrow = () => !!window.matchMedia?.('(max-width: 560px)').matches;
+  const asSheet = () => mode === 'edit' && !!selection && narrow();
   const drawSide = () => {
     side.innerHTML = '';
+    const sheet = asSheet();
+    side.classList.toggle('is-sheet', sheet);
+    side.classList.toggle('is-full', sheet && sheetFull);
+    sec.classList.toggle('has-sheet', sheet);
+    if (sheet) {
+      const grip = el('button', { class: 'fp-grip', type: 'button', title: sheetFull ? 'Show less' : 'Show more' });
+      grip.setAttribute('aria-label', sheetFull ? 'Show less' : 'Show more');
+      grip.setAttribute('aria-expanded', String(sheetFull));
+      grip.onclick = () => { sheetFull = !sheetFull; drawSide(); };
+      side.appendChild(grip);
+    }
     const fl = floorNow();
     if (!fl) {
       side.appendChild(el('h3', { text: 'Start with a floor' }));
@@ -1876,6 +2409,7 @@ export default function mount(sec: any, host: any) {
     if (selection?.type === 'item') return drawItem(itemOf(selection.id), editing);
     if (selection?.type === 'opening') return drawOpening(openingOf(selection.id), editing);
     if (selection?.type === 'run') return drawRun(runOf(selection.id), editing);
+    if (selection?.type === 'wall') return drawWall(standaloneOf(selection.id), editing);
     if (selection && shapeOf(selection)) return drawShape(selection.type as 'room' | 'area', shapeOf(selection), editing);
     drawFloorSummary(fl);
   };
@@ -1919,7 +2453,7 @@ export default function mount(sec: any, host: any) {
       case 'angle': return `${refName(a)} at ${Math.round(Math.abs(Number(c.Value) || 0) * 10) / 10}°`;
       case 'horizontal': return `${refName(a)} level`;
       case 'vertical': return `${refName(a)} plumb`;
-      case 'coincident': return `${refName(a)} on ${refName(b)}`;
+      case 'coincident': return b?.Edge != null ? `${refName(a)} on ${refName(b)}` : `${refName(a)} joined to ${refName(b)}`;
       case 'colinear': return `${refName(a)} in line with ${refName(b)}`;
       case 'parallel': return `${refName(a)} parallel to ${refName(b)}`;
       case 'perpendicular': return `${refName(a)} square to ${refName(b)}`;
@@ -1927,6 +2461,29 @@ export default function mount(sec: any, host: any) {
     return c.Kind;
   };
 
+  /// Square up: straightens a nearly square room, once. Nothing is stored; dragging it after keeps its level and plumb
+  /// walls anyway (#601).
+  const squareUp = (sh: any) => {
+    const poly: Pt[] = sh.Shape;
+    const n = poly.length;
+    const tilt = (i: number) => { const a = poly[i], b = poly[(i + 1) % n]; return Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI; };
+    const off = (i: number) => Math.min(Math.abs(norm90(tilt(i))), Math.abs(Math.abs(norm90(tilt(i))) - 90));
+    const axis = poly.every((_, i) => off(i) <= 10);
+    const square = poly.every((_, i) => Math.abs(Math.abs(planCornerAngle(sh, i)) - 90) <= 15);
+    const done = poly.every((_, i) => off(i) <= 0.1) || poly.every((_, i) => Math.abs(Math.abs(planCornerAngle(sh, i)) - 90) <= 0.5);
+    const b = btn('Square up');
+    b.title = done ? 'It is square.' : axis || square ? 'Straighten its walls and corners to 90°.' : 'Only a room whose corners are all near 90° can be squared up.';
+    b.disabled = done || !!sh.Locked || !(axis || square);
+    b.onclick = () => act(() => {
+      const temp: PlanConstraint[] = axis
+        ? poly.map((_, i) => ({ Id: `squareup${i}`, Kind: Math.abs(norm90(tilt(i))) <= 10 ? 'horizontal' : 'vertical', Refs: [{ Room: sh.Id, Edge: i }], Value: null }))
+        : poly.slice(0, n - 1).map((_, i) => ({ Id: `squareup${i}`, Kind: 'angle', Refs: [{ Room: sh.Id, Corner: i }], Value: Math.sign(planCornerAngle(sh, i) || 1) * 90 }));
+      const first = poly.findIndex((_, i) => !cornerLocked(sh, i));
+      planSolve(solverShapes(), [...constraintsNow(), ...temp], new Set(first >= 0 && !(sh.LockedWalls || []).length ? [`${sh.Id}#${first}`] : []), 120, { before: before || undefined, hold: [sh.Id] });
+      solve([], [sh.Id]);
+    });
+    return b;
+  };
   const drawShape = (type: 'room' | 'area', s: any, editing: boolean) => {
     const p = placeOf(s.Id);
     const name = el('input', { type: 'text', class: 'fp-name', value: s.Name || '' }) as HTMLInputElement;
@@ -1943,7 +2500,12 @@ export default function mount(sec: any, host: any) {
       const lock = el('button', { class: 'small fp-lock' + (held ? ' is-on' : ''), type: 'button', title: held ? 'Unlock it, so it can be changed again.' : 'Lock it in place.' }, fpToolIcon('lock'), held ? ' Locked' : ' Lock');
       lock.setAttribute('aria-pressed', String(held));
       lock.onclick = () => act(() => { if (s.Locked) delete s.Locked; else s.Locked = true; });
-      side.appendChild(actions(lock));
+      const sq = poly.length >= 3 ? squareUp(s) : null;
+      const grow = btn('Take in space');
+      grow.title = 'Drag a rectangle over space this room should cover; it is cut out of the rooms there.';
+      grow.disabled = !!s.Locked || type !== 'room' || poly.length < 3;
+      grow.onclick = () => { pickTool('room'); claimFor = s.Id; render(); };
+      side.appendChild(actions(lock, ...(sq ? [sq] : []), grow));
     }
     /// A length typed for a wall keeps any length it is fixed at in step, then the rest of the plan follows.
     const settle = () => {
@@ -1953,17 +2515,19 @@ export default function mount(sec: any, host: any) {
         const [i, j] = planEdgeCorners(s, c.Refs[0].Edge);
         if (i < n && j < n) c.Value = Math.round(Math.hypot(s.Shape[j].X - s.Shape[i].X, s.Shape[j].Y - s.Shape[i].Y) * 10) / 10;
       });
-      solve(keysOf(s));
+      solve(keysOf(s), [s.Id]);
     };
     const lengthFix = (edge: number) => constraintsNow().find(c => c.Kind === 'length' && c.Refs[0]?.Room === s.Id && c.Refs[0].Edge === edge);
     if (poly.length >= 3) {
       side.appendChild(el('h4', { text: 'Size' }));
-      side.appendChild(row('Floor area', areaText(poly)));
+      // Sizes read inside the walls when the floor gives them a thickness.
+      const inner = type === 'room' ? insideOf(s) : poly;
+      side.appendChild(row('Floor area', areaText(inner)));
       if (editing && type === 'room' && planIsBox(poly)) {
         // A rectangle is sized by its inside measurements; its top-left corner stays put.
-        const b = planBounds(poly);
-        const setBox = (w: number, h: number) => { if (held || (s.LockedWalls || []).length) { saidLocked(); render(); return; } act(() => { s.Shape = planClamp(planRect({ X: b.x, Y: b.y }, { X: b.x + w, Y: b.y + h }), floorSize().w, floorSize().h); settle(); }); };
-        const wi = lenInput(b.w, w => setBox(w, b.h)), di = lenInput(b.h, h => setBox(b.w, h));
+        const b = planBounds(poly), ib = planBounds(inner);
+        const setBox = (w: number, h: number) => { if (held || (s.LockedWalls || []).length) { saidLocked(); render(); return; } act(() => { s.Shape = planClamp(planRect({ X: b.x, Y: b.y }, { X: b.x + w + (b.w - ib.w), Y: b.y + h + (b.h - ib.h) }), floorSize().w, floorSize().h); settle(); }); };
+        const wi = lenInput(ib.w, w => setBox(w, ib.h)), di = lenInput(ib.h, h => setBox(ib.w, h));
         if (held) { wi.disabled = true; di.disabled = true; }
         side.appendChild(el('div', { class: 'fp-two' }, field('Width', wi), field('Depth', di)));
       }
@@ -1972,17 +2536,20 @@ export default function mount(sec: any, host: any) {
       poly.forEach((a, i) => {
         const bpt = poly[(i + 1) % poly.length];
         const L = Math.hypot(bpt.X - a.X, bpt.Y - a.Y);
+        const ia = inner[i], ibp = inner[(i + 1) % inner.length];
+        const inL = inner === poly ? L : Math.hypot(ibp.X - ia.X, ibp.Y - ia.Y);
         const wallLocked = (s.LockedWalls || []).includes(i);
-        if (!editing) { walls.appendChild(row(`Wall ${i + 1}`, len(L) + (wallLocked ? ' · locked' : '') + (lengthFix(i) ? ' · fixed' : ''))); return; }
+        if (!editing) { walls.appendChild(row(`Wall ${i + 1}`, len(inL) + (wallLocked ? ' · locked' : '') + (lengthFix(i) ? ' · fixed' : ''))); return; }
         // Typing a wall's length moves the corner at its far end along the wall.
-        const inp = lenInput(L, want => {
+        const inp = lenInput(inL, wantIn => {
           if (held || cornerLocked(s, (i + 1) % poly.length)) { saidLocked(); render(); return; }
+          const want = wantIn + (L - inL);
           act(() => {
             if (!L) return;
             const k = want / L;
             s.Shape[(i + 1) % poly.length] = { X: planRound(a.X + (bpt.X - a.X) * k), Y: planRound(a.Y + (bpt.Y - a.Y) * k) };
             const fix = lengthFix(i); if (fix) fix.Value = Math.round(want * 10) / 10;
-            solve([`${s.Id}#${i}`, `${s.Id}#${(i + 1) % poly.length}`]);
+            solve([`${s.Id}#${i}`, `${s.Id}#${(i + 1) % poly.length}`], [s.Id]);
           });
         });
         inp.disabled = held;
@@ -2000,7 +2567,7 @@ export default function mount(sec: any, host: any) {
         walls.appendChild(el('div', { class: 'fp-wall-row' + (selectedCorner === i ? ' is-picked' : '') }, el('span', { class: 'fp-wall-k', text: `Wall ${i + 1}` }), inp, fixBtn, lockBtn));
       });
       side.appendChild(walls);
-      if (editing) side.appendChild(el('div', { class: 'desc', text: 'Drag a wall’s middle dot to slide the wall; double-click it to add a corner. A corner shared with the next room moves in both — hold Alt to pull it apart.' }));
+      if (editing) side.appendChild(el('div', { class: 'desc', text: touch ? 'Drag a wall’s middle dot to slide the wall. A corner shared with the next room moves in both.' : 'Drag a wall’s middle dot to slide the wall; double-click it to add a corner. A corner shared with the next room moves in both — hold Alt to pull it apart.' }));
     }
 
     if (editing && type === 'room') {
@@ -2019,17 +2586,20 @@ export default function mount(sec: any, host: any) {
     }
 
     // The constraints that hold this room, each removable.
-    const mine = constraintsNow().filter(c => c.Refs.some(r => r.Room === s.Id));
+    const mine: [string, PlanConstraint[]][] = constraintsNow().filter(c => c.Refs.some(r => r.Room === s.Id)).map(c => [describeConstraint(c), [c]]);
     if (mine.length) {
       side.appendChild(el('h4', { text: 'Constraints' }));
       const cl2 = el('div', { class: 'fp-list' });
-      mine.forEach(c => {
-        const unmet = lastSolve.unmet.includes(c.Id);
-        const rowEl = el('div', { class: 'fp-list-row is-static' + (unmet ? ' is-unmet' : '') }, el('span', { class: 'fp-list-name', text: describeConstraint(c) }),
+      mine.forEach(([text, cs]) => {
+        const unmet = cs.some(c => lastSolve.unmet.includes(c.Id));
+        const rowEl = el('div', { class: 'fp-list-row is-static' + (unmet ? ' is-unmet' : '') }, el('span', { class: 'fp-list-name', text }),
           el('span', { class: 'fp-list-val' + (unmet ? ' is-nodata' : ''), text: unmet ? 'cannot hold' : 'holds' }));
+        // Pointing at one shows it on the plan.
+        rowEl.onmouseenter = () => { consLit = cs[0].Id; drawPlan(); };
+        rowEl.onmouseleave = () => { consLit = ''; drawPlan(); };
         if (editing) {
           const x = el('button', { class: 'fp-chip-x', type: 'button', text: '×', title: 'Remove this constraint' });
-          x.onclick = () => act(() => { setConstraints(constraintsNow().filter(k => k !== c)); });
+          x.onclick = () => act(() => { setConstraints(constraintsNow().filter(k => !cs.includes(k))); });
           rowEl.appendChild(x);
         }
         cl2.appendChild(rowEl);
@@ -2097,7 +2667,7 @@ export default function mount(sec: any, host: any) {
       if (selectedCorner >= 0 && poly.length > 3) {
         side.appendChild(el('div', { class: 'desc', text: 'Double-click a corner to remove it, or drag a small dot to add one.' }));
         const dropCorner = btn('Remove corner');
-        dropCorner.onclick = () => act(() => { s.Shape.splice(selectedCorner, 1); selectedCorner = -1; });
+        dropCorner.onclick = () => { removeCorner(); };
         btns.push(dropCorner);
       }
       if (type === 'room' && poly.length >= 3) { const copy = btn('Duplicate'); copy.title = 'A copy beside it (Ctrl+D).'; copy.onclick = () => duplicate(); btns.push(copy); }
@@ -2306,6 +2876,21 @@ export default function mount(sec: any, host: any) {
     if (c) side.appendChild(circuitRow(c));
   };
 
+  const drawWall = (w: any, editing: boolean) => {
+    if (!w) { selection = null; return drawSide(); }
+    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: 'Wall' }), el('span', { class: 'fp-pill', text: 'standalone' })));
+    side.appendChild(row('Length', len(planPathLength(w.Points || []))));
+    if (!editing) { side.appendChild(row('Thickness', len(wallThick(w)))); return; }
+    side.appendChild(field('Thickness', lenInput(wallThick(w), v => act(() => { w.Thickness = planRound(v); })), 'An interior wall is about 4½ in; an exterior one about 6 in.'));
+    const del = btn('Delete', 'danger');
+    del.onclick = () => deleteSelection();
+    const btns2: any[] = [];
+    if (selectedBend >= 0 && selectedBend < (w.Points || []).length) { const rb = btn('Remove point'); rb.onclick = () => removeBend(); btns2.push(rb); }
+    if (wallSplits(w.Id).length) { const sp = btn('Split the room', 'primary'); sp.title = 'It runs right across a room: make it the wall between two rooms.'; sp.onclick = () => splitByWall(w.Id); btns2.unshift(sp); }
+    side.appendChild(actions(...btns2, del));
+    side.appendChild(el('div', { class: 'desc', text: 'Drag an end or bend to move it, a small dot to add a bend; double-click a point to remove it.' }));
+  };
+
   /// A copy of the selection beside it, selected: an item, a door or window, or a room with nothing in it.
   const duplicate = () => {
     if (!selection) return;
@@ -2344,7 +2929,7 @@ export default function mount(sec: any, host: any) {
       sh.Shape.splice(at, 1); selectedCorner = -1;
       setConstraints(planRefsAfterRemove(constraintsNow(), sh.Id, at, count));
       sh.LockedWalls = (sh.LockedWalls || []).filter((e: number) => e !== at && e !== (at - 1 + count) % count).map((e: number) => e > at ? e - 1 : e);
-      solve();
+      solve([], [sh.Id]);
     });
     return true;
   };
@@ -2363,15 +2948,60 @@ export default function mount(sec: any, host: any) {
   };
   /// Take out the selected bend of a wire; its path joins straight across.
   const removeBend = () => {
-    const r = !extra.length && selection?.type === 'run' ? runOf(selection.id) : null;
+    const r = lineSel();
     if (!r || selectedBend < 0 || selectedBend >= (r.Points || []).length) return false;
-    if ((r.From ? 1 : 0) + (r.To ? 1 : 0) + r.Points.length <= 2) { toast('A wire needs two ends.', false); return true; }
-    const at = selectedBend;
-    act(() => { r.Points.splice(at, 1); selectedBend = -1; });
+    if ((r.From ? 1 : 0) + (r.To ? 1 : 0) + r.Points.length <= 2) { toast(selection?.type === 'wall' ? 'A wall needs two ends.' : 'A wire needs two ends.', false); return true; }
+    const at = selectedBend, count = r.Points.length, wall = selection?.type === 'wall';
+    act(() => { r.Points.splice(at, 1); selectedBend = -1; if (wall) { setConstraints(planRefsAfterRemove(constraintsNow(), r.Id, at, count)); solve([], [r.Id]); } });
     return true;
   };
 
   /// Remove everything selected in one undoable step. A room's items stay, outdoors; a wire to a removed item keeps its path.
+  /// Rooms that meet along a wall, made one: the first picked keeps its name, and everything in or served by the
+  /// others comes with it.
+  const roomsPicked = () => selected().filter(x => x.type === 'room').map(x => shapeOf(x)).filter(Boolean);
+  const mergeRooms = () => {
+    const rooms = roomsPicked();
+    if (rooms.length < 2) return;
+    if (rooms.some((r: any) => r.Locked)) return toast('Unlock the rooms to merge them.', false);
+    let shape: Pt[] = rooms[0].Shape, cons = constraintsNow(), locked: number[] = [...(rooms[0].LockedWalls || [])];
+    const keep = rooms[0], merged: any[] = [];
+    let rest = rooms.slice(1);
+    for (let progress = true; progress && rest.length;) {
+      progress = false;
+      for (const r of [...rest]) {
+        const next = planUnion(shape, r.Shape);
+        if (!next) continue;
+        const m = planRefsAfterMerge(cons, keep.Id, r.Id, { [keep.Id]: shape, [r.Id]: r.Shape }, next);
+        locked = [...new Set([...locked.map(e => m.edge(keep.Id, e)), ...(r.LockedWalls || []).map((e: number) => m.edge(r.Id, e))].filter((e): e is number => e != null))];
+        shape = next; cons = m.constraints; merged.push(r); rest = rest.filter(x => x !== r); progress = true;
+      }
+    }
+    if (!merged.length) return toast('Those rooms do not share a wall, so they cannot be merged.', false);
+    act(() => {
+      const ids = new Set(merged.map(r => r.Id));
+      keep.Shape = shape.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) }));
+      if (locked.length) keep.LockedWalls = locked; else delete keep.LockedWalls;
+      setConstraints(cons);
+      merged.forEach(r => roomsNow().splice(roomsNow().indexOf(r), 1));
+      itemsIn().forEach((it: any) => { if (ids.has(it.Room)) it.Room = keep.Id; });
+      areasNow().forEach(ar => { if ((ar.Rooms || []).some((id: string) => ids.has(id))) ar.Rooms = [...new Set((ar.Rooms as string[]).map(id => ids.has(id) ? keep.Id : id))]; });
+      // Breakers that serve a merged room, and nodes placed in one, now name the room it became.
+      const walk = (o: any) => {
+        if (!o || typeof o !== 'object') return;
+        const loc = o.Ext?.locations;
+        if (loc) {
+          if (Array.isArray(loc.Rooms) && loc.Rooms.some((id: string) => ids.has(id))) loc.Rooms = [...new Set((loc.Rooms as string[]).map(id => ids.has(id) ? keep.Id : id))];
+          if (ids.has(loc.Location)) loc.Location = keep.Id;
+        }
+        Object.values(o).forEach(walk);
+      };
+      walk(flowIn());
+      selection = { type: 'room', id: keep.Id }; extra = [];
+    });
+    if (rest.length) toast(`${rest.length} room${rest.length > 1 ? 's' : ''} did not share a wall and stayed separate.`, false);
+  };
+
   const deleteSelection = () => {
     const chosen = selected();
     if (!chosen.length) return;
@@ -2390,6 +3020,7 @@ export default function mount(sec: any, host: any) {
           runsIn().forEach((r: any) => { if (r.From === it.Id) { ensure(r, 'Points', []).unshift({ X: it.X, Y: it.Y }); r.From = ''; } if (r.To === it.Id) { ensure(r, 'Points', []).push({ X: it.X, Y: it.Y }); r.To = ''; } });
         } else if (x.type === 'opening') { const o = openingOf(x.id); if (o) openingsNow().splice(openingsNow().indexOf(o), 1); }
         else if (x.type === 'run') { const r = runOf(x.id); if (r) runsIn().splice(runsIn().indexOf(r), 1); }
+        else if (x.type === 'wall') { const w = standaloneOf(x.id); if (w) { setConstraints(planRefsWithout(constraintsNow(), w.Id)); wallsNow().splice(wallsNow().indexOf(w), 1); } }
         else {
           const sh = shapeOf(x);
           if (!sh || sh.Locked) return;
@@ -2408,7 +3039,7 @@ export default function mount(sec: any, host: any) {
   const drawMany = (editing: boolean) => {
     const all = selected();
     const count = (t: SelType) => all.filter(x => x.type === t).length;
-    const words = ([['room', 'room', 'rooms'], ['area', 'area', 'areas'], ['item', 'item', 'items'], ['opening', 'door or window', 'doors and windows'], ['run', 'wire', 'wires']] as [SelType, string, string][])
+    const words = ([['room', 'room', 'rooms'], ['area', 'area', 'areas'], ['item', 'item', 'items'], ['opening', 'door or window', 'doors and windows'], ['run', 'wire', 'wires'], ['wall', 'wall', 'walls']] as [SelType, string, string][])
       .map(([t, one, many]) => { const n = count(t); return n ? `${n} ${n > 1 ? many : one}` : ''; }).filter(Boolean);
     side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: `${all.length} selected` })));
     side.appendChild(el('div', { class: 'desc', text: words.join(', ') + '. Drag any of them to move them all; arrow keys nudge them; Shift-click adds or removes one.' }));
@@ -2422,6 +3053,12 @@ export default function mount(sec: any, host: any) {
       }, { placeholder: 'Search circuits…' }), 'Puts every selected outlet, light and device on one breaker.'));
     }
     const btns: any[] = [];
+    if (editing && count('room') > 1) {
+      const merge = btn('Merge rooms', 'primary');
+      merge.title = 'Makes the selected rooms one room. They must share a wall; the first picked keeps its name.';
+      merge.onclick = () => mergeRooms();
+      btns.push(merge);
+    }
     if (editing) {
       const del = btn(`Delete ${all.length}`, 'danger');
       del.onclick = () => deleteSelection();
@@ -2590,6 +3227,55 @@ export default function mount(sec: any, host: any) {
   };
   addBtn.onclick = addSheet;
 
+  /// Rooms drawn apart, a wall's thickness between them, brought together on the middle of each wall; what stands on
+  /// a wall that moves moves with it. Gaps up to half again the wall's thickness are taken as walls.
+  const closeGaps = () => {
+    const f = floorNow()?.floor;
+    if (!f) return;
+    const t = interiorWall() || 0.1143 * scale();
+    const rooms = roomsNow().filter(r => !r.Outdoor && (r.Shape || []).length >= 3);
+    type Side = { r: any; i: number; at: number; lo: number; hi: number; dir: number; upright: boolean };
+    const sides: Side[] = [];
+    rooms.forEach(r => {
+      const poly: Pt[] = r.Shape, sign = Math.sign(planArea(poly));
+      poly.forEach((a, i) => {
+        const b = poly[(i + 1) % poly.length];
+        if (Math.abs(a.X - b.X) < 0.01 && Math.abs(a.Y - b.Y) > 1) sides.push({ r, i, at: a.X, lo: Math.min(a.Y, b.Y), hi: Math.max(a.Y, b.Y), dir: sign * Math.sign(b.Y - a.Y), upright: true });
+        else if (Math.abs(a.Y - b.Y) < 0.01 && Math.abs(a.X - b.X) > 1) sides.push({ r, i, at: a.Y, lo: Math.min(a.X, b.X), hi: Math.max(a.X, b.X), dir: -sign * Math.sign(b.X - a.X), upright: false });
+      });
+    });
+    // A locked room stays put: the room across the gap comes all the way to it, and two locked rooms are left be.
+    const moves = new Map<Side, number[]>();
+    const move = (sd: Side, to: number) => { if (!moves.has(sd)) moves.set(sd, []); moves.get(sd)!.push(to); };
+    let held = 0;
+    sides.forEach(p => sides.forEach(q => {
+      if (p.r === q.r || p.upright !== q.upright || p.dir <= 0 || q.dir >= 0) return;
+      const gap = q.at - p.at;
+      if (gap <= 0.5 || gap > t * 1.5 || Math.min(p.hi, q.hi) - Math.max(p.lo, q.lo) <= 1) return;
+      if (p.r.Locked && q.r.Locked) { held++; return; }
+      if (p.r.Locked) move(q, p.at);
+      else if (q.r.Locked) move(p, q.at);
+      else { const mid = (p.at + q.at) / 2; move(p, mid); move(q, mid); }
+    }));
+    const heldNote = held ? ` ${held} between locked rooms ${held > 1 ? 'were' : 'was'} left; unlock them and close the gaps again.` : '';
+    if (!moves.size) return toast((held ? 'Every gap found is between locked rooms.' : 'No gaps the width of a wall were found between rooms.') + heldNote, false);
+    act(() => {
+      moves.forEach((mids, sd) => {
+        const to = planRound(mids.reduce((a, b) => a + b, 0) / mids.length), from = sd.at;
+        const poly: Pt[] = sd.r.Shape, n = poly.length;
+        [poly[sd.i], poly[(sd.i + 1) % n]].forEach(q => { if (sd.upright) q.X = to; else q.Y = to; });
+        itemsIn().forEach((it: any) => {
+          if (it.Room !== sd.r.Id) return;
+          const on = sd.upright ? Math.abs(it.X - from) < 1 && it.Y >= sd.lo - 1 && it.Y <= sd.hi + 1 : Math.abs(it.Y - from) < 1 && it.X >= sd.lo - 1 && it.X <= sd.hi + 1;
+          if (on) { if (sd.upright) it.X = to; else it.Y = to; }
+        });
+      });
+      if (!(Number(f.InteriorWall) > 0)) f.InteriorWall = planRound(t);
+      if (!(Number(f.ExteriorWall) > 0)) f.ExteriorWall = planRound(t);
+    });
+    toast(`Closed ${moves.size} wall gaps; walls are drawn ${len(interiorWall())} thick.${heldNote}`, true);
+  };
+
   const floorSheet = () => {
     const fl = floorNow();
     if (!fl) return addSheet();
@@ -2607,6 +3293,13 @@ export default function mount(sec: any, host: any) {
         field('Plot width', lenInput(w, v => act(() => { f.Width = Math.max(100, Math.round(v)); viewFor = ''; }))),
         field('Plot depth', lenInput(h, v => act(() => { f.Height = Math.max(100, Math.round(v)); viewFor = ''; })))),
       field('Ground', select(PLAN_GROUNDS, f.Ground || '', v => act(() => { f.Ground = v; })), 'What is drawn around the rooms: a lawn, a slab, gravel.'),
+      field('North points', select(northChoices(f), String(Number(f.North) || 0), v => act(() => { f.North = Number(v); })), 'Which way north is on this drawing. The compass on the plan follows it.'),
+      el('h4', { text: 'Walls' }),
+      el('div', { class: 'fp-two' },
+        field('Interior walls', lenInput(Number(f.InteriorWall) || 0, v => act(() => { f.InteriorWall = Math.max(0, planRound(v)); }), '4½ in')),
+        field('Exterior walls', lenInput(Number(f.ExteriorWall) || 0, v => act(() => { f.ExteriorWall = Math.max(0, planRound(v)); }), '6 in'))),
+      el('div', { class: 'desc', text: 'With a thickness, rooms are drawn touching: to the middle of the walls between them and the inside of the outside walls. The walls are drawn at their thickness and sizes read inside them. A 2x4 wall with drywall both sides is 4½ in.' }),
+      actions((() => { const b = btn('Close the gaps between rooms'); b.title = 'For rooms drawn with a gap where each wall stands: meet them in the middle of it, and set the wall thickness from it.'; b.onclick = () => { closeGaps(); closeSheet(); }; return b; })()),
       el('h4', { text: 'Arrange' }),
       actions(
         (() => { const b = btn('Centre the drawing'); b.title = 'Move everything drawn on this floor to the middle of the plot.'; b.onclick = () => { arrange('centre'); closeSheet(); }; return b; })(),
@@ -2935,7 +3628,7 @@ export default function mount(sec: any, host: any) {
   let pending: any = null;
   const schedule = () => { clearTimeout(pending); pending = setTimeout(load, 600); };
   const load = async () => {
-    const q = period === 'now' ? '' : `?period=${period}`;
+    const q = period === 'now' || period === 'circuits' ? '' : `?period=${period}`;
     let r: any;
     try { r = await call('totals', q); }
     catch (e: any) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
@@ -3024,6 +3717,7 @@ export default function mount(sec: any, host: any) {
       return;
     }
     if (k === 'Enter' && wireDraft) { finishWire(''); return; }
+    if (k === 'Enter' && tool === 'wall' && draft.length >= 2) { finishWall(draft); return; }
     if (k === 'Enter' && draft.length >= 3) { finishOutline(draft); return; }
     if (k === '+' || k === '=') { zoomAt(centre(), 1.4); return; }
     if (k === '-' || k === '_') { zoomAt(centre(), 1 / 1.4); return; }
@@ -3055,7 +3749,7 @@ export default function mount(sec: any, host: any) {
   window.addEventListener('keyup', (e: any) => { if (e.key === ' ' && spaceDown) { spaceDown = false; svg.classList.remove('is-panning'); } });
 
   // The live view keeps up with the house while it is on screen.
-  setInterval(() => { if (sec.classList.contains('active') && !dragging && mode === 'view' && period === 'now') load(); }, 10000);
+  setInterval(() => { if (sec.classList.contains('active') && !dragging && mode === 'view' && (period === 'now' || period === 'circuits')) load(); }, 10000);
   return { show: () => { render(); load(); readStorage(); } };
 }
 

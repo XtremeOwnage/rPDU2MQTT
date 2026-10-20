@@ -59,6 +59,21 @@ public class FloorConfig
     [Description("How strongly the plan image shows behind the drawing, from 0 (hidden) to 1.")]
     public double ImageOpacity { get; set; } = 0.85;
 
+    [Range(0, 10000, ErrorMessage = "Interior wall must be between 0 and 10000.")]
+    [DefaultValue(0)]
+    [Description("How thick an interior wall is, in drawing units. Rooms on this floor are drawn to the middle of the walls between them, and their sizes read inside these walls. 0 draws walls as plain lines.")]
+    public double InteriorWall { get; set; }
+
+    [Range(0, 10000, ErrorMessage = "Exterior wall must be between 0 and 10000.")]
+    [DefaultValue(0)]
+    [Description("How thick an outside wall is, in drawing units. Rooms are drawn to the inside face of an outside wall, and the wall is drawn beyond it. 0 draws walls as plain lines.")]
+    public double ExteriorWall { get; set; }
+
+    [Range(0, 360, ErrorMessage = "North must be between 0 and 360.")]
+    [DefaultValue(0)]
+    [Description("Which way north points on the plan, in degrees clockwise from the top: 0 is up, 90 right, 180 down. The plan's compass follows it.")]
+    public double North { get; set; }
+
     [AllowedValues("", Surfaces.Grass, Surfaces.Concrete, Surfaces.Gravel, Surfaces.Dirt, Surfaces.Pavers, Surfaces.Snow)]
     [Description("What the ground around the rooms looks like: grass, concrete, gravel, dirt, pavers or snow. Blank is plain paper.")]
     public string Ground { get; set; } = "";
@@ -74,6 +89,9 @@ public class FloorConfig
 
     [Description("Doors, windows and openings in the walls on this floor.")]
     public List<OpeningConfig> Openings { get; set; } = new();
+
+    [Description("Walls drawn on their own rather than as the side of a room: a half wall, a partition, a wall not yet closed into a room.")]
+    public List<WallConfig> Walls { get; set; } = new();
 
     [Description("Geometric constraints between the corners and walls of this floor's rooms and areas: coincident, colinear, parallel, perpendicular, horizontal, vertical, a fixed angle or a fixed length. Kept as the plan is edited.")]
     public List<PlanConstraintConfig> Constraints { get; set; } = new();
@@ -100,7 +118,7 @@ public class PlanConstraintConfig
 
     [AllowedValues(PlanConstraintKind.Coincident, PlanConstraintKind.Colinear, PlanConstraintKind.Parallel, PlanConstraintKind.Perpendicular,
         PlanConstraintKind.Horizontal, PlanConstraintKind.Vertical, PlanConstraintKind.Angle, PlanConstraintKind.Length)]
-    [Description("Coincident (two corners), colinear, parallel or perpendicular (two walls), horizontal or vertical (a wall), angle (a corner) or length (a wall).")]
+    [Description("Coincident (two corners, or a corner on a wall), colinear, parallel or perpendicular (two walls), horizontal or vertical (a wall), angle (a corner) or length (a wall).")]
     public string Kind { get; set; } = PlanConstraintKind.Length;
 
     [Description("The corners or walls it holds, each a room or area id with a corner or wall number counted from 0.")]
@@ -185,6 +203,20 @@ public class OpeningConfig
     public bool Flip { get; set; }
 }
 
+/// <summary>A wall drawn on its own, as a line with bends (#601).</summary>
+public class WallConfig
+{
+    [Description("Stable unique id for this wall.")]
+    public string Id { get; set; } = "";
+
+    [Description("Its ends and bends, in order, in drawing units.")]
+    public List<PlanPoint> Points { get; set; } = new();
+
+    [DefaultValue(0)]
+    [Description("How thick it is, in drawing units. 0 draws an interior wall's 4½ inches at the floor's scale.")]
+    public double Thickness { get; set; }
+}
+
 /// <summary>A room on a floor, outlined on the plan (#461, #463).</summary>
 public class RoomConfig
 {
@@ -215,6 +247,12 @@ public class RoomConfig
 
     [Description("Walls that are locked in place, by number: wall n runs from corner n to the next.")]
     public List<int> LockedWalls { get; set; } = new();
+
+    [Description("Where the room's name is drawn, across the plan in drawing units. Blank puts it in the widest part of the room.")]
+    public double? LabelX { get; set; }
+
+    [Description("Where the room's name is drawn, down the plan in drawing units. Blank puts it in the widest part of the room.")]
+    public double? LabelY { get; set; }
 
     [Description("The Home Assistant area this room was linked to, by area id. Written when rooms are published to Home Assistant, so a rename updates the same area.")]
     public string HaArea { get; set; } = "";

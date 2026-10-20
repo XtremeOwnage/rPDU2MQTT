@@ -107,16 +107,50 @@ await wait(50);
 
 // --- The geometry, the units and the history the editor stands on ---
 // The page's own helpers, from the plugin's script.
-const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle };\n') + '})()', sandbox);
-const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory } = lib;
+const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea, planWallMass, planInset, planLabelPoint };\n') + '})()', sandbox);
+const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea, planWallMass, planInset, planLabelPoint } = lib;
+// The space left enclosed between rooms is found as its own region, and regions join back into one outline.
+const ring = [rect(0, 0, 300, 100), rect(0, 200, 300, 300), rect(0, 100, 100, 200), rect(200, 100, 300, 200)];
+const hole = planFaces(ring).filter(f => !planShapeAt(ring.map((r, i) => ({ Id: 'r' + i, Shape: r })), f.at));
+if (hole.length !== 1 || Math.abs(Math.abs(planArea(hole[0].shape)) - 10000) > 1) fail(`the space enclosed by rooms was not found: ${JSON.stringify(hole)}`);
+const cut = planFaces([rect(0, 0, 200, 100), rect(150, 0, 250, 100)]);
+if (cut.length !== 3 || planJoin(cut.map(f => f.shape))?.length !== 4) fail(`overlapping outlines did not cut into three regions that join back up: ${JSON.stringify(cut)}`);
+// Merging: two rooms sharing all or part of a wall become one outline; apart or overlapping, they cannot.
+const ell = planUnion(rect(0, 0, 400, 100), rect(300, 100, 400, 300));
+if (!ell || ell.length !== 6) fail(`an L-shaped merge came out wrong: ${JSON.stringify(ell)}`);
+const strip = planUnion(rect(0, 0, 400, 100), rect(400, 0, 600, 100));
+if (!strip || strip.length !== 4 || planRect({ X: 0, Y: 0 }, { X: 600, Y: 100 }).some(q => !strip.some(r => r.X === q.X && r.Y === q.Y))) fail(`two rooms end to end did not merge into one box: ${JSON.stringify(strip)}`);
+if (planUnion(rect(0, 0, 100, 100), rect(200, 0, 300, 100))) fail('rooms apart were merged');
+if (planUnion(rect(0, 0, 200, 100), rect(100, 0, 300, 100))) fail('overlapping rooms were merged');
+const mc = planRefsAfterMerge([
+  { Id: 'h', Kind: 'horizontal', Refs: [{ Room: 'b', Edge: 2 }] },
+  { Id: 's', Kind: 'horizontal', Refs: [{ Room: 'a', Edge: 1 }] },
+  { Id: 'c', Kind: 'colinear', Refs: [{ Room: 'a', Edge: 0 }, { Room: 'b', Edge: 0 }] },
+], 'a', 'b', { a: rect(0, 0, 400, 100), b: rect(400, 0, 600, 100) }, strip).constraints;
+if (mc.length !== 1 || mc[0].Id !== 'h' || mc[0].Refs[0].Room !== 'a') fail(`constraints were not carried over a merge: ${JSON.stringify(mc)}`);
 if (typeof planSnap !== 'function') fail('the plan geometry is not in the plugin page');
 const office = rect(400, 0, 800, 300);
 const s1 = planSnap({ X: 405, Y: 4 }, [office], 12, 10);
 if (s1.to !== 'corner' || s1.pt.X !== 400 || s1.pt.Y !== 0) fail(`a point beside a corner did not snap to it: ${JSON.stringify(s1)}`);
 const s2 = planSnap({ X: 395, Y: 150 }, [office], 12, 10);
 if (s2.to !== 'edge' || s2.pt.X !== 400 || s2.pt.Y !== 150) fail(`a point beside an edge did not snap onto it: ${JSON.stringify(s2)}`);
+// Next door, a point snaps to the far face of the wall, and each way on its own to the walls it is near.
+const s3 = planSnap({ X: 386, Y: 147 }, [office], 12, 10, 11.4);
+if (s3.to !== 'edge' || Math.abs(s3.pt.X - 388.6) > 0.01 || s3.pt.Y !== 150) fail(`a point beside a room did not snap to the far face of its wall: ${JSON.stringify(s3)}`);
+const s4 = planSnap({ X: 386, Y: 147 }, [office.slice().reverse()], 12, 10, 11.4);
+if (Math.abs(s4.pt.X - 388.6) > 0.01) fail(`the wall face depends on which way the room was drawn: ${JSON.stringify(s4)}`);
+const s5 = planSnap({ X: 412, Y: 150 }, [office], 12, 10, 11.4);
+if (s5.pt.X !== 400) fail(`a point inside a room snapped to the outside face of its wall: ${JSON.stringify(s5)}`);
 if (!planContains(office, { X: 500, Y: 100 }) || planContains(office, { X: 100, Y: 100 })) fail('containment is wrong');
 if (planShapeAt([{ Id: 'office', Shape: office }, { Id: 'closet', Shape: rect(420, 20, 480, 80) }], { X: 450, Y: 50 })?.Id !== 'closet') fail('a point in a closet inside a room is not in the closet');
+{
+  // An L-shaped hall is named in its widest part, inside it; a rectangle at its centre.
+  const L = [{ X: 0, Y: 0 }, { X: 400, Y: 0 }, { X: 400, Y: 40 }, { X: 40, Y: 40 }, { X: 40, Y: 400 }, { X: 0, Y: 400 }];
+  const at = planLabelPoint(L);
+  if (!planContains(L, at)) fail(`an L-shaped room's name fell outside it: ${JSON.stringify(at)}`);
+  const r = planLabelPoint(planRect({ X: 0, Y: 0 }, { X: 100, Y: 50 }));
+  if (Math.abs(r.X - 50) > 1 || Math.abs(r.Y - 25) > 1) fail(`a rectangle's name is not at its middle: ${JSON.stringify(r)}`);
+}
 const c = planCentroid(planRect({ X: 0, Y: 0 }, { X: 100, Y: 50 }));
 if (c.X !== 50 || c.Y !== 25) fail(`the centre of a rectangle is not its middle: ${JSON.stringify(c)}`);
 const near = (a, b) => Math.abs(a - b) < 1e-6;
@@ -127,6 +161,12 @@ const ft = 0.3048, inch = 0.0254;
   .forEach(([t, m]) => { if (!near(planParseLen(t, 'metric'), m)) fail(`"${t}" did not read as ${m} m: ${planParseLen(t, 'metric')}`); });
 if (planParseLen('twelve', 'imperial') !== null) fail('nonsense read as a length');
 if (planFmtLen(12 * ft + 6 * inch, 'imperial') !== '12′ 6″') fail(`12 ft 6 in was written ${planFmtLen(12 * ft + 6 * inch, 'imperial')}`);
+if (planFmtLen(4.5 * inch, 'imperial') !== '4½″' || !near(planParseLen('4½"', 'imperial'), 4.5 * inch)) fail(`a wall's thickness is not written or read to the half inch: ${planFmtLen(4.5 * inch, 'imperial')}`);
+// Walls from rooms drawn touching: the stretch two rooms share is one wall between them, the rest are outside walls.
+const wm = planWallMass([{ Id: 'a', Shape: rect(0, 0, 100, 100) }, { Id: 'b', Shape: rect(100, 0, 200, 50) }]);
+if (wm.filter(w => w.shared).length !== 2 || wm.filter(w => w.shared && w.draw).length !== 1 || wm.filter(w => !w.shared).length !== 7) fail(`the walls between and around two rooms are wrong: ${JSON.stringify(wm)}`);
+const ins = planInset(rect(0, 0, 100, 100), [0, 5, 0, 0]);
+if (ins[1].X !== 95 || ins[2].X !== 95 || ins[0].X !== 0) fail(`a room's inside is not inset from its shared wall: ${JSON.stringify(ins)}`);
 if (planFmtLen(0.85, 'metric') !== '85 cm' || planFmtLen(3.75, 'metric') !== '3.75 m') fail('metric lengths are not written as a tape reads them');
 if (planUnitSystem('auto', 'en-US') !== 'imperial' || planUnitSystem('auto', 'en-GB') !== 'metric' || planUnitSystem('metric', 'en-US') !== 'metric') fail('the unit setting is not followed');
 const box = { v: 1 };
@@ -184,6 +224,42 @@ const near1 = (a, b) => Math.abs(a - b) <= 1;
   if (!c.unmet.length) fail('two lengths for one wall are not reported as conflicting');
 }
 
+{
+  // Widening a room by typing: the room sharing its top wall follows the corner it shared, as a rectangle (#602).
+  const two = { Id: 'two', Shape: rect(350, 200, 650, 400) }, four = { Id: 'four', Shape: rect(350, 50, 650, 200) };
+  const before = JSON.parse(JSON.stringify([two, four]));
+  two.Shape = rect(350, 200, 750, 400);
+  planSolve([two, four], [], new Set(['two#0', 'two#1', 'two#2', 'two#3']), 120, { before, hold: ['two'] });
+  if (JSON.stringify(four.Shape) !== JSON.stringify(rect(350, 50, 750, 200))) fail(`the room above did not follow the wall it shares: ${JSON.stringify(four.Shape)}`);
+}
+{
+  // Joined corners are one point: the second room comes to the first, and comes along when the first moves.
+  const a = { Id: 'a', Shape: rect(0, 0, 100, 100) }, b = { Id: 'b', Shape: rect(130, 20, 230, 120) };
+  const join = [{ Id: 'j', Kind: 'coincident', Refs: [{ Room: 'a', Corner: 1 }, { Room: 'b', Corner: 0 }] }];
+  const before = planSolve([a, b], join, new Set(), 0);
+  if (!before.unmet.includes('j')) fail('two corners apart are not reported as unjoined');
+  const r = planSolve([a, b], join, new Set(['a#0', 'a#1', 'a#2', 'a#3']), 120, { hold: [] });
+  if (r.unmet.length || b.Shape[0].X !== 100 || b.Shape[0].Y !== 0 || a.Shape[1].X !== 100) fail(`joining did not bring the second corner to the first: ${JSON.stringify(b.Shape)}`);
+  if (b.Shape[1].Y !== 0 || b.Shape[3].X !== 100) fail(`the joined room did not stay square: ${JSON.stringify(b.Shape)}`);
+  a.Shape = rect(0, 50, 100, 150);
+  planSolve([a, b], join, new Set(['a#0', 'a#1', 'a#2', 'a#3']), 120, { hold: ['a'] });
+  if (b.Shape[0].X !== 100 || b.Shape[0].Y !== 50) fail(`a joined room did not follow the room it is joined to: ${JSON.stringify(b.Shape)}`);
+}
+{
+  // A corner on a wall stays on the wall's line.
+  const a = { Id: 'a', Shape: rect(0, 0, 100, 100) }, b = { Id: 'b', Shape: rect(110, 30, 210, 130) };
+  const r = planSolve([a, b], [{ Id: 'w', Kind: 'coincident', Refs: [{ Room: 'b', Corner: 0 }, { Room: 'a', Edge: 1 }] }], new Set(['a#0', 'a#1', 'a#2', 'a#3']), 120, { hold: [] });
+  if (r.unmet.length || !near1(b.Shape[0].X, 100) || !near1(b.Shape[0].Y, 30)) fail(`a corner held on a wall is not on it: ${JSON.stringify(b.Shape)}`);
+}
+{
+  // Two right angles leave a room free to skew; held level and plumb, it stays a rectangle as a corner is dragged (#601).
+  const a = { Id: 'a', Shape: rect(0, 0, 200, 100) };
+  const hv = [0, 1, 2, 3].map(i => ({ Id: `square_${i}`, Kind: i % 2 ? 'vertical' : 'horizontal', Refs: [{ Room: 'a', Edge: i }] }));
+  a.Shape[2] = { X: 260, Y: 140 };
+  planSolve([a], hv, new Set(['a#2']), 120, { hold: ['a'] });
+  if (JSON.stringify(a.Shape) !== JSON.stringify(rect(0, 0, 260, 140))) fail(`a room held square did not stay a rectangle: ${JSON.stringify(a.Shape)}`);
+}
+
 // --- The page ---
 const link = query(getEl('nav'), 'a', true).find(a => a.dataset.label === 'Floor Plans');
 if (!link) fail('no Floor Plans page in the nav');
@@ -216,12 +292,12 @@ const tap = (target, x, y) => {
   svg.dispatch('pointerdown', { ...at(x, y), pointerId: id, button: 0, target });
   svg.dispatch('pointerup', { ...at(x, y), pointerId: id, target });
 };
-const drag = (target, from, to) => {
+const drag = (target, from, to, mods = {}) => {
   const id = pid++;
-  svg.dispatch('pointerdown', { ...at(...from), pointerId: id, button: 0, target });
-  svg.dispatch('pointermove', { ...at((from[0] + to[0]) / 2, (from[1] + to[1]) / 2), pointerId: id, target });
-  svg.dispatch('pointermove', { ...at(...to), pointerId: id, target });
-  svg.dispatch('pointerup', { ...at(...to), pointerId: id, target });
+  svg.dispatch('pointerdown', { ...at(...from), pointerId: id, button: 0, target, ...mods });
+  svg.dispatch('pointermove', { ...at((from[0] + to[0]) / 2, (from[1] + to[1]) / 2), pointerId: id, target, ...mods });
+  svg.dispatch('pointermove', { ...at(...to), pointerId: id, target, ...mods });
+  svg.dispatch('pointerup', { ...at(...to), pointerId: id, target, ...mods });
 };
 
 // View: the kitchen shaded by what it draws, the office unknown, the garage unmetered — and no zero anywhere.
@@ -312,7 +388,6 @@ button('Finish outline', sec).onclick();
 const traced = floor().Rooms[floor().Rooms.length - 1];
 if (traced.Shape.length !== 3 || traced.Shape[1].Y !== traced.Shape[0].Y) fail(`a nearly level wall was not made level: ${JSON.stringify(traced.Shape)}`);
 if (traced.Shape[2].X !== traced.Shape[1].X) fail(`a nearly plumb wall was not made plumb: ${JSON.stringify(traced.Shape)}`);
-key('z', { ctrlKey: true });
 
 // Items: an outlet in the kitchen, a light outdoors that belongs to no room, and a utility pole.
 toolBtn('Item').onclick();
@@ -385,6 +460,32 @@ const officeMoved = roomById('office').Shape[0].Y;
 if (fridgeMoved < 90 || officeMoved < 90) fail(`dragging the kitchen did not move the rest of the selection with it: fridge ${fridgeMoved}, office ${officeMoved}`);
 key('z', { ctrlKey: true });
 if (roomById('office').Shape[0].Y !== 0 || loc().Placements.find(p => p.Id === 'fridge').Y !== fridgeY) fail('undo did not put the whole group back');
+// Merging the kitchen and office: one room, with what was in or around the office now the kitchen's; undo splits them.
+tap(polygonFor('kitchen'), 200, 150);
+svg.dispatch('pointerdown', { ...at(600, 150), pointerId: 902, button: 0, target: polygonFor('office'), shiftKey: true });
+svg.dispatch('pointerup', { ...at(600, 150), pointerId: 902, target: polygonFor('office'), shiftKey: true });
+if (!button('Merge rooms', side())) fail(`two rooms selected offer no Merge: ${textOf(side())}`);
+button('Merge rooms', side()).onclick();
+if (roomById('office') || roomById('kitchen')?.Shape.length !== 4 || Math.max(...roomById('kitchen').Shape.map(q => q.X)) !== 800) fail(`the kitchen and office did not merge: ${JSON.stringify(floor().Rooms)}`);
+if (floor().Areas[0].Rooms.join() !== 'kitchen') fail(`the area still names the merged room: ${floor().Areas[0].Rooms}`);
+key('z', { ctrlKey: true });
+if (!roomById('office') || roomById('kitchen').Shape.length !== 4) fail('undo did not split the merged rooms');
+// Take in space: the office grows over the kitchen's right-hand strip, which the kitchen gives up.
+tap(polygonFor('office'), 600, 150);
+button('Take in space', side()).onclick();
+drag(svg, [300, 0], [400, 300]);
+const kx = Math.max(...roomById('kitchen').Shape.map(q => q.X)), ox = Math.min(...roomById('office').Shape.map(q => q.X));
+if (Math.abs(kx - 300) > 4 || Math.abs(kx - ox) > 0.5 || roomById('office').Shape.length !== 4) fail(`the office did not take in the strip from the kitchen: kitchen ${JSON.stringify(roomById('kitchen').Shape)}, office ${JSON.stringify(roomById('office').Shape)}`);
+key('z', { ctrlKey: true });
+if (Math.max(...roomById('kitchen').Shape.map(q => q.X)) !== 400) fail('undo did not give the kitchen its strip back');
+// With the floor's wall thickness set, the walls are drawn at it and gone again at 0.
+loc().Sites.forEach(st => st.Floors.forEach(f => { f.InteriorWall = 20; f.ExteriorWall = 15; }));
+tap(polygonFor('kitchen'), 200, 150);
+if (!query(sec, 'line', true).some(l => l.classList.contains('fp-wallmass'))) fail(`walls are not drawn at the floor's thickness: ${query(sec, 'line', true).length} lines, ${query(sec, 'polygon', true).length} polygons, rooms ${JSON.stringify(floor().Rooms.map(r => r.Id))} mode ${textOf(query(sec, '.fp-opts'))}`);
+loc().Sites.forEach(st => st.Floors.forEach(f => { f.InteriorWall = 0; f.ExteriorWall = 0; }));
+tap(polygonFor('kitchen'), 200, 150);
+if (query(sec, 'line', true).some(l => l.classList.contains('fp-wallmass'))) fail('walls are still drawn thick with no thickness set');
+
 key('a', { ctrlKey: true });
 if (!/\d+ selected/.test(textOf(side()))) fail('Ctrl+A did not select everything');
 key('Escape');
@@ -522,6 +623,9 @@ if (!/Protected by\s*GFCI/.test(textOf(side()))) fail(`a protected outlet does n
 key('Escape');
 
 // Measure a wall and say how long it really is: the scale follows, and the undo button takes it back.
+// In Edit a tool says what it does in its options bar, not in a bubble over the plan being drawn on.
+toolBtn('Door').onclick();
+if (!/Tap a wall to put a door/.test(textOf(query(sec, '.fp-opts'))) || !query(sec, '.fp-hint').hidden) fail(`the Door tool's help is not in its options bar: ${textOf(query(sec, '.fp-opts'))}`);
 toolBtn('Measure').onclick();
 tap(svg, 0, 0); tap(svg, 400, 0);
 if (!/13′ 1″/.test(textOf(query(sec, '.fp-opts')))) fail(`the measured line does not read its length: ${textOf(query(sec, '.fp-opts'))}`);
@@ -628,6 +732,123 @@ if (!/Constraints/.test(textOf(side())) || !/fixed at/.test(textOf(side()))) fai
 key('z', { ctrlKey: true }); key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
 if ((floor().Constraints || []).length) fail(`undo did not take the constraints back: ${JSON.stringify(floor().Constraints)}`);
 
+// A room stays square while its corner is dragged, Shift lets it go, and Square up straightens it again, storing
+// nothing (#601).
+tap(polygonFor('kitchen'), 200, 150);
+if (!button('Square up', side())?.disabled) fail('a square room offers to be squared up');
+drag(kCorner(2), [400, 300], [450, 350]);
+const sqK = roomById('kitchen').Shape, sqO = roomById('office').Shape;
+if (!(sqK[0].X === 0 && sqK[0].Y === 0 && sqK[1].Y === 0 && sqK[1].X === sqK[2].X && sqK[2].Y === sqK[3].Y && sqK[3].X === 0 && Math.abs(sqK[2].X - 450) < 16 && Math.abs(sqK[2].Y - 350) < 16))
+  fail(`a room did not stay a rectangle while its corner was dragged: ${JSON.stringify(sqK)}`);
+if (sqO[0].X !== sqK[1].X || sqO[2].Y !== sqK[2].Y || sqO[1].X !== 800) fail(`the office did not follow the corners it shares, square: ${JSON.stringify(roomById('office').Shape)}`);
+key('z', { ctrlKey: true });
+drag(kCorner(2), [400, 300], [420, 330], { shiftKey: true });
+const skK = roomById('kitchen').Shape;
+if (skK[1].X === skK[2].X && skK[2].Y === skK[3].Y) fail(`Shift did not let the corner go free: ${JSON.stringify(skK)}`);
+const sqUp = button('Square up', side());
+if (!sqUp || sqUp.disabled) fail('a skewed room cannot be squared up');
+sqUp.onclick();
+const upK = roomById('kitchen').Shape;
+if (!(upK[0].Y === upK[1].Y && upK[1].X === upK[2].X && upK[2].Y === upK[3].Y && upK[3].X === upK[0].X)) fail(`Square up left it skewed: ${JSON.stringify(upK)}`);
+if ((floor().Constraints || []).length) fail(`Square up stored constraints: ${JSON.stringify(floor().Constraints)}`);
+key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
+
+// The same constraint twice is refused.
+toolBtn('Constrain').onclick();
+tap(svg, 2, 150); tap(svg, 798, 150); button('Parallel', sec).onclick();
+tap(svg, 798, 150); tap(svg, 2, 150); button('Parallel', sec).onclick();
+if (floor().Constraints.filter(c => c.Kind === 'parallel').length !== 1) fail(`the same constraint was added twice: ${JSON.stringify(floor().Constraints)}`);
+if (!query(sec, 'line', true).some(l => l.classList.contains('fp-cons-link'))) fail('paired walls are not joined on the plan');
+toolBtn('Select').onclick();
+tap(polygonFor('kitchen'), 200, 150);
+if (!query(sec, 'line', true).some(l => l.classList.contains('fp-cons-link'))) fail('a selected room does not show its constraints');
+toolBtn('Constrain').onclick();
+key('z', { ctrlKey: true });
+toolBtn('Select').onclick();
+
+// Join: two corners picked with Constrain become one, and the corner and wall pair offers On wall (#602).
+toolBtn('Constrain').onclick();
+tap(svg, 2, 298);
+tap(svg, 798, 298);
+const joinBtn = button('Join', sec);
+if (!joinBtn) fail(`two corners picked offer no Join: ${textOf(query(sec, '.fp-opts'))}`);
+joinBtn.onclick();
+const joined = floor().Constraints.find(c => c.Kind === 'coincident');
+if (!joined) fail('joining two corners recorded nothing');
+if (roomById('office').Shape[2].X !== 0 || roomById('office').Shape[2].Y !== 300) fail(`the second corner did not come to the first: ${JSON.stringify(roomById('office').Shape)}`);
+if (JSON.stringify(roomById('kitchen').Shape) !== JSON.stringify(rect(0, 0, 400, 300))) fail(`the corner picked first moved: ${JSON.stringify(roomById('kitchen').Shape)}`);
+key('z', { ctrlKey: true });
+tap(svg, 798, 298);
+tap(svg, 200, 2);
+if (!button('On wall', sec)) fail(`a corner and a wall picked offer no On wall: ${textOf(query(sec, '.fp-opts'))}`);
+button('Clear', sec).onclick();
+toolBtn('Select').onclick();
+
+// A wall drawn right across a room splits it in two; undo puts it back whole.
+toolBtn('Wall').onclick();
+tap(svg, 600, 0); tap(svg, 600, 300); tap(svg, 600, 300);
+const halves = floor().Rooms.filter(r => /^Office/.test(r.Name));
+if (halves.length !== 2 || (floor().Walls || []).length || halves.some(r => Math.abs(Math.max(...r.Shape.map(q => q.X)) - Math.min(...r.Shape.map(q => q.X)) - 200) > 16)) fail(`a wall across the office did not split it: ${JSON.stringify(halves)} walls ${JSON.stringify(floor().Walls)}`);
+if (!floor().Areas[0].Rooms.includes(halves[1].Id)) fail('the area that took in the office does not take in its new half');
+key('z', { ctrlKey: true });
+if (floor().Rooms.filter(r => /^Office/.test(r.Name)).length !== 1) fail('undo did not put the split office back');
+toolBtn('Select').onclick();
+
+// A standalone wall: drawn end to end with the Wall tool, its end dragged, a door put in it, and deleted.
+toolBtn('Wall').onclick();
+tap(svg, 100, 500); tap(svg, 300, 500); tap(svg, 300, 500);
+const wl = (floor().Walls || [])[0];
+if (!wl || wl.Points.length !== 2 || Math.abs(wl.Points[1].X - wl.Points[0].X - 200) > 16 || wl.Points[0].Y !== wl.Points[1].Y) fail(`the Wall tool did not draw a wall: ${JSON.stringify(floor().Walls)}`);
+if (!/Wall/.test(textOf(side())) || !/Thickness/.test(textOf(side()))) fail('a new wall is not selected with its thickness');
+// A second wall started beside the first's end begins exactly on it.
+toolBtn('Wall').onclick();
+tap(svg, wl.Points[1].X + 4, wl.Points[1].Y + 5); tap(svg, wl.Points[1].X + 4, 700); tap(svg, wl.Points[1].X + 4, 700);
+const wNext = floor().Walls[1];
+if (!wNext || wNext.Points[0].X !== wl.Points[1].X || wNext.Points[0].Y !== wl.Points[1].Y) fail(`a wall started by another's end did not snap to it: ${JSON.stringify(floor().Walls)}`);
+key('z', { ctrlKey: true });
+toolBtn('Select').onclick();
+tap(query(sec, 'polyline', true).find(l => l.dataset?.wall), 150, 500);
+const wEnd = query(sec, 'circle', true).find(c => c.dataset?.runpt === '1');
+if (!wEnd) fail('a selected wall has no handle on its end');
+const wY = wl.Points[0].Y;
+drag(wEnd, [300, 500], [300, 600]);
+if (Math.abs(floor().Walls[0].Points[1].Y - 600) > 16) fail(`dragging a wall's end did not move it: ${JSON.stringify(floor().Walls[0])}`);
+key('z', { ctrlKey: true });
+toolBtn('Door').onclick();
+tap(svg, 200, 505);
+const wDoor = floor().Openings.find(o => near1(o.Y, wY));
+if (!wDoor || Math.abs(Number(wDoor.Angle) % 180) > 0.5) fail(`a door tapped onto a standalone wall did not sit in it: ${JSON.stringify(floor().Openings)}`);
+key('z', { ctrlKey: true });
+toolBtn('Select').onclick();
+tap(query(sec, 'polyline', true).find(l => l.dataset?.wall), 150, 500);
+if (!/standalone/.test(textOf(side()))) fail('tapping a wall does not select it');
+key('Delete');
+if ((floor().Walls || []).length) fail(`Delete did not remove the wall: ${JSON.stringify(floor().Walls)}`);
+key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
+if ((floor().Walls || []).length) fail(`undo did not take the wall back: ${JSON.stringify(floor().Walls)}`);
+
+// A standalone wall takes constraints like a room's wall: held parallel to the kitchen's side, it stays so when dragged.
+toolBtn('Wall').onclick();
+tap(svg, 600, 400); tap(svg, 640, 600); tap(svg, 640, 600);
+const cw = floor().Walls[0];
+toolBtn('Constrain').onclick();
+tap(svg, 620, 500); tap(svg, 2, 150);
+button('Parallel', sec).onclick();
+const cwc = floor().Constraints.find(c => c.Kind === 'parallel' && c.Refs.some(r => r.Room === cw.Id));
+if (!cwc) fail(`a standalone wall cannot be constrained: ${JSON.stringify(floor().Constraints)}`);
+if (Math.abs(floor().Walls[0].Points[0].X - floor().Walls[0].Points[1].X) > 1) fail(`the wall was not made parallel to the kitchen's side: ${JSON.stringify(floor().Walls[0])}`);
+toolBtn('Select').onclick();
+tap(query(sec, 'polyline', true).find(l => l.dataset?.wall), 620, 500);
+const cwEnd = query(sec, 'circle', true).find(c => c.dataset?.runpt === '1');
+drag(cwEnd, [620, 600], [700, 650]);
+const cwp = floor().Walls[0].Points;
+if (Math.abs(cwp[0].X - cwp[1].X) > 1) fail(`dragging a constrained wall's end broke its constraint: ${JSON.stringify(cwp)}`);
+tap(query(sec, 'polyline', true).find(l => l.dataset?.wall), cwp[0].X, 500);
+key('Delete');
+if ((floor().Constraints || []).some(c => c.Refs.some(r => r.Room === cw.Id))) fail('deleting a wall left its constraints behind');
+key('z', { ctrlKey: true }); key('z', { ctrlKey: true }); key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
+if ((floor().Walls || []).length || (floor().Constraints || []).length) fail(`undo did not take the constrained wall back: ${JSON.stringify(floor())}`);
+
 // A locked room does not move, reshape or delete.
 tap(polygonFor('kitchen'), 200, 150);
 button(' Lock', side())?.onclick?.() ?? query(side(), 'button', true).find(b => b.classList.contains('fp-lock')).onclick();
@@ -663,6 +884,23 @@ if (query(sec, '.fp-banner').hidden || !/will not be kept/.test(textOf(query(sec
 button('Export…', sec).onclick();
 ['This floor as SVG', 'This floor as PNG', 'All floor plans (JSON)', 'Import floor plans…'].forEach(t => { if (!button(t, sheet())) fail(`the export sheet has no "${t}"`); });
 shut();
+// On a phone the floor's settings fold into More, which opens each of them.
+const more = button('More…', sec);
+if (!more) fail('there is no More menu for a phone');
+more.onclick();
+// Editing, it offers what changes the floor; viewing, what takes it away.
+['Add a floor', 'Floor settings', 'Background', 'Tools…'].forEach(t => { if (!button(t, sheet())) fail(`More has no "${t}" while editing`); });
+['Export…', 'Print'].forEach(t => { if (button(t, sheet())) fail(`More offers "${t}" while editing`); });
+if (!button('Export…', sec).classList.contains('fp-off') || button('Floor settings', sec).classList.contains('fp-off')) fail('the bar shows Export while editing, or hides Floor settings');
+shut();
+button('View', sec).onclick();
+button('More…', sec).onclick();
+['Export…', 'Print'].forEach(t => { if (!button(t, sheet())) fail(`More has no "${t}" while viewing`); });
+if (button('Floor settings', sheet())) fail('More offers Floor settings while viewing');
+button('Export…', sheet()).onclick();
+if (!button('This floor as SVG', sheet())) fail('More › Export did not open the export sheet');
+shut();
+button('Edit', sec).onclick();
 
 // Appliances at their real size: a washer dropped by the kitchen's left wall stands with its back to it, facing in.
 toolBtn('Item').onclick();
@@ -735,15 +973,15 @@ rightClick(svg, 900, 600);
 if (!menuItem('Fit the floor in view') || !menuItem('Background image…')) fail(`the menu on bare plot offers nothing: ${textOf(menu())}`);
 key('Escape');
 if (!menu().hidden) fail('Escape did not close the menu');
-// …and while viewing, a choice that edits turns Edit on and does it, rather than sitting there greyed out.
+// …and while viewing, the menu offers only looking, and Edit this floor.
 button('View', sec).onclick();
 rightClick(itemEl('fridge'), 100, 100);
-if (menuItem('Duplicate').disabled) fail('the menu greys out editing while viewing instead of switching to Edit');
-const countBefore = loc().Placements.length;
-menuItem('Duplicate').onclick();
-if (loc().Placements.length !== countBefore + 1) fail('duplicating from the menu while viewing did nothing');
-if (!button('Edit', sec).classList.contains('is-on')) fail('it did not switch to Edit');
-key('z', { ctrlKey: true });
+if (menuItem('Duplicate') || menuItem('Delete') || menuItem('Wire from here') || !menuItem('Edit this floor')) fail(`the item menu offers editing while viewing: ${textOf(menu())}`);
+key('Escape');
+rightClick(svg, 900, 600);
+if (menuItem('Add a room here') || menuItem('Background image…') || !menuItem('Fit the floor in view') || !menuItem('Edit this floor')) fail(`the plot menu offers editing while viewing: ${textOf(menu())}`);
+menuItem('Edit this floor').onclick();
+if (!button('Edit', sec).classList.contains('is-on')) fail('Edit this floor did not switch to Edit');
 
 // Floor settings: the plot is sized in feet, and the ground can be grass.
 button('Floor settings', sec).onclick();

@@ -1881,8 +1881,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         });
 
         // Serves a plugin page's script and stylesheet.
-        app.MapGet("/api/integrations/{id}/pages/{file}", (string id, string file) =>
+        app.MapGet("/api/integrations/{id}/pages/{file}", (string id, string file, HttpContext ctx) =>
         {
+            // Never kept by the browser, so an update to a plugin shows on the next load.
+            ctx.Response.Headers.CacheControl = "no-cache";
             if (integrations?.ById(id) is not Core.Integrations.IGuiPageProvider provider
                 || !provider.Pages.Any(g => file == g.Id + ".js" || file == g.Id + ".css"))
                 return Results.NotFound();
