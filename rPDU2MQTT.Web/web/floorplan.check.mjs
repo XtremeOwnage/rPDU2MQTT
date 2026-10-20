@@ -107,8 +107,21 @@ await wait(50);
 
 // --- The geometry, the units and the history the editor stands on ---
 // The page's own helpers, from the plugin's script.
-const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle };\n') + '})()', sandbox);
-const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory } = lib;
+const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle, planUnion, planRefsAfterMerge };\n') + '})()', sandbox);
+const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planUnion, planRefsAfterMerge } = lib;
+// Merging: two rooms sharing all or part of a wall become one outline; apart or overlapping, they cannot.
+const ell = planUnion(rect(0, 0, 400, 100), rect(300, 100, 400, 300));
+if (!ell || ell.length !== 6) fail(`an L-shaped merge came out wrong: ${JSON.stringify(ell)}`);
+const strip = planUnion(rect(0, 0, 400, 100), rect(400, 0, 600, 100));
+if (!strip || strip.length !== 4 || planRect({ X: 0, Y: 0 }, { X: 600, Y: 100 }).some(q => !strip.some(r => r.X === q.X && r.Y === q.Y))) fail(`two rooms end to end did not merge into one box: ${JSON.stringify(strip)}`);
+if (planUnion(rect(0, 0, 100, 100), rect(200, 0, 300, 100))) fail('rooms apart were merged');
+if (planUnion(rect(0, 0, 200, 100), rect(100, 0, 300, 100))) fail('overlapping rooms were merged');
+const mc = planRefsAfterMerge([
+  { Id: 'h', Kind: 'horizontal', Refs: [{ Room: 'b', Edge: 2 }] },
+  { Id: 's', Kind: 'horizontal', Refs: [{ Room: 'a', Edge: 1 }] },
+  { Id: 'c', Kind: 'colinear', Refs: [{ Room: 'a', Edge: 0 }, { Room: 'b', Edge: 0 }] },
+], 'a', 'b', { a: rect(0, 0, 400, 100), b: rect(400, 0, 600, 100) }, strip).constraints;
+if (mc.length !== 1 || mc[0].Id !== 'h' || mc[0].Refs[0].Room !== 'a') fail(`constraints were not carried over a merge: ${JSON.stringify(mc)}`);
 if (typeof planSnap !== 'function') fail('the plan geometry is not in the plugin page');
 const office = rect(400, 0, 800, 300);
 const s1 = planSnap({ X: 405, Y: 4 }, [office], 12, 10);
@@ -421,6 +434,16 @@ const officeMoved = roomById('office').Shape[0].Y;
 if (fridgeMoved < 90 || officeMoved < 90) fail(`dragging the kitchen did not move the rest of the selection with it: fridge ${fridgeMoved}, office ${officeMoved}`);
 key('z', { ctrlKey: true });
 if (roomById('office').Shape[0].Y !== 0 || loc().Placements.find(p => p.Id === 'fridge').Y !== fridgeY) fail('undo did not put the whole group back');
+// Merging the kitchen and office: one room, with what was in or around the office now the kitchen's; undo splits them.
+tap(polygonFor('kitchen'), 200, 150);
+svg.dispatch('pointerdown', { ...at(600, 150), pointerId: 902, button: 0, target: polygonFor('office'), shiftKey: true });
+svg.dispatch('pointerup', { ...at(600, 150), pointerId: 902, target: polygonFor('office'), shiftKey: true });
+if (!button('Merge rooms', side())) fail(`two rooms selected offer no Merge: ${textOf(side())}`);
+button('Merge rooms', side()).onclick();
+if (roomById('office') || roomById('kitchen')?.Shape.length !== 4 || Math.max(...roomById('kitchen').Shape.map(q => q.X)) !== 800) fail(`the kitchen and office did not merge: ${JSON.stringify(floor().Rooms)}`);
+if (floor().Areas[0].Rooms.join() !== 'kitchen') fail(`the area still names the merged room: ${floor().Areas[0].Rooms}`);
+key('z', { ctrlKey: true });
+if (!roomById('office') || roomById('kitchen').Shape.length !== 4) fail('undo did not split the merged rooms');
 key('a', { ctrlKey: true });
 if (!/\d+ selected/.test(textOf(side()))) fail('Ctrl+A did not select everything');
 key('Escape');

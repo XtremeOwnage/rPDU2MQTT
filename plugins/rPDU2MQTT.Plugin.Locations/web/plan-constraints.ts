@@ -324,3 +324,40 @@ export function planRefsAfterRemove(constraints: PlanConstraint[], room: string,
 export function planRefsWithout(constraints: PlanConstraint[], room: string): PlanConstraint[] {
   return constraints.filter(c => !c.Refs.some(r => r.Room === room));
 }
+
+/// Two rooms merged into one: references to either move to the matching corner or wall of the merged outline,
+/// and anything that pointed at the wall between them, or now points at one thing twice, goes.
+export function planRefsAfterMerge(constraints: PlanConstraint[], keep: string, gone: string, before: Record<string, Pt[]>, merged: Pt[], eps = 0.5) {
+  const n = merged.length;
+  const same = (p: Pt, q: Pt) => Math.hypot(p.X - q.X, p.Y - q.Y) <= eps;
+  const offLine = (p: Pt, s: Pt, t: Pt) => { const l = Math.hypot(t.X - s.X, t.Y - s.Y) || 1; return Math.abs((t.X - s.X) * (p.Y - s.Y) - (t.Y - s.Y) * (p.X - s.X)) / l; };
+  const corner = (room: string, c: number): number | null => { const p = before[room]?.[c]; if (!p) return null; const j = merged.findIndex(q => same(p, q)); return j < 0 ? null : j; };
+  const edge = (room: string, e: number): number | null => {
+    const old = before[room];
+    if (!old?.[e]) return null;
+    const s = old[e], t = old[(e + 1) % old.length];
+    const len = Math.hypot(t.X - s.X, t.Y - s.Y) || 1;
+    const along = (p: Pt) => ((p.X - s.X) * (t.X - s.X) + (p.Y - s.Y) * (t.Y - s.Y)) / len;
+    for (let j = 0; j < n; j++) {
+      const a = merged[j], b = merged[(j + 1) % n];
+      if (offLine(a, s, t) > eps || offLine(b, s, t) > eps) continue;
+      const lo = Math.max(0, Math.min(along(a), along(b))), hi = Math.min(len, Math.max(along(a), along(b)));
+      if (hi - lo > eps) return j;
+    }
+    return null;
+  };
+  const kept: PlanConstraint[] = [];
+  constraints.forEach(c => {
+    if (!c.Refs.some(r => r.Room === keep || r.Room === gone)) return kept.push(c);
+    const refs: PlanRef[] = [];
+    for (const r of c.Refs) {
+      if (r.Room !== keep && r.Room !== gone) { refs.push(r); continue; }
+      const to = r.Corner != null ? corner(r.Room, r.Corner) : r.Edge != null ? edge(r.Room, r.Edge) : null;
+      if (to == null) return;
+      refs.push(r.Corner != null ? { ...r, Room: keep, Corner: to } : { ...r, Room: keep, Edge: to });
+    }
+    if (new Set(refs.map(r => `${r.Room}|${r.Corner}|${r.Edge}`)).size < refs.length) return;
+    kept.push({ ...c, Refs: refs });
+  });
+  return { constraints: kept, edge };
+}

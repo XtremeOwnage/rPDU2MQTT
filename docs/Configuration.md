@@ -1480,6 +1480,7 @@ room's walls, and the Constrain tool picks their ends and stretches as it does a
 - A room that only follows a shared or joined corner keeps its level and plumb walls, so it stretches as a
   rectangle.
 - A room keeps its level and plumb walls while a corner or wall is dragged; hold Shift to drag it free. *Square up* straightens a nearly square room once, storing no constraints.
+- *Merge rooms* (with two or more rooms selected) makes rooms that share a wall one room. The first picked keeps its name; items, areas, breakers and constraints that named the others move to it, and constraints on the wall between them are dropped.
 - An unsatisfiable constraint is marked red, and the floor names it.
 - Each room lists its constraints, each removable. A wall's *Fix* button holds its length.
 - The *Constraints* checkbox shows or hides the markers.

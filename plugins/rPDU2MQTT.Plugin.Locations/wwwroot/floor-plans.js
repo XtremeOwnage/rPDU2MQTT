@@ -174,6 +174,51 @@ function planProtectedBy(runs                                  , isGfci         
   return null;
 }
 
+/// Two rooms that meet along a wall, as one outline: the shared stretch of wall goes, the rest is kept as drawn.
+/// Null when they do not share a wall, overlap, or would leave a hole or two separate pieces.
+function planUnion(a      , b      , eps = 0.5)              {
+  if (a.length < 3 || b.length < 3) return null;
+  const ccw = (p      ) => planArea(p) < 0 ? [...p].reverse() : p;
+  const A = ccw(a), B = ccw(b);
+  const same = (p    , q    ) => Math.hypot(p.X - q.X, p.Y - q.Y) <= eps;
+  const onSeg = (p    , s    , t    ) => { const n = planNearestOnSegment(p, s, t); return same(n, p) && !same(p, s) && !same(p, t); };
+  // Every edge broken wherever a corner of the other room sits along it, so shared stretches line up end to end.
+  const split = (poly      , other      ) => {
+    const out             = [];
+    poly.forEach((s, i) => {
+      const t = poly[(i + 1) % poly.length];
+      const len = Math.hypot(t.X - s.X, t.Y - s.Y) || 1;
+      const cuts = other.filter(p => onSeg(p, s, t)).map(p => ({ p, d: ((p.X - s.X) * (t.X - s.X) + (p.Y - s.Y) * (t.Y - s.Y)) / len })).sort((x, y) => x.d - y.d).map(x => x.p);
+      [s, ...cuts, t].reduce((prev, cur) => { if (!same(prev, cur)) out.push([prev, cur]); return cur; });
+    });
+    return out;
+  };
+  const ea = split(A, B), eb = split(B, A);
+  const shared = (e          , list            ) => list.some(f => same(e[0], f[1]) && same(e[1], f[0]));
+  const strictlyIn = (p    , poly      ) => planContains(poly, p) && poly.every((s, i) => !same(planNearestOnSegment(p, s, poly[(i + 1) % poly.length]), p));
+  const mid = (e          ) => ({ X: (e[0].X + e[1].X) / 2, Y: (e[0].Y + e[1].Y) / 2 });
+  if (ea.some(e => strictlyIn(mid(e), B)) || eb.some(e => strictlyIn(mid(e), A))) return null;
+  const keepA = ea.filter(e => !shared(e, eb)), keepB = eb.filter(e => !shared(e, ea));
+  if (keepA.length === ea.length) return null;
+  const edges = [...keepA, ...keepB];
+  const loop       = [];
+  let at = edges.shift() ;
+  loop.push(at[0]);
+  while (edges.length) {
+    const i = edges.findIndex(e => same(e[0], at[1]));
+    if (i < 0) return null;
+    at = edges.splice(i, 1)[0];
+    loop.push(at[0]);
+  }
+  if (!same(at[1], loop[0])) return null;
+  // Corners left standing in the middle of a straight wall are dropped.
+  const out = loop.filter((p, i) => {
+    const s = loop[(i - 1 + loop.length) % loop.length], t = loop[(i + 1) % loop.length];
+    return !same(planNearestOnSegment(p, s, t), p);
+  });
+  return out.length >= 3 ? out : null;
+}
+
 // ── plan-units.ts ───────────────────────────────────────────────
 // Real-world lengths on the floor plans (#463): feet and inches or metres and centimetres, as the GUI settings say.
 
@@ -604,6 +649,43 @@ function planRefsAfterRemove(constraints                  , room        , at    
 /// Everything that no longer refers to a room: when it is deleted, or its outline redrawn.
 function planRefsWithout(constraints                  , room        )                   {
   return constraints.filter(c => !c.Refs.some(r => r.Room === room));
+}
+
+/// Two rooms merged into one: references to either move to the matching corner or wall of the merged outline,
+/// and anything that pointed at the wall between them, or now points at one thing twice, goes.
+function planRefsAfterMerge(constraints                  , keep        , gone        , before                      , merged      , eps = 0.5) {
+  const n = merged.length;
+  const same = (p    , q    ) => Math.hypot(p.X - q.X, p.Y - q.Y) <= eps;
+  const offLine = (p    , s    , t    ) => { const l = Math.hypot(t.X - s.X, t.Y - s.Y) || 1; return Math.abs((t.X - s.X) * (p.Y - s.Y) - (t.Y - s.Y) * (p.X - s.X)) / l; };
+  const corner = (room        , c        )                => { const p = before[room]?.[c]; if (!p) return null; const j = merged.findIndex(q => same(p, q)); return j < 0 ? null : j; };
+  const edge = (room        , e        )                => {
+    const old = before[room];
+    if (!old?.[e]) return null;
+    const s = old[e], t = old[(e + 1) % old.length];
+    const len = Math.hypot(t.X - s.X, t.Y - s.Y) || 1;
+    const along = (p    ) => ((p.X - s.X) * (t.X - s.X) + (p.Y - s.Y) * (t.Y - s.Y)) / len;
+    for (let j = 0; j < n; j++) {
+      const a = merged[j], b = merged[(j + 1) % n];
+      if (offLine(a, s, t) > eps || offLine(b, s, t) > eps) continue;
+      const lo = Math.max(0, Math.min(along(a), along(b))), hi = Math.min(len, Math.max(along(a), along(b)));
+      if (hi - lo > eps) return j;
+    }
+    return null;
+  };
+  const kept                   = [];
+  constraints.forEach(c => {
+    if (!c.Refs.some(r => r.Room === keep || r.Room === gone)) return kept.push(c);
+    const refs            = [];
+    for (const r of c.Refs) {
+      if (r.Room !== keep && r.Room !== gone) { refs.push(r); continue; }
+      const to = r.Corner != null ? corner(r.Room, r.Corner) : r.Edge != null ? edge(r.Room, r.Edge) : null;
+      if (to == null) return;
+      refs.push(r.Corner != null ? { ...r, Room: keep, Corner: to } : { ...r, Room: keep, Edge: to });
+    }
+    if (new Set(refs.map(r => `${r.Room}|${r.Corner}|${r.Edge}`)).size < refs.length) return;
+    kept.push({ ...c, Refs: refs });
+  });
+  return { constraints: kept, edge };
 }
 
 // ── plan-art.ts ─────────────────────────────────────────────────
@@ -2466,6 +2548,7 @@ function mount(sec     , host     ) {
     const many = selected().length > 1;
     if (many) return [
       { label: `${selected().length} selected`, head: true },
+      ...(roomsPicked().length > 1 ? [{ label: 'Merge rooms', run: onEdit(() => mergeRooms()) }] : []),
       { label: 'Delete them', danger: true, run: onEdit(() => deleteSelection())},
       { label: 'Select none', run: () => { selection = null; extra = []; render(); } },
     ];
@@ -3595,6 +3678,51 @@ function mount(sec     , host     ) {
   };
 
   /// Remove everything selected in one undoable step. A room's items stay, outdoors; a wire to a removed item keeps its path.
+  /// Rooms that meet along a wall, made one: the first picked keeps its name, and everything in or served by the
+  /// others comes with it.
+  const roomsPicked = () => selected().filter(x => x.type === 'room').map(x => shapeOf(x)).filter(Boolean);
+  const mergeRooms = () => {
+    const rooms = roomsPicked();
+    if (rooms.length < 2) return;
+    if (rooms.some((r     ) => r.Locked)) return toast('Unlock the rooms to merge them.', false);
+    let shape       = rooms[0].Shape, cons = constraintsNow(), locked           = [...(rooms[0].LockedWalls || [])];
+    const keep = rooms[0], merged        = [];
+    let rest = rooms.slice(1);
+    for (let progress = true; progress && rest.length;) {
+      progress = false;
+      for (const r of [...rest]) {
+        const next = planUnion(shape, r.Shape);
+        if (!next) continue;
+        const m = planRefsAfterMerge(cons, keep.Id, r.Id, { [keep.Id]: shape, [r.Id]: r.Shape }, next);
+        locked = [...new Set([...locked.map(e => m.edge(keep.Id, e)), ...(r.LockedWalls || []).map((e        ) => m.edge(r.Id, e))].filter((e)              => e != null))];
+        shape = next; cons = m.constraints; merged.push(r); rest = rest.filter(x => x !== r); progress = true;
+      }
+    }
+    if (!merged.length) return toast('Those rooms do not share a wall, so they cannot be merged.', false);
+    act(() => {
+      const ids = new Set(merged.map(r => r.Id));
+      keep.Shape = shape.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) }));
+      if (locked.length) keep.LockedWalls = locked; else delete keep.LockedWalls;
+      setConstraints(cons);
+      merged.forEach(r => roomsNow().splice(roomsNow().indexOf(r), 1));
+      itemsIn().forEach((it     ) => { if (ids.has(it.Room)) it.Room = keep.Id; });
+      areasNow().forEach(ar => { if ((ar.Rooms || []).some((id        ) => ids.has(id))) ar.Rooms = [...new Set((ar.Rooms            ).map(id => ids.has(id) ? keep.Id : id))]; });
+      // Breakers that serve a merged room, and nodes placed in one, now name the room it became.
+      const walk = (o     ) => {
+        if (!o || typeof o !== 'object') return;
+        const loc = o.Ext?.locations;
+        if (loc) {
+          if (Array.isArray(loc.Rooms) && loc.Rooms.some((id        ) => ids.has(id))) loc.Rooms = [...new Set((loc.Rooms            ).map(id => ids.has(id) ? keep.Id : id))];
+          if (ids.has(loc.Location)) loc.Location = keep.Id;
+        }
+        Object.values(o).forEach(walk);
+      };
+      walk(flowIn());
+      selection = { type: 'room', id: keep.Id }; extra = [];
+    });
+    if (rest.length) toast(`${rest.length} room${rest.length > 1 ? 's' : ''} did not share a wall and stayed separate.`, false);
+  };
+
   const deleteSelection = () => {
     const chosen = selected();
     if (!chosen.length) return;
@@ -3646,6 +3774,12 @@ function mount(sec     , host     ) {
       }, { placeholder: 'Search circuits…' }), 'Puts every selected outlet, light and device on one breaker.'));
     }
     const btns        = [];
+    if (editing && count('room') > 1) {
+      const merge = btn('Merge rooms', 'primary');
+      merge.title = 'Makes the selected rooms one room. They must share a wall; the first picked keeps its name.';
+      merge.onclick = () => mergeRooms();
+      btns.push(merge);
+    }
     if (editing) {
       const del = btn(`Delete ${all.length}`, 'danger');
       del.onclick = () => deleteSelection();

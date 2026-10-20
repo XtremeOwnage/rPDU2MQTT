@@ -169,3 +169,48 @@ export function planProtectedBy(runs: { From?: string; To?: string }[], isGfci: 
   }
   return null;
 }
+
+/// Two rooms that meet along a wall, as one outline: the shared stretch of wall goes, the rest is kept as drawn.
+/// Null when they do not share a wall, overlap, or would leave a hole or two separate pieces.
+export function planUnion(a: Pt[], b: Pt[], eps = 0.5): Pt[] | null {
+  if (a.length < 3 || b.length < 3) return null;
+  const ccw = (p: Pt[]) => planArea(p) < 0 ? [...p].reverse() : p;
+  const A = ccw(a), B = ccw(b);
+  const same = (p: Pt, q: Pt) => Math.hypot(p.X - q.X, p.Y - q.Y) <= eps;
+  const onSeg = (p: Pt, s: Pt, t: Pt) => { const n = planNearestOnSegment(p, s, t); return same(n, p) && !same(p, s) && !same(p, t); };
+  // Every edge broken wherever a corner of the other room sits along it, so shared stretches line up end to end.
+  const split = (poly: Pt[], other: Pt[]) => {
+    const out: [Pt, Pt][] = [];
+    poly.forEach((s, i) => {
+      const t = poly[(i + 1) % poly.length];
+      const len = Math.hypot(t.X - s.X, t.Y - s.Y) || 1;
+      const cuts = other.filter(p => onSeg(p, s, t)).map(p => ({ p, d: ((p.X - s.X) * (t.X - s.X) + (p.Y - s.Y) * (t.Y - s.Y)) / len })).sort((x, y) => x.d - y.d).map(x => x.p);
+      [s, ...cuts, t].reduce((prev, cur) => { if (!same(prev, cur)) out.push([prev, cur]); return cur; });
+    });
+    return out;
+  };
+  const ea = split(A, B), eb = split(B, A);
+  const shared = (e: [Pt, Pt], list: [Pt, Pt][]) => list.some(f => same(e[0], f[1]) && same(e[1], f[0]));
+  const strictlyIn = (p: Pt, poly: Pt[]) => planContains(poly, p) && poly.every((s, i) => !same(planNearestOnSegment(p, s, poly[(i + 1) % poly.length]), p));
+  const mid = (e: [Pt, Pt]) => ({ X: (e[0].X + e[1].X) / 2, Y: (e[0].Y + e[1].Y) / 2 });
+  if (ea.some(e => strictlyIn(mid(e), B)) || eb.some(e => strictlyIn(mid(e), A))) return null;
+  const keepA = ea.filter(e => !shared(e, eb)), keepB = eb.filter(e => !shared(e, ea));
+  if (keepA.length === ea.length) return null;
+  const edges = [...keepA, ...keepB];
+  const loop: Pt[] = [];
+  let at = edges.shift()!;
+  loop.push(at[0]);
+  while (edges.length) {
+    const i = edges.findIndex(e => same(e[0], at[1]));
+    if (i < 0) return null;
+    at = edges.splice(i, 1)[0];
+    loop.push(at[0]);
+  }
+  if (!same(at[1], loop[0])) return null;
+  // Corners left standing in the middle of a straight wall are dropped.
+  const out = loop.filter((p, i) => {
+    const s = loop[(i - 1 + loop.length) % loop.length], t = loop[(i + 1) % loop.length];
+    return !same(planNearestOnSegment(p, s, t), p);
+  });
+  return out.length >= 3 ? out : null;
+}

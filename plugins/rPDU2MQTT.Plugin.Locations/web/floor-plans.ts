@@ -1558,6 +1558,7 @@ export default function mount(sec: any, host: any) {
     const many = selected().length > 1;
     if (many) return [
       { label: `${selected().length} selected`, head: true },
+      ...(roomsPicked().length > 1 ? [{ label: 'Merge rooms', run: onEdit(() => mergeRooms()) }] : []),
       { label: 'Delete them', danger: true, run: onEdit(() => deleteSelection())},
       { label: 'Select none', run: () => { selection = null; extra = []; render(); } },
     ];
@@ -2688,6 +2689,51 @@ export default function mount(sec: any, host: any) {
   };
 
   /// Remove everything selected in one undoable step. A room's items stay, outdoors; a wire to a removed item keeps its path.
+  /// Rooms that meet along a wall, made one: the first picked keeps its name, and everything in or served by the
+  /// others comes with it.
+  const roomsPicked = () => selected().filter(x => x.type === 'room').map(x => shapeOf(x)).filter(Boolean);
+  const mergeRooms = () => {
+    const rooms = roomsPicked();
+    if (rooms.length < 2) return;
+    if (rooms.some((r: any) => r.Locked)) return toast('Unlock the rooms to merge them.', false);
+    let shape: Pt[] = rooms[0].Shape, cons = constraintsNow(), locked: number[] = [...(rooms[0].LockedWalls || [])];
+    const keep = rooms[0], merged: any[] = [];
+    let rest = rooms.slice(1);
+    for (let progress = true; progress && rest.length;) {
+      progress = false;
+      for (const r of [...rest]) {
+        const next = planUnion(shape, r.Shape);
+        if (!next) continue;
+        const m = planRefsAfterMerge(cons, keep.Id, r.Id, { [keep.Id]: shape, [r.Id]: r.Shape }, next);
+        locked = [...new Set([...locked.map(e => m.edge(keep.Id, e)), ...(r.LockedWalls || []).map((e: number) => m.edge(r.Id, e))].filter((e): e is number => e != null))];
+        shape = next; cons = m.constraints; merged.push(r); rest = rest.filter(x => x !== r); progress = true;
+      }
+    }
+    if (!merged.length) return toast('Those rooms do not share a wall, so they cannot be merged.', false);
+    act(() => {
+      const ids = new Set(merged.map(r => r.Id));
+      keep.Shape = shape.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) }));
+      if (locked.length) keep.LockedWalls = locked; else delete keep.LockedWalls;
+      setConstraints(cons);
+      merged.forEach(r => roomsNow().splice(roomsNow().indexOf(r), 1));
+      itemsIn().forEach((it: any) => { if (ids.has(it.Room)) it.Room = keep.Id; });
+      areasNow().forEach(ar => { if ((ar.Rooms || []).some((id: string) => ids.has(id))) ar.Rooms = [...new Set((ar.Rooms as string[]).map(id => ids.has(id) ? keep.Id : id))]; });
+      // Breakers that serve a merged room, and nodes placed in one, now name the room it became.
+      const walk = (o: any) => {
+        if (!o || typeof o !== 'object') return;
+        const loc = o.Ext?.locations;
+        if (loc) {
+          if (Array.isArray(loc.Rooms) && loc.Rooms.some((id: string) => ids.has(id))) loc.Rooms = [...new Set((loc.Rooms as string[]).map(id => ids.has(id) ? keep.Id : id))];
+          if (ids.has(loc.Location)) loc.Location = keep.Id;
+        }
+        Object.values(o).forEach(walk);
+      };
+      walk(flowIn());
+      selection = { type: 'room', id: keep.Id }; extra = [];
+    });
+    if (rest.length) toast(`${rest.length} room${rest.length > 1 ? 's' : ''} did not share a wall and stayed separate.`, false);
+  };
+
   const deleteSelection = () => {
     const chosen = selected();
     if (!chosen.length) return;
@@ -2739,6 +2785,12 @@ export default function mount(sec: any, host: any) {
       }, { placeholder: 'Search circuits…' }), 'Puts every selected outlet, light and device on one breaker.'));
     }
     const btns: any[] = [];
+    if (editing && count('room') > 1) {
+      const merge = btn('Merge rooms', 'primary');
+      merge.title = 'Makes the selected rooms one room. They must share a wall; the first picked keeps its name.';
+      merge.onclick = () => mergeRooms();
+      btns.push(merge);
+    }
     if (editing) {
       const del = btn(`Delete ${all.length}`, 'danger');
       del.onclick = () => deleteSelection();
