@@ -1460,7 +1460,7 @@ rooms it serves.
 
 **Standalone walls** (`Walls`, per floor): the *Wall* tool draws a wall that is not the side of a room, end to end with
 bends. `Thickness` is in drawing units; 0 is an interior wall's 4½ in. Doors, windows and outlets sit in them as in a
-room's walls.
+room's walls, and the Constrain tool picks their ends and stretches as it does a room's corners and walls.
 
 **Shared walls.**
 

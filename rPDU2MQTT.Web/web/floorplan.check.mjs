@@ -694,6 +694,10 @@ tap(svg, 2, 150); tap(svg, 798, 150); button('Parallel', sec).onclick();
 tap(svg, 798, 150); tap(svg, 2, 150); button('Parallel', sec).onclick();
 if (floor().Constraints.filter(c => c.Kind === 'parallel').length !== 1) fail(`the same constraint was added twice: ${JSON.stringify(floor().Constraints)}`);
 if (!query(sec, 'line', true).some(l => l.classList.contains('fp-cons-link'))) fail('paired walls are not joined on the plan');
+toolBtn('Select').onclick();
+tap(polygonFor('kitchen'), 200, 150);
+if (!query(sec, 'line', true).some(l => l.classList.contains('fp-cons-link'))) fail('a selected room does not show its constraints');
+toolBtn('Constrain').onclick();
 key('z', { ctrlKey: true });
 toolBtn('Select').onclick();
 
@@ -739,6 +743,28 @@ key('Delete');
 if ((floor().Walls || []).length) fail(`Delete did not remove the wall: ${JSON.stringify(floor().Walls)}`);
 key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
 if ((floor().Walls || []).length) fail(`undo did not take the wall back: ${JSON.stringify(floor().Walls)}`);
+
+// A standalone wall takes constraints like a room's wall: held parallel to the kitchen's side, it stays so when dragged.
+toolBtn('Wall').onclick();
+tap(svg, 600, 400); tap(svg, 640, 600); tap(svg, 640, 600);
+const cw = floor().Walls[0];
+toolBtn('Constrain').onclick();
+tap(svg, 620, 500); tap(svg, 2, 150);
+button('Parallel', sec).onclick();
+const cwc = floor().Constraints.find(c => c.Kind === 'parallel' && c.Refs.some(r => r.Room === cw.Id));
+if (!cwc) fail(`a standalone wall cannot be constrained: ${JSON.stringify(floor().Constraints)}`);
+if (Math.abs(floor().Walls[0].Points[0].X - floor().Walls[0].Points[1].X) > 1) fail(`the wall was not made parallel to the kitchen's side: ${JSON.stringify(floor().Walls[0])}`);
+toolBtn('Select').onclick();
+tap(query(sec, 'polyline', true).find(l => l.dataset?.wall), 620, 500);
+const cwEnd = query(sec, 'circle', true).find(c => c.dataset?.runpt === '1');
+drag(cwEnd, [620, 600], [700, 650]);
+const cwp = floor().Walls[0].Points;
+if (Math.abs(cwp[0].X - cwp[1].X) > 1) fail(`dragging a constrained wall's end broke its constraint: ${JSON.stringify(cwp)}`);
+tap(query(sec, 'polyline', true).find(l => l.dataset?.wall), cwp[0].X, 500);
+key('Delete');
+if ((floor().Constraints || []).some(c => c.Refs.some(r => r.Room === cw.Id))) fail('deleting a wall left its constraints behind');
+key('z', { ctrlKey: true }); key('z', { ctrlKey: true }); key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
+if ((floor().Walls || []).length || (floor().Constraints || []).length) fail(`undo did not take the constrained wall back: ${JSON.stringify(floor())}`);
 
 // A locked room does not move, reshape or delete.
 tap(polygonFor('kitchen'), 200, 150);

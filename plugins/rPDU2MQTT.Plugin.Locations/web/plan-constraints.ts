@@ -5,7 +5,8 @@ import { type Pt } from './plan-geometry.js';
 
 export type PlanRef = { Room: string; Corner?: number | null; Edge?: number | null };
 export type PlanConstraint = { Id: string; Kind: string; Refs: PlanRef[]; Value?: number | null };
-export type PlanShape = { Id: string; Shape: Pt[]; Locked?: boolean; LockedWalls?: number[] };
+/// `Open`: a wall drawn on its own, whose last point does not join back to its first.
+export type PlanShape = { Id: string; Shape: Pt[]; Locked?: boolean; LockedWalls?: number[]; Open?: boolean };
 
 /// Corners closer than this, in drawing units, are one corner shared by the rooms that meet there.
 const SHARED = 0.5;
@@ -126,6 +127,7 @@ export function planSolve(shapes: PlanShape[], constraints: PlanConstraint[], fi
       const was = opts.before?.find(b => b.Id === s.Id && b.Shape.length === s.Shape.length) || s;
       const n = was.Shape.length;
       was.Shape.forEach((p, i) => {
+        if (s.Open && i === n - 1) return;
         const q = was.Shape[(i + 1) % n];
         if (Math.hypot(q.X - p.X, q.Y - p.Y) < 1) return;
         if (Math.abs(q.Y - p.Y) <= 0.15) implied.push({ Id: id, Kind: 'horizontal', Refs: [{ Room: s.Id, Edge: i }] });

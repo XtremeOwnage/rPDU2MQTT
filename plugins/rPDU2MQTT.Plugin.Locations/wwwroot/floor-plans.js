@@ -288,6 +288,8 @@ function planHistory(get           , set                  , limit = 200)        
 // horizontal and vertical walls, fixed angles and fixed lengths — kept by relaxing the points toward each
 // constraint in turn until they all hold. Corners that sit on top of one another move as one: a shared wall.
 
+/// `Open`: a wall drawn on its own, whose last point does not join back to its first.
+
 /// Corners closer than this, in drawing units, are one corner shared by the rooms that meet there.
 const SHARED = 0.5;
 
@@ -406,6 +408,7 @@ function planSolve(shapes             , constraints                  , fixed    
       const was = opts.before?.find(b => b.Id === s.Id && b.Shape.length === s.Shape.length) || s;
       const n = was.Shape.length;
       was.Shape.forEach((p, i) => {
+        if (s.Open && i === n - 1) return;
         const q = was.Shape[(i + 1) % n];
         if (Math.hypot(q.X - p.X, q.Y - p.Y) < 1) return;
         if (Math.abs(q.Y - p.Y) <= 0.15) implied.push({ Id: id, Kind: 'horizontal', Refs: [{ Room: s.Id, Edge: i }] });
@@ -1145,7 +1148,7 @@ function mount(sec     , host     ) {
   const changed = () => { refreshDirty(); schedule(); };
   /// The outlines as they were when the change under way began: what was shared then stays shared (#602).
   let before                     = null;
-  const outlines = () => JSON.parse(JSON.stringify(shapesNow().map(x => ({ Id: x.Id, Shape: x.Shape }))))               ;
+  const outlines = () => JSON.parse(JSON.stringify(solverShapes().map(x => ({ Id: x.Id, Shape: x.Shape }))))               ;
   /// One undoable change: remember what was, make the change, redraw.
   const act = (fn            ) => { history.push(); before = outlines(); try { fn(); } finally { before = null; } changed(); render(); };
   const undo = () => { if (history.undo()) { cleanSelection(); changed(); render(); } };
@@ -1460,7 +1463,9 @@ function mount(sec     , host     ) {
   const setConstraints = (list                  ) => { const f = floorNow()?.floor; if (f) f.Constraints = list; };
   /// The outlines on this floor, as the solver sees them.
   const shapesNow = () => [...roomsNow(), ...areasNow()].filter(x => (x.Shape || []).length >= 3);
-  const shapeById = (id        ) => shapesNow().find(x => x.Id === id);
+  /// What the solver holds: the outlines, and each standalone wall as an open line whose points are its corners.
+  const solverShapes = ()        => [...shapesNow(), ...wallsNow().filter((w     ) => (w.Points || []).length >= 2).map((w     ) => ({ Id: w.Id, Name: 'Wall', Shape: w.Points, Open: true }))];
+  const shapeById = (id        ) => solverShapes().find(x => x.Id === id);
   /// A corner that must stay put: its room is locked, or a locked wall ends there.
   const cornerLocked = (sh     , i        ) => {
     if (!sh) return false;
@@ -1476,7 +1481,7 @@ function mount(sec     , host     ) {
   /// follow the corners they share, keeping theirs.
   const solve = (fixed           = [], hold           , free = false) => {
     if (!constraintsNow().length && !hold) { lastSolve = { worst: 0, unmet: [] }; return; }
-    lastSolve = planSolve(shapesNow(), constraintsNow(), new Set(fixed), 120, { before: before || gesture?.before || undefined, hold, keep: !free });
+    lastSolve = planSolve(solverShapes(), constraintsNow(), new Set(fixed), 120, { before: before || gesture?.before || undefined, hold, keep: !free });
   };
   const keysOf = (sh     ) => (sh?.Shape || []).map((_     , i        ) => `${sh.Id}#${i}`);
   const saidLocked = () => toast('That is locked. Unlock it in its panel to change it.', false);
@@ -1487,10 +1492,11 @@ function mount(sec     , host     ) {
   const pickRef = (p    )                 => {
     const reach = 14 * upp() * hs();
     let best                 = null, bestD = reach;
-    shapesNow().forEach(sh => sh.Shape.forEach((q    , i        ) => { const d = Math.hypot(q.X - p.X, q.Y - p.Y); if (d <= bestD) { bestD = d; best = { Room: sh.Id, Corner: i }; } }));
+    solverShapes().forEach(sh => sh.Shape.forEach((q    , i        ) => { const d = Math.hypot(q.X - p.X, q.Y - p.Y); if (d <= bestD) { bestD = d; best = { Room: sh.Id, Corner: i }; } }));
     if (best) return best;
     bestD = reach * 0.85;
-    shapesNow().forEach(sh => sh.Shape.forEach((q    , i        ) => {
+    solverShapes().forEach(sh => sh.Shape.forEach((q    , i        ) => {
+      if (sh.Open && i === sh.Shape.length - 1) return;
       const r2 = sh.Shape[(i + 1) % sh.Shape.length];
       const n = planNearestOnSegment(p, q, r2);
       const d = Math.hypot(n.X - p.X, n.Y - p.Y);
@@ -1902,7 +1908,7 @@ function mount(sec     , host     ) {
       const all = mode === 'edit' && tool === 'constrain';
       constraintsNow().forEach(c => {
         const unmet = lastSolve.unmet.includes(c.Id);
-        if (!(unmet || all || c.Id === consLit || c.Refs.some(r => r.Room === selection))) return;
+        if (!(unmet || all || c.Id === consLit || c.Refs.some(r => r.Room === selection?.id))) return;
         if (c.Kind === 'length' || c.Kind === 'horizontal' || c.Kind === 'vertical') {
           const m = edgeMid(c.Refs[0]);
           if (m) { wall(m, unmet); pill(inward(m, 16), c.Kind === 'length' ? len(Number(c.Value) || 0) : c.Kind === 'horizontal' ? 'level' : 'plumb', unmet); }
@@ -2293,7 +2299,11 @@ function mount(sec     , host     ) {
         if (box) { dx = Math.max(-box.x, Math.min(w - box.x - box.w, dx)); dy = Math.max(-box.y, Math.min(h - box.y - box.h, dy)); }
         shift(m, dx, dy);
         // Moved, a room leaves the rooms it only touched; those joined to it by a constraint come along.
-        if (m.shapes.length) { gesture.before = null; solve(m.shapes.flatMap((x     ) => keysOf(x.sh)), m.shapes.map((x     ) => x.sh.Id)); }
+        if (m.shapes.length || m.walls.length) {
+          gesture.before = null;
+          const moved = [...m.shapes.map((x     ) => x.sh), ...m.walls.map((x     ) => shapeById(x.r.Id))];
+          solve(moved.flatMap((x     ) => keysOf(x)), moved.map((x     ) => x.Id));
+        }
       }
     } else if (k === 'resize' || k === 'rotate') {
       begin();
@@ -2352,8 +2362,11 @@ function mount(sec     , host     ) {
           // Bends are stored between the ends; a midpoint before the first bend inserts at the front.
           const at = Math.max(0, Math.min(pts.length, gesture.index - (r.From ? 1 : 0) + 1));
           pts.splice(at, 0, drawSnap(null, p));
+          if (selection .type === 'wall') planRefsAfterInsert(constraintsNow(), r.Id, at);
           gesture.kind = 'runpt'; gesture.index = at;
         } else pts[gesture.index] = drawSnap(null, p);
+        // A wall's point is a corner the constraints hold, as a room's is.
+        if (selection .type === 'wall') solve([`${r.Id}#${gesture.index}`], [r.Id], !!e.shiftKey);
       }
     }
     drawPlan();
@@ -3095,7 +3108,7 @@ function mount(sec     , host     ) {
         ? poly.map((_, i) => ({ Id: `squareup${i}`, Kind: Math.abs(norm90(tilt(i))) <= 10 ? 'horizontal' : 'vertical', Refs: [{ Room: sh.Id, Edge: i }], Value: null }))
         : poly.slice(0, n - 1).map((_, i) => ({ Id: `squareup${i}`, Kind: 'angle', Refs: [{ Room: sh.Id, Corner: i }], Value: Math.sign(planCornerAngle(sh, i) || 1) * 90 }));
       const first = poly.findIndex((_, i) => !cornerLocked(sh, i));
-      planSolve(shapesNow(), [...constraintsNow(), ...temp], new Set(first >= 0 && !(sh.LockedWalls || []).length ? [`${sh.Id}#${first}`] : []), 120, { before: before || undefined, hold: [sh.Id] });
+      planSolve(solverShapes(), [...constraintsNow(), ...temp], new Set(first >= 0 && !(sh.LockedWalls || []).length ? [`${sh.Id}#${first}`] : []), 120, { before: before || undefined, hold: [sh.Id] });
       solve([], [sh.Id]);
     });
     return b;
@@ -3557,8 +3570,8 @@ function mount(sec     , host     ) {
     const r = lineSel();
     if (!r || selectedBend < 0 || selectedBend >= (r.Points || []).length) return false;
     if ((r.From ? 1 : 0) + (r.To ? 1 : 0) + r.Points.length <= 2) { toast(selection?.type === 'wall' ? 'A wall needs two ends.' : 'A wire needs two ends.', false); return true; }
-    const at = selectedBend;
-    act(() => { r.Points.splice(at, 1); selectedBend = -1; });
+    const at = selectedBend, count = r.Points.length, wall = selection?.type === 'wall';
+    act(() => { r.Points.splice(at, 1); selectedBend = -1; if (wall) { setConstraints(planRefsAfterRemove(constraintsNow(), r.Id, at, count)); solve([], [r.Id]); } });
     return true;
   };
 
@@ -3581,7 +3594,7 @@ function mount(sec     , host     ) {
           runsIn().forEach((r     ) => { if (r.From === it.Id) { ensure(r, 'Points', []).unshift({ X: it.X, Y: it.Y }); r.From = ''; } if (r.To === it.Id) { ensure(r, 'Points', []).push({ X: it.X, Y: it.Y }); r.To = ''; } });
         } else if (x.type === 'opening') { const o = openingOf(x.id); if (o) openingsNow().splice(openingsNow().indexOf(o), 1); }
         else if (x.type === 'run') { const r = runOf(x.id); if (r) runsIn().splice(runsIn().indexOf(r), 1); }
-        else if (x.type === 'wall') { const w = standaloneOf(x.id); if (w) wallsNow().splice(wallsNow().indexOf(w), 1); }
+        else if (x.type === 'wall') { const w = standaloneOf(x.id); if (w) { setConstraints(planRefsWithout(constraintsNow(), w.Id)); wallsNow().splice(wallsNow().indexOf(w), 1); } }
         else {
           const sh = shapeOf(x);
           if (!sh || sh.Locked) return;
