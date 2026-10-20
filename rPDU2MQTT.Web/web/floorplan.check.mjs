@@ -881,10 +881,19 @@ shut();
 const more = button('More…', sec);
 if (!more) fail('there is no More menu for a phone');
 more.onclick();
-['Add a floor', 'Floor settings', 'Background', 'Tools…', 'Export…', 'Print'].forEach(t => { if (!button(t, sheet())) fail(`More has no "${t}"`); });
+// Editing, it offers what changes the floor; viewing, what takes it away.
+['Add a floor', 'Floor settings', 'Background', 'Tools…'].forEach(t => { if (!button(t, sheet())) fail(`More has no "${t}" while editing`); });
+['Export…', 'Print'].forEach(t => { if (button(t, sheet())) fail(`More offers "${t}" while editing`); });
+if (!button('Export…', sec).classList.contains('fp-off') || button('Floor settings', sec).classList.contains('fp-off')) fail('the bar shows Export while editing, or hides Floor settings');
+shut();
+button('View', sec).onclick();
+button('More…', sec).onclick();
+['Export…', 'Print'].forEach(t => { if (!button(t, sheet())) fail(`More has no "${t}" while viewing`); });
+if (button('Floor settings', sheet())) fail('More offers Floor settings while viewing');
 button('Export…', sheet()).onclick();
 if (!button('This floor as SVG', sheet())) fail('More › Export did not open the export sheet');
 shut();
+button('Edit', sec).onclick();
 
 // Appliances at their real size: a washer dropped by the kitchen's left wall stands with its back to it, facing in.
 toolBtn('Item').onclick();

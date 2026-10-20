@@ -289,6 +289,7 @@ export default function mount(sec: any, host: any) {
   moreBtn.onclick = () => {
     const body = el('div', { class: 'fp-sheet fp-more' });
     ([[addBtn, 'Add a floor'], [floorBtn, 'Floor settings'], [bgBtn, 'Background'], [toolsBtn, 'Tools…'], [exportBtn, 'Export…'], [printBtn, 'Print']] as [any, string][]).forEach(([b, label]) => {
+      if (b.classList.contains('fp-off')) return;
       const go = btn(label);
       go.disabled = b.disabled;
       go.onclick = () => { closeSheet(); b.onclick(); };
@@ -707,6 +708,8 @@ export default function mount(sec: any, host: any) {
     const max = planScaleMax(roomsNow().map(r => placeOf(r.Id)?.value));
     const font = 13 * u;
     const focus = focusCircuit();
+    // The Circuits view: every circuit in its own colour, its wires drawn bold, and the rooms left plain to trace them over.
+    const trace = mode === 'view' && period === 'circuits';
     // The rooms the focused circuit serves: the breaker's own list, and every room something on it is in.
     const focusRooms = new Set<string>(focus ? [...(circuitOf(focus)?.rooms || []), ...itemsIn().filter((i: any) => i.Circuit === focus).map((i: any) => i.Room).filter(Boolean)] : []);
     // A selected GFCI shows what it protects, in green, among the rest of its circuit.
@@ -766,14 +769,14 @@ export default function mount(sec: any, host: any) {
         'stroke-width': (room.Outdoor ? 1.5 : sel ? (walls ? 3 : 5) : walls ? 1 : 4) * u,
       });
       if (room.Outdoor) shape.setAttribute('stroke-dasharray', `${7 * u} ${5 * u}`);
-      if (mode === 'view' && st === 'known') shape.style.fill = shadeOf(p!.value, max);
-      if (mode === 'view' && st === 'unmetered' && !room.Surface) shape.style.fill = 'url(#fp-hatch)';
+      if (mode === 'view' && !trace && st === 'known') shape.style.fill = shadeOf(p!.value, max);
+      if (mode === 'view' && !trace && st === 'unmetered' && !room.Surface) shape.style.fill = 'url(#fp-hatch)';
       shape.dataset.room = room.Id;
       svg.appendChild(shape);
       if (focusRooms.has(room.Id)) shape.classList.add('is-circuit');
       if (focusRooms.has(room.Id)) svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-circuit-tint', fill: planCircuitColor(focus) }));
       const lines = [room.Name || room.Id];
-      if (mode === 'view') lines.push(st === 'known' ? fmt(p!.value) : st === 'unknown' ? 'no data' : 'unmetered');
+      if (mode === 'view' && !trace) lines.push(st === 'known' ? fmt(p!.value) : st === 'unknown' ? 'no data' : 'unmetered');
       if (showSizes || (mode === 'edit' && sel)) lines.push(areaText(insideOf(room, mass)));
       labels.push(label(poly, lines, 'fp-label' + (mode === 'view' ? ' is-' + st : '') + (room.Outdoor ? ' is-outdoor' : '')));
     });
@@ -842,19 +845,19 @@ export default function mount(sec: any, host: any) {
     // A wire is on the circuit of the outlets at its ends too, even when its own circuit was never set or is stale.
     const onFocus = (r: any) => !!focus && (r.Circuit === focus || [r.From, r.To].some(id => id && itemOf(id)?.Circuit === focus));
     // While viewing with the wiring hidden, the selected circuit's wires still show.
-    if (showWiring || mode === 'edit' || focus || downstream) runsNow().forEach(r => {
+    if (showWiring || trace || mode === 'edit' || focus || downstream) runsNow().forEach(r => {
       const path = runPath(r);
       if (path.length < 2) return;
       const sel = isSel('run', r.Id);
       const prot = !!downstream?.runs.has(r.Id);
       const lit = prot || onFocus(r);
-      if (!showWiring && mode !== 'edit' && !lit && !sel) return;
+      if (!showWiring && !trace && mode !== 'edit' && !lit && !sel) return;
       const dim = !!(focus || downstream) && !lit;
       const colour = r.Kind === 'circuit' ? planCircuitColor(lit && focus ? focus : r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
       const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit ? '' : ' is-unknown'}` });
-      const sw = (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : lit ? 2.2 : 1);
+      const sw = (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : lit ? 2.2 : trace ? 1.8 : 1);
       // On the circuit being looked at, a wire is cased in the page's colour so it parts from a wall it runs along.
-      if (lit) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-case', 'stroke-width': sw + 6 * u }));
+      if (lit || (trace && !dim)) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-case', 'stroke-width': sw + 6 * u }));
       g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': sw, 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
       // And current is shown flowing along it, supply to load.
       if (lit) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-flow', 'stroke-width': sw * 0.45, 'stroke-dasharray': `${3 * u} ${9 * u}`, style: `--fp-flow:${-12 * u}px` }));
@@ -902,8 +905,17 @@ export default function mount(sec: any, host: any) {
       const W = Number(item.Width) || 0, D = Number(item.Depth) || 0, sized = W > 0 && D > 0;
       // A wall-mounted item sits beside its wall on the room's side, joined to it by a short stub, at any zoom.
       const facing = !sized && item.Facing != null && Number.isFinite(Number(item.Facing)) ? Number(item.Facing) * Math.PI / 180 : null;
-      const off = facing == null ? { X: 0, Y: 0 } : { X: Math.cos(facing) * (r + 3 * u), Y: Math.sin(facing) * (r + 3 * u) };
-      if (facing != null) svg.appendChild(svgEl('line', { x1: item.X, y1: item.Y, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
+      // At the floor's wall thickness it stands out from the face of the wall it is on, whichever side that is: an
+      // outdoor outlet beyond an outside wall, an indoor one off the middle of a wall between rooms.
+      let face = 0;
+      if (facing != null && walls) {
+        const near = mass.map(w => { const q = planNearestOnSegment(item, w.a, w.b); return { w, d: Math.hypot(q.X - item.X, q.Y - item.Y) }; }).sort((a, b) => a.d - b.d)[0];
+        if (near && near.d <= Math.max(interiorWall(), exteriorWall()) + 1)
+          face = near.w.shared ? interiorWall() / 2 : Math.cos(facing) * near.w.out.X + Math.sin(facing) * near.w.out.Y > 0 ? exteriorWall() : 0;
+      }
+      const fx = facing == null ? 0 : Math.cos(facing) * face, fy = facing == null ? 0 : Math.sin(facing) * face;
+      const off = facing == null ? { X: 0, Y: 0 } : { X: fx + Math.cos(facing) * (r + 3 * u), Y: fy + Math.sin(facing) * (r + 3 * u) };
+      if (facing != null) svg.appendChild(svgEl('line', { x1: item.X + fx, y1: item.Y + fy, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
       const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
       g.dataset.item = item.Id;
       let rr = r;
@@ -933,8 +945,12 @@ export default function mount(sec: any, host: any) {
         hasArt = !!art;
         rr = Math.max(6 * u, Math.min(r, Math.min(W, D) * 0.32));
       } else {
-        const disc = svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : 2) * u });
-        if (item.Circuit && (showWiring || focus)) disc.style.stroke = planCircuitColor(item.Circuit);
+        // A panel, inverter or battery is a box on the wall, not a dot.
+        const boxy = ['panel', 'inverter', 'battery', 'generator', 'transformer'].includes(item.Kind);
+        const bw = item.Kind === 'panel' ? r * 1.55 : r * 1.9, bh = item.Kind === 'panel' ? r * 2.2 : r * 1.9;
+        const disc = boxy ? svgEl('rect', { x: -bw / 2, y: -bh / 2, width: bw, height: bh, rx: r * 0.18, class: 'fp-item-disc is-box', 'stroke-width': (sel ? 3 : trace ? 4 : 2) * u })
+          : svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : trace ? 4 : 2) * u });
+        if (item.Circuit && (showWiring || focus || trace)) disc.style.stroke = planCircuitColor(item.Circuit);
         if (lit && !sel) {
           const halo = svgEl('circle', { r: r + 7 * u, class: 'fp-halo', 'stroke-width': 3 * u });
           halo.style.stroke = prot ? '' : planCircuitColor(item.Circuit);
@@ -948,13 +964,17 @@ export default function mount(sec: any, host: any) {
         glyph.setAttribute('stroke-width', 1.4 * u);
         g.appendChild(glyph);
       }
-      // A GFCI wears a G; anything it protects, when the wiring is shown, a small green shield dot.
+      // A GFCI is plain to see: a green ring round it, a G on it, and GFCI written under it. Anything it protects, when
+      // the wiring or circuits are shown, wears a small green dot.
       if (item.Gfci) {
-        const b = svgEl('g', { class: 'fp-gfci', transform: `translate(${-r * 0.85},${-r * 0.8})` });
-        b.appendChild(svgEl('circle', { r: r * 0.45, 'stroke-width': u }));
-        const t = svgEl('text', { y: r * 0.03, 'font-size': r * 0.6 }); t.textContent = 'G'; b.appendChild(t);
+        g.insertBefore(svgEl('circle', { r: r + 4 * u, class: 'fp-gfci-ring', 'stroke-width': 2.5 * u }), g.firstChild);
+        const b = svgEl('g', { class: 'fp-gfci', transform: `translate(${-r * 0.9},${-r * 0.85})` });
+        b.appendChild(svgEl('circle', { r: r * 0.55, 'stroke-width': u }));
+        const t = svgEl('text', { y: r * 0.04, 'font-size': r * 0.75 }); t.textContent = 'G'; b.appendChild(t);
         g.appendChild(b);
-      } else if (showWiring && planProtectedBy(runsIn(), isGfci, item.Id)) {
+        const tag = svgEl('text', { y: r + 13 * u, class: 'fp-gfci-tag', 'font-size': font * 0.7 }); tag.textContent = 'GFCI';
+        g.appendChild(tag);
+      } else if ((showWiring || trace) && planProtectedBy(runsIn(), isGfci, item.Id)) {
         g.appendChild(svgEl('circle', { cx: r * 0.8, cy: r * 0.75, r: r * 0.28, class: 'fp-protected-dot', 'stroke-width': u }));
       }
       if (!known) {
@@ -1163,7 +1183,7 @@ export default function mount(sec: any, host: any) {
     }
 
     // The scale the shading is on, with what the unshaded rooms mean.
-    if (mode === 'view' && rooms.length) {
+    if (mode === 'view' && !trace && rooms.length) {
       legend.append(
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch fp-grad' }), `0 – ${max > 0 ? fmt(max) : 'no readings yet'}`),
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch is-unmetered' }), 'unmetered'),
@@ -1171,7 +1191,7 @@ export default function mount(sec: any, host: any) {
     }
     // The circuits on this floor, each a way to bring that circuit forward and fade the rest.
     const refs = [...new Set([...itemsNow().map((i: any) => i.Circuit), ...runsNow().map(r => r.Circuit)].filter(Boolean))] as string[];
-    if (showWiring && refs.length) {
+    if ((showWiring || trace) && refs.length) {
       const box = el('div', { class: 'fp-circuits' }, el('span', { class: 'fp-circuits-k', text: 'Circuits' }));
       refs.sort().forEach(ref => {
         const b = el('button', { class: 'fp-chip' + (focused === ref ? ' is-on' : ''), type: 'button', title: 'Bring this circuit forward; tap again to show them all.' },
@@ -2014,8 +2034,8 @@ export default function mount(sec: any, host: any) {
     subBar.innerHTML = '';
     Object.entries(modeBtns).forEach(([m, b]) => { b.classList.toggle('is-on', m === mode); b.setAttribute('aria-selected', String(m === mode)); });
     if (mode === 'view') {
-      subBar.appendChild(seg([['now', 'Power now'], ['today', 'Today'], ['week', 'This week']], period, v => { period = v; remember('period', v); load(); },
-        'Shade by what each room is drawing now, or by the energy it has used over a period.'));
+      subBar.appendChild(seg([['now', 'Power now'], ['today', 'Today'], ['week', 'This week'], ['circuits', 'Circuits']], period, v => { period = v; remember('period', v); load(); },
+        'Shade by what each room is drawing now, or by the energy it has used over a period; or show every circuit in its own colour, to trace where each goes.'));
     }
     subBar.appendChild(check('Wiring', showWiring, v => { showWiring = v; remember('wiring', v ? '1' : '0'); drawPlan(); }, 'Show cable runs, and ring each item in its circuit’s colour.'));
     if (constraintsNow().length && !(mode === 'view' && window.matchMedia?.('(max-width: 560px)').matches)) subBar.appendChild(check('Constraints', showCons, v => { showCons = v; remember('cons', v ? '1' : '0'); drawPlan(); }, 'Show the constraints held on this floor: fixed lengths, angles, parallel and square walls.'));
@@ -2024,6 +2044,9 @@ export default function mount(sec: any, host: any) {
     if (mode === 'edit') subBar.appendChild(check('Snap', snapOn, v => { snapOn = v; remember('snap', v ? '1' : '0'); }, 'Corners snap to other rooms’ corners and edges, and everything to a fine grid.'));
 
     palette.hidden = mode !== 'edit';
+    // What changes the floor shows only while editing; what takes it away only while viewing.
+    [addBtn, floorBtn, bgBtn, toolsBtn].forEach(b => b.classList.toggle('fp-off', mode !== 'edit'));
+    [exportBtn, printBtn].forEach(b => b.classList.toggle('fp-off', mode === 'edit'));
     body.classList.toggle('is-editing', mode === 'edit');
     sec.classList.toggle('is-editing', mode === 'edit');
     Object.entries(toolBtns).forEach(([t, b]) => { b.classList.toggle('is-on', mode === 'edit' && t === tool); b.setAttribute('aria-pressed', String(mode === 'edit' && t === tool)); });
@@ -3144,7 +3167,7 @@ export default function mount(sec: any, host: any) {
     const f = floorNow()?.floor;
     if (!f) return;
     const t = interiorWall() || 0.1143 * scale();
-    const rooms = roomsNow().filter(r => !r.Outdoor && (r.Shape || []).length >= 3 && !r.Locked);
+    const rooms = roomsNow().filter(r => !r.Outdoor && (r.Shape || []).length >= 3);
     type Side = { r: any; i: number; at: number; lo: number; hi: number; dir: number; upright: boolean };
     const sides: Side[] = [];
     rooms.forEach(r => {
@@ -3155,15 +3178,21 @@ export default function mount(sec: any, host: any) {
         else if (Math.abs(a.Y - b.Y) < 0.01 && Math.abs(a.X - b.X) > 1) sides.push({ r, i, at: a.Y, lo: Math.min(a.X, b.X), hi: Math.max(a.X, b.X), dir: -sign * Math.sign(b.X - a.X), upright: false });
       });
     });
+    // A locked room stays put: the room across the gap comes all the way to it, and two locked rooms are left be.
     const moves = new Map<Side, number[]>();
+    const move = (sd: Side, to: number) => { if (!moves.has(sd)) moves.set(sd, []); moves.get(sd)!.push(to); };
+    let held = 0;
     sides.forEach(p => sides.forEach(q => {
       if (p.r === q.r || p.upright !== q.upright || p.dir <= 0 || q.dir >= 0) return;
       const gap = q.at - p.at;
       if (gap <= 0.5 || gap > t * 1.5 || Math.min(p.hi, q.hi) - Math.max(p.lo, q.lo) <= 1) return;
-      const mid = (p.at + q.at) / 2;
-      [p, q].forEach(s => { if (!moves.has(s)) moves.set(s, []); moves.get(s)!.push(mid); });
+      if (p.r.Locked && q.r.Locked) { held++; return; }
+      if (p.r.Locked) move(q, p.at);
+      else if (q.r.Locked) move(p, q.at);
+      else { const mid = (p.at + q.at) / 2; move(p, mid); move(q, mid); }
     }));
-    if (!moves.size) return toast('No gaps the width of a wall were found between rooms.', false);
+    const heldNote = held ? ` ${held} between locked rooms ${held > 1 ? 'were' : 'was'} left; unlock them and close the gaps again.` : '';
+    if (!moves.size) return toast((held ? 'Every gap found is between locked rooms.' : 'No gaps the width of a wall were found between rooms.') + heldNote, false);
     act(() => {
       moves.forEach((mids, sd) => {
         const to = planRound(mids.reduce((a, b) => a + b, 0) / mids.length), from = sd.at;
@@ -3178,7 +3207,7 @@ export default function mount(sec: any, host: any) {
       if (!(Number(f.InteriorWall) > 0)) f.InteriorWall = planRound(t);
       if (!(Number(f.ExteriorWall) > 0)) f.ExteriorWall = planRound(t);
     });
-    toast(`Closed ${moves.size} wall gaps; walls are drawn ${len(interiorWall())} thick.`, true);
+    toast(`Closed ${moves.size} wall gaps; walls are drawn ${len(interiorWall())} thick.${heldNote}`, true);
   };
 
   const floorSheet = () => {
@@ -3532,7 +3561,7 @@ export default function mount(sec: any, host: any) {
   let pending: any = null;
   const schedule = () => { clearTimeout(pending); pending = setTimeout(load, 600); };
   const load = async () => {
-    const q = period === 'now' ? '' : `?period=${period}`;
+    const q = period === 'now' || period === 'circuits' ? '' : `?period=${period}`;
     let r: any;
     try { r = await call('totals', q); }
     catch (e: any) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
@@ -3653,7 +3682,7 @@ export default function mount(sec: any, host: any) {
   window.addEventListener('keyup', (e: any) => { if (e.key === ' ' && spaceDown) { spaceDown = false; svg.classList.remove('is-panning'); } });
 
   // The live view keeps up with the house while it is on screen.
-  setInterval(() => { if (sec.classList.contains('active') && !dragging && mode === 'view' && period === 'now') load(); }, 10000);
+  setInterval(() => { if (sec.classList.contains('active') && !dragging && mode === 'view' && (period === 'now' || period === 'circuits')) load(); }, 10000);
   return { show: () => { render(); load(); readStorage(); } };
 }
 

@@ -334,6 +334,9 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-circuit-tint { stroke: none; opacity: .14; pointer-events: none; }
 .fp-run-arrow { fill: none; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 .fp-gfci circle { fill: var(--good); stroke: var(--panel); }
+.fp-gfci-ring { fill: none; stroke: var(--good); }
+.fp-gfci-tag { fill: var(--good); text-anchor: middle; font-weight: 800; letter-spacing: .04em; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; pointer-events: none; }
+.fp-off { display: none !important; }
 .fp-gfci text { fill: var(--accent-fg); text-anchor: middle; dominant-baseline: middle; font-weight: 800; pointer-events: none; }
 .fp-protected-dot { fill: var(--good); stroke: var(--panel); pointer-events: none; }
 
