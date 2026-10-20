@@ -458,7 +458,7 @@ export default function mount(sec: any, host: any) {
   /// Where a wall-mounted item goes: on the wall, facing the side the pointer is on. Away from walls it stands free.
   const onWall = (kind: string, q: Pt, side: Pt = q): Pt & { facing: number | null } => {
     if (!snapOn || !WALL_KINDS.includes(kind)) return { ...q, facing: null };
-    const w = planNearestWall(q, outlinesOf(roomsNow().filter(r => !r.Outdoor)));
+    const w = planNearestWall(q, [...outlinesOf(roomsNow().filter(r => !r.Outdoor)), ...standaloneStretches()]);
     if (!w || w.dist > Math.max(0.3 * scale(), 10 * upp())) return { ...q, facing: null };
     // The normal toward the pointer's side of the wall; the room it is in when the pointer is on the line itself.
     let toward = { X: side.X - w.pt.X, Y: side.Y - w.pt.Y };
@@ -471,7 +471,7 @@ export default function mount(sec: any, host: any) {
   /// A sized item near a wall stands with its back to it, facing the room the pointer is in; away from walls it keeps its turn.
   const fitToWall = (it: any, q: Pt, side: Pt = q) => {
     const D = Number(it.Depth) || 0;
-    const w = snapOn ? planNearestWall(q, outlinesOf(roomsNow().filter(r => !r.Outdoor))) : null;
+    const w = snapOn ? planNearestWall(q, [...outlinesOf(roomsNow().filter(r => !r.Outdoor)), ...standaloneStretches()]) : null;
     if (!w || w.dist > D / 2 + Math.max(0.3 * scale(), 12 * upp())) { const g2 = gridSnapped(q); it.X = g2.X; it.Y = g2.Y; return; }
     let toward = { X: side.X - w.pt.X, Y: side.Y - w.pt.Y };
     if (Math.hypot(toward.X, toward.Y) < 1e-6) toward = { X: q.X - w.pt.X, Y: q.Y - w.pt.Y };
