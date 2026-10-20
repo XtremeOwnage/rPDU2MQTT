@@ -1674,7 +1674,9 @@ export default function mount(sec: any, host: any) {
   const openMenu = (e: any, entries: Entry[]) => fpMenu.open(e, entries);
   /// What a right-click offers, by what it landed on.
   /// A menu choice that edits: it turns Edit on first, so nothing in the menu is dead while viewing.
-  const onEdit = (fn: () => void) => () => { if (mode !== 'edit') { mode = 'edit'; tool = 'select'; } fn(); };
+  const onEdit = (fn: () => void) => { const run = () => { if (mode !== 'edit') { mode = 'edit'; tool = 'select'; } fn(); }; editOnly.add(run); return run; };
+  /// What changes the floor: left out of the menu while viewing, which offers only looking and Edit this floor.
+  const editOnly = new WeakSet<() => void>();
   const menuFor = (hit: any, p: Pt): Entry[] => {
     const editing = mode === 'edit';
     const toEdit: Entry = { label: 'Edit this floor', run: () => { mode = 'edit'; tool = 'select'; render(); } };
@@ -1755,10 +1757,10 @@ export default function mount(sec: any, host: any) {
     // Bare plot.
     return [
       { label: 'Here', head: true },
-      ...(gapAt(p) ? [{ label: 'Make this space a room', run: () => { mode = 'edit'; tool = 'room'; const gap = gapAt(p); if (gap) finishOutline(gap); } }] : []),
-      { label: 'Add a room here', disabled: !floorNow(), run: () => { mode = 'edit'; tool = 'room'; render(); roomBySize(false); } },
-      { label: `Place ${kindName(itemKind).toLowerCase()} here`, disabled: !floorNow(), run: () => { mode = 'edit'; tool = 'item'; render(); tap({ hit: {}, additive: false }, p); } },
-      { label: 'Background image…', disabled: !floorNow(), run: () => backgroundSheet() },
+      ...(gapAt(p) ? [{ label: 'Make this space a room', run: onEdit(() => { tool = 'room'; const gap = gapAt(p); if (gap) finishOutline(gap); }) }] : []),
+      { label: 'Add a room here', disabled: !floorNow(), run: onEdit(() => { tool = 'room'; render(); roomBySize(false); }) },
+      { label: `Place ${kindName(itemKind).toLowerCase()} here`, disabled: !floorNow(), run: onEdit(() => { tool = 'item'; render(); tap({ hit: {}, additive: false }, p); }) },
+      { label: 'Background image…', disabled: !floorNow(), run: onEdit(() => backgroundSheet()) },
       { label: 'Fit the floor in view', run: () => { fit(); drawPlan(); } },
       ...(editing ? [] : [toEdit]),
     ];
@@ -1766,7 +1768,11 @@ export default function mount(sec: any, host: any) {
   svg.addEventListener('contextmenu', (e: any) => {
     e.preventDefault?.();
     const p = toPlan(e);
-    const entries = menuFor(hitOf(e), p);
+    let entries = menuFor(hitOf(e), p);
+    if (mode !== 'edit') {
+      entries = entries.filter(x => !x.run || !editOnly.has(x.run));
+      if (!entries.some(x => x.label === 'Edit this floor')) entries.push({ label: 'Edit this floor', run: () => { mode = 'edit'; tool = 'select'; render(); } });
+    }
     render();
     openMenu(e, entries);
   });

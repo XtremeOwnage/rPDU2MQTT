@@ -388,7 +388,6 @@ button('Finish outline', sec).onclick();
 const traced = floor().Rooms[floor().Rooms.length - 1];
 if (traced.Shape.length !== 3 || traced.Shape[1].Y !== traced.Shape[0].Y) fail(`a nearly level wall was not made level: ${JSON.stringify(traced.Shape)}`);
 if (traced.Shape[2].X !== traced.Shape[1].X) fail(`a nearly plumb wall was not made plumb: ${JSON.stringify(traced.Shape)}`);
-key('z', { ctrlKey: true });
 
 // Items: an outlet in the kitchen, a light outdoors that belongs to no room, and a utility pole.
 toolBtn('Item').onclick();
@@ -974,15 +973,15 @@ rightClick(svg, 900, 600);
 if (!menuItem('Fit the floor in view') || !menuItem('Background image…')) fail(`the menu on bare plot offers nothing: ${textOf(menu())}`);
 key('Escape');
 if (!menu().hidden) fail('Escape did not close the menu');
-// …and while viewing, a choice that edits turns Edit on and does it, rather than sitting there greyed out.
+// …and while viewing, the menu offers only looking, and Edit this floor.
 button('View', sec).onclick();
 rightClick(itemEl('fridge'), 100, 100);
-if (menuItem('Duplicate').disabled) fail('the menu greys out editing while viewing instead of switching to Edit');
-const countBefore = loc().Placements.length;
-menuItem('Duplicate').onclick();
-if (loc().Placements.length !== countBefore + 1) fail('duplicating from the menu while viewing did nothing');
-if (!button('Edit', sec).classList.contains('is-on')) fail('it did not switch to Edit');
-key('z', { ctrlKey: true });
+if (menuItem('Duplicate') || menuItem('Delete') || menuItem('Wire from here') || !menuItem('Edit this floor')) fail(`the item menu offers editing while viewing: ${textOf(menu())}`);
+key('Escape');
+rightClick(svg, 900, 600);
+if (menuItem('Add a room here') || menuItem('Background image…') || !menuItem('Fit the floor in view') || !menuItem('Edit this floor')) fail(`the plot menu offers editing while viewing: ${textOf(menu())}`);
+menuItem('Edit this floor').onclick();
+if (!button('Edit', sec).classList.contains('is-on')) fail('Edit this floor did not switch to Edit');
 
 // Floor settings: the plot is sized in feet, and the ground can be grass.
 button('Floor settings', sec).onclick();
