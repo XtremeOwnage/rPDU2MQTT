@@ -315,7 +315,13 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 
 /* Floor Plans: a circuit brought forward, what a GFCI protects, and which way a wire runs. */
 .fp-item.is-focus .fp-item-disc { stroke-width: 3.5px; filter: drop-shadow(0 0 4px var(--accent)); }
-.fp-run.is-focus .fp-run-line { filter: drop-shadow(0 0 3px var(--accent)); }
+.fp-run.is-focus .fp-run-line { filter: drop-shadow(0 0 4px var(--accent)); }
+/* A circuit being looked at stands out: what is on it is ringed in its colour, and the rest of the wiring fades. */
+.fp-halo { fill: none; stroke: var(--accent); pointer-events: none; animation: fp-halo 1.4s ease-in-out infinite; }
+.is-protected > .fp-halo { stroke: var(--good); }
+@keyframes fp-halo { 50% { stroke-opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .fp-halo { animation: none; } }
+.fp-item.is-dim, .fp-body.is-dim, .fp-item-stub.is-dim, .fp-run.is-dim { opacity: .28; }
 .fp-item.is-protected .fp-item-disc { stroke: var(--good) !important; filter: drop-shadow(0 0 5px var(--good)); }
 .fp-run.is-protected .fp-run-line { stroke: var(--good) !important; filter: drop-shadow(0 0 3px var(--good)); }
 .fp-run.is-protected .fp-run-arrow { stroke: var(--good) !important; }

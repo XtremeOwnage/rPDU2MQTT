@@ -798,7 +798,7 @@ export default function mount(sec: any, host: any) {
       const colour = r.Kind === 'circuit' ? planCircuitColor(r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
       const lit = downstream ? downstream.runs.has(r.Id) : !!focus && r.Circuit === focus;
       const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (downstream ? ' is-protected' : ' is-focus') : ''}${r.Circuit ? '' : ' is-unknown'}` });
-      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : 1), 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
+      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : lit ? 1.8 : 1), 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
       // While viewing, a branch circuit's run carries the circuit's reading at its middle.
       const cp = mode === 'view' && r.Circuit ? circuitOf(r.Circuit)?.power : undefined;
       if (mode === 'view' && r.Circuit && path.length >= 2) {
@@ -855,6 +855,14 @@ export default function mount(sec: any, host: any) {
           ? svgEl('ellipse', { rx: W / 2, ry: D / 2, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u })
           : svgEl('rect', { x: -W / 2, y: -D / 2, width: W, height: D, rx: Math.min(W, D) * 0.07, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u });
         if (item.Circuit && (showWiring || focus)) shape.style.stroke = planCircuitColor(item.Circuit);
+        // On the circuit being looked at: ringed in its colour, well clear of the outline.
+        if (lit && !sel) {
+          const m = 6 * u;
+          const halo = item.Round ? svgEl('ellipse', { rx: W / 2 + m, ry: D / 2 + m, class: 'fp-halo', 'stroke-width': 3 * u })
+            : svgEl('rect', { x: -W / 2 - m, y: -D / 2 - m, width: W + 2 * m, height: D + 2 * m, rx: m, class: 'fp-halo', 'stroke-width': 3 * u });
+          halo.style.stroke = downstream ? '' : planCircuitColor(item.Circuit);
+          body.appendChild(halo);
+        }
         body.appendChild(shape);
         // The front, where the door or the controls are.
         // The appliance itself, seen from above, when it is one we know how to draw.
@@ -867,6 +875,11 @@ export default function mount(sec: any, host: any) {
       } else {
         const disc = svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : 2) * u });
         if (item.Circuit && (showWiring || focus)) disc.style.stroke = planCircuitColor(item.Circuit);
+        if (lit && !sel) {
+          const halo = svgEl('circle', { r: r + 7 * u, class: 'fp-halo', 'stroke-width': 3 * u });
+          halo.style.stroke = downstream ? '' : planCircuitColor(item.Circuit);
+          g.appendChild(halo);
+        }
         g.appendChild(disc);
       }
       // An appliance drawn as itself needs no icon on top.
