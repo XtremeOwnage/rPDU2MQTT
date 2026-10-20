@@ -242,7 +242,7 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
   .section.fp.is-editing .fp-intro { display: none; }
   .fp-stage { max-height: 64vh; border-radius: var(--r); }
   /* Editing on a phone: every tool in sight, and the plan as tall as the screen allows. */
-  .fp-palette { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 2px; padding: 4px; overflow: visible; }
+  .fp-palette { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; padding: 4px; overflow: visible; }
   .fp-palette[hidden] { display: none; }
   .fp-tool { padding: 6px 0 4px; min-height: 48px; }
   .fp-opts { min-height: 0; padding: 6px 8px; }
@@ -397,3 +397,6 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-menu-item:hover:not(:disabled) { background: var(--panel3); }
 .fp-menu-item.is-danger { color: var(--bad); }
 .fp-menu-item:disabled { opacity: .45; cursor: default; }
+.fp-standalone-line { fill: none; stroke: var(--fg); stroke-linecap: square; stroke-linejoin: miter; pointer-events: none; }
+.fp-standalone.is-selected .fp-standalone-line { stroke: var(--accent); }
+.fp-draft.is-wall { stroke-opacity: .6; }

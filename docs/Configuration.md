@@ -1458,6 +1458,10 @@ rooms it serves.
 - Selecting a GFCI highlights what it protects. A protected outlet names its GFCI and shows a green dot when
   wiring is shown.
 
+**Standalone walls** (`Walls`, per floor): the *Wall* tool draws a wall that is not the side of a room, end to end with
+bends. `Thickness` is in drawing units; 0 is an interior wall's 4½ in. Doors, windows and outlets sit in them as in a
+room's walls.
+
 **Shared walls.**
 
 - Coincident corners belong to every room meeting there; dragging one moves it in all.

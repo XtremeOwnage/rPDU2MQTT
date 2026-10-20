@@ -51,6 +51,7 @@ Click an item for its circuit, meter, reading and what it is wired to.
 | Pan | H | Drag to pan |
 | Room | R | Drag a rectangle, or **Add a room by size** |
 | Outline | P | Click each corner; click the first to close |
+| Wall | E | A wall on its own: click each end and bend, then the last point again |
 | Outdoor | O | Yard, porch, patio, driveway, deck |
 | Area | A | Area spanning rooms |
 | Door / Window | D / W | Click a wall. Door, double, sliding, garage, window, opening |

@@ -940,6 +940,7 @@ const FP_TOOLS                                   = [
   ['pan', 'Pan', 'H', 'Drag to move around the plan. Two fingers or the wheel with Ctrl also pan and zoom.'],
   ['room', 'Room', 'R', 'Drag a rectangle to draw a room, or add one by its measurements.'],
   ['outline', 'Outline', 'P', 'Tap each corner of an odd-shaped room; tap the first corner again to close it.'],
+  ['wall', 'Wall', 'E', 'Draw a wall on its own: tap each end and bend, then tap the last point again or double-tap to finish.'],
   ['zone', 'Outdoor', 'O', 'Drag out a yard, porch, patio, driveway or deck.'],
   ['area', 'Area', 'A', 'Drag out an area that may span rooms, such as upstairs or the server corner.'],
   ['door', 'Door', 'D', 'Tap a wall to put a door in it.'],
@@ -959,6 +960,7 @@ function fpToolIcon(tool        )      {
     case 'pan': p('M12 3 V21 M3 12 H21 M12 3 L9.5 5.5 M12 3 L14.5 5.5 M12 21 L9.5 18.5 M12 21 L14.5 18.5 M3 12 L5.5 9.5 M3 12 L5.5 14.5 M21 12 L18.5 9.5 M21 12 L18.5 14.5'); break;
     case 'room': p('M4 5 H20 V19 H4 Z M4 12 H10'); break;
     case 'outline': p('M4 7 L11 4 L20 8 L18 19 L6 18 Z'); break;
+    case 'wall': p('M3 18 L10 11 L21 11 M3 15 L10 8 L21 8'); break;
     case 'zone': p('M12 3 L7 11 H10 L6 17 H18 L14 11 H17 Z M12 17 V21'); break;
     case 'area': p('M4 5 H7 M10 5 H14 M17 5 H20 V8 M20 11 V14 M20 17 V19 H17 M14 19 H10 M7 19 H4 V16 M4 13 V10 M4 7 V5'); break;
     case 'door': p('M4 20 H20 M6 20 V6 M6 6 A14 14 0 0 1 20 20'); break;
@@ -1084,6 +1086,13 @@ function mount(sec     , host     ) {
   const roomsNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Rooms', []) : []; };
   const areasNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Areas', []) : []; };
   const openingsNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Openings', []) : []; };
+  /// Walls drawn on their own, not as the side of a room: a half wall, a partition, a wall still to be closed in.
+  const wallsNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Walls', []) : []; };
+  const standaloneOf = (id        ) => wallsNow().find((w     ) => w.Id === id);
+  /// A standalone wall's thickness: its own, or an interior wall's 4½ inches.
+  const wallThick = (w     ) => Number(w.Thickness) > 0 ? Number(w.Thickness) : 0.1143 * scale();
+  /// The wire or standalone wall selected on its own, whose bends can be dragged.
+  const lineSel = () => extra.length ? null : selection?.type === 'run' ? runOf(selection.id) : selection?.type === 'wall' ? standaloneOf(selection.id) : null;
   const shapeOf = (sel           ) => sel?.type === 'room' ? roomsNow().find(r => r.Id === sel.id)
     : sel?.type === 'area' ? areasNow().find(a => a.Id === sel.id) : null;
   const itemOf = (id        ) => itemsIn().find((p     ) => p.Id === id);
@@ -1141,7 +1150,7 @@ function mount(sec     , host     ) {
   const act = (fn            ) => { history.push(); before = outlines(); try { fn(); } finally { before = null; } changed(); render(); };
   const undo = () => { if (history.undo()) { cleanSelection(); changed(); render(); } };
   const redo = () => { if (history.redo()) { cleanSelection(); changed(); render(); } };
-  const exists = (x                        ) => x.type === 'item' ? !!itemOf(x.id) : x.type === 'run' ? !!runOf(x.id)
+  const exists = (x                        ) => x.type === 'item' ? !!itemOf(x.id) : x.type === 'run' ? !!runOf(x.id) : x.type === 'wall' ? !!standaloneOf(x.id)
     : x.type === 'opening' ? !!openingOf(x.id) : !!shapeOf(x);
   /// Everything selected, the primary first.
   const selected = ()                           => [...(selection ? [selection] : []), ...extra];
@@ -1149,7 +1158,7 @@ function mount(sec     , host     ) {
   const cleanSelection = () => {
     extra = extra.filter(exists);
     if (!selection) return;
-    const gone = selection.type === 'item' ? !itemOf(selection.id) : selection.type === 'run' ? !runOf(selection.id)
+    const gone = selection.type === 'item' ? !itemOf(selection.id) : selection.type === 'run' ? !runOf(selection.id) : selection.type === 'wall' ? !standaloneOf(selection.id)
       : selection.type === 'opening' ? !openingOf(selection.id) : !shapeOf(selection);
     if (gone) selection = null;
     selectedCorner = -1;
@@ -1327,8 +1336,10 @@ function mount(sec     , host     ) {
     return pts;
   };
   /// Where a wall is for a door or window: near enough to one, on it and lying along it.
+  /// Every stretch of a standalone wall, as an outline of its own, so a door or outlet finds it as it finds a room's.
+  const standaloneStretches = ()         => wallsNow().flatMap((w     ) => (w.Points || []).slice(1).map((b    , i        ) => [w.Points[i], b]));
   const wallAt = (p    ) => {
-    const w = planNearestWall(p, outlinesOf(roomsNow().filter(r => !r.Outdoor)));
+    const w = planNearestWall(p, [...outlinesOf(roomsNow().filter(r => !r.Outdoor)), ...standaloneStretches()]);
     return w && w.dist <= Math.max(0.6 * scale(), 16 * upp()) ? w : null;
   };
   const openingWidth = (kind        ) => {
@@ -1392,11 +1403,12 @@ function mount(sec     , host     ) {
     ...openingsNow().map(o => ({ type: 'opening'           , id: o.Id })),
     ...itemsNow().map((i     ) => ({ type: 'item'           , id: i.Id })),
     ...runsNow().map(r => ({ type: 'run'           , id: r.Id })),
+    ...wallsNow().map((w     ) => ({ type: 'wall'           , id: w.Id })),
   ];
   /// Every point that moves when a set of things moves: outlines, items, doors and windows, wire bends.
   /// A room carries what is in it, the doors and windows in its walls and the bends of wires to what it holds.
   const movable = (sel                          ) => {
-    const shapes = new Set     (), items = new Set     (), openings = new Set     (), runs = new Set     ();
+    const shapes = new Set     (), items = new Set     (), openings = new Set     (), runs = new Set     (), walls = new Set     ();
     sel.forEach(x => {
       if (x.type === 'room' || x.type === 'area') {
         const s = shapeOf(x);
@@ -1410,6 +1422,7 @@ function mount(sec     , host     ) {
       } else if (x.type === 'item') { const it = itemOf(x.id); if (it) items.add(it); }
       else if (x.type === 'opening') { const o = openingOf(x.id); if (o) openings.add(o); }
       else if (x.type === 'run') { const r = runOf(x.id); if (r) runs.add(r); }
+      else if (x.type === 'wall') { const w = standaloneOf(x.id); if (w) walls.add(w); }
     });
     runsNow().forEach(r => { if ([r.From, r.To].some(id => [...items].some((it     ) => it.Id === id))) runs.add(r); });
     return {
@@ -1417,17 +1430,18 @@ function mount(sec     , host     ) {
       items: [...items].map(it => ({ it, X: Number(it.X) || 0, Y: Number(it.Y) || 0 })),
       openings: [...openings].map(o => ({ o, X: Number(o.X) || 0, Y: Number(o.Y) || 0 })),
       runs: [...runs].map(r => ({ r, pts: (r.Points || []).map((q    ) => ({ ...q })) })),
+      walls: [...walls].map(w => ({ r: w, pts: (w.Points || []).map((q    ) => ({ ...q })) })),
     };
   };
   const shift = (m                            , dx        , dy        ) => {
     m.shapes.forEach(x => { x.sh.Shape = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
     m.items.forEach(x => { x.it.X = planRound(x.X + dx); x.it.Y = planRound(x.Y + dy); });
     m.openings.forEach(x => { x.o.X = planRound(x.X + dx); x.o.Y = planRound(x.Y + dy); });
-    m.runs.forEach(x => { x.r.Points = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
+    [...m.runs, ...m.walls].forEach(x => { x.r.Points = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
   };
   /// The box around a set of movable points, or null when there are none.
   const boundsOf = (m                            ) => {
-    const pts       = [...m.shapes.flatMap(x => x.pts), ...m.items.map(x => ({ X: x.X, Y: x.Y })), ...m.openings.map(x => ({ X: x.X, Y: x.Y })), ...m.runs.flatMap(x => x.pts)];
+    const pts       = [...m.shapes.flatMap(x => x.pts), ...m.items.map(x => ({ X: x.X, Y: x.Y })), ...m.openings.map(x => ({ X: x.X, Y: x.Y })), ...m.runs.flatMap(x => x.pts), ...m.walls.flatMap(x => x.pts)];
     return pts.length ? planBounds(pts) : null;
   };
   /// Is a selectable thing wholly inside a box?
@@ -1436,6 +1450,7 @@ function mount(sec     , host     ) {
     if (x.type === 'room' || x.type === 'area') return (shapeOf(x)?.Shape || []).every(inB);
     if (x.type === 'item') { const it = itemOf(x.id); return !!it && inB({ X: it.X, Y: it.Y }); }
     if (x.type === 'opening') { const o = openingOf(x.id); return !!o && inB({ X: o.X, Y: o.Y }); }
+    if (x.type === 'wall') { const w = standaloneOf(x.id); return !!w && (w.Points || []).every(inB); }
     const r = runOf(x.id);
     return !!r && runPath(r).length > 0 && runPath(r).every(inB);
   };
@@ -1647,6 +1662,27 @@ function mount(sec     , host     ) {
       shape.dataset.area = area.Id;
       svg.appendChild(shape);
       labels.push(label(poly, [area.Name || area.Id], 'fp-label fp-area-label'));
+    });
+
+    // Standalone walls, at their thickness; a selected one shows its ends and bends to drag, and dots to add a bend.
+    wallsNow().forEach((wl     ) => {
+      const pts       = wl.Points || [];
+      if (pts.length < 2) return;
+      const sel = isSel('wall', wl.Id);
+      const g = svgEl('g', { class: 'fp-standalone' + (sel ? ' is-selected' : '') });
+      g.appendChild(svgEl('polyline', { points: points(pts), class: 'fp-standalone-line', 'stroke-width': Math.max(wallThick(wl), 3 * u) }));
+      const hit = svgEl('polyline', { points: points(pts), class: 'fp-hit', 'stroke-width': Math.max(wallThick(wl), 14 * u) });
+      hit.dataset.wall = wl.Id;
+      g.appendChild(hit);
+      svg.appendChild(g);
+      if (sel && mode === 'edit' && !extra.length) {
+        pts.forEach((q, i) => { const hd = svgEl('circle', { cx: q.X, cy: q.Y, r: 7 * u * hs(), class: 'fp-handle' + (i === selectedBend ? ' is-selected' : '') }); hd.dataset.runpt = String(i); svg.appendChild(hd); });
+        for (let i = 0; i + 1 < pts.length; i++) {
+          const m = svgEl('circle', { cx: (pts[i].X + pts[i + 1].X) / 2, cy: (pts[i].Y + pts[i + 1].Y) / 2, r: 5 * u * hs(), class: 'fp-mid' });
+          m.dataset.runmid = String(i);
+          svg.appendChild(m);
+        }
+      }
     });
 
     // Doors and windows cut the walls they sit in.
@@ -1930,7 +1966,7 @@ function mount(sec     , host     ) {
     }
     if (draft.length) {
       const pts = hover ? [...draft, hover] : draft;
-      svg.appendChild(svgEl('polyline', { points: points(pts), class: 'fp-draft', 'stroke-width': 2 * u }));
+      svg.appendChild(svgEl('polyline', { points: points(pts), class: 'fp-draft' + (tool === 'wall' ? ' is-wall' : ''), 'stroke-width': tool === 'wall' ? Math.max(0.1143 * scale(), 3 * u) : 2 * u }));
       draft.forEach((q, i) => svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: (i === 0 ? 9 : 6) * u, class: 'fp-draft-pt' + (i === 0 ? ' is-first' : '') })));
     }
     if (wireDraft) {
@@ -2005,6 +2041,7 @@ function mount(sec     , host     ) {
       if (d.item) return { item: d.item           };
       if (d.opening) return { opening: d.opening           };
       if (d.run) return { run: d.run           };
+      if (d.wall) return { wall: d.wall           };
       if (d.area) return { area: d.area           };
       if (d.room) return { room: d.room           };
     }
@@ -2012,7 +2049,7 @@ function mount(sec     , host     ) {
   };
   /// Select what was hit. With Shift, Ctrl or ⌘ it is added to the selection, or taken out if already in it.
   const selectHit = (hit     , additive = false) => {
-    const next            = hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening } : hit.run ? { type: 'run', id: hit.run }
+    const next            = hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening } : hit.run ? { type: 'run', id: hit.run } : hit.wall ? { type: 'wall', id: hit.wall }
       : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
     selectedCorner = -1; selectedBend = -1;
     if (!additive) { selection = next; extra = []; return; }
@@ -2024,7 +2061,7 @@ function mount(sec     , host     ) {
     extra = all.slice(1);
   };
   const hitSel = (hit     )                                => hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening }
-    : hit.run ? { type: 'run', id: hit.run } : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
+    : hit.run ? { type: 'run', id: hit.run } : hit.wall ? { type: 'wall', id: hit.wall } : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
 
   /// The tools a wall or corner can be dragged from without going back to Select: those that act on a tap, not a drag.
   const GRAB_TOOLS = new Set(['select', 'constrain', 'door', 'window', 'item', 'measure']);
@@ -2136,7 +2173,7 @@ function mount(sec     , host     ) {
       gesture.box = boundsOf(gesture.all);
     } else if (mode === 'edit' && tool === 'select') {
       const target = extra.length ? null : shapeOf(selection);
-      const run = !extra.length && selection?.type === 'run' ? runOf(selection.id) : null;
+      const run = lineSel();
       const under = hitSel(hit);
       // Near a wall or corner, a drag takes hold of it, selected or not; items, doors and wires on it come first.
       const grab = under && under.type !== 'room' && under.type !== 'area' ? null : grabAt(p);
@@ -2154,7 +2191,7 @@ function mount(sec     , host     ) {
         gesture.kind = 'group';
         gesture.members = movable(selected());
         const m0 = gesture.members;
-        if (!m0.shapes.length && !m0.items.length && !m0.openings.length && !m0.runs.length) { gesture.kind = 'none'; saidLocked(); }
+        if (!m0.shapes.length && !m0.items.length && !m0.openings.length && !m0.runs.length && !m0.walls.length) { gesture.kind = 'none'; saidLocked(); }
         gesture.single = selected().length === 1 ? selection : null;
       } else {
         gesture.kind = 'marquee';
@@ -2308,7 +2345,7 @@ function mount(sec     , host     ) {
       rectEnd = snapped(p);
     } else if (k === 'runpt' || k === 'runinsert') {
       begin();
-      const r = runOf(selection .id);
+      const r = lineSel();
       if (r) {
         const pts = ensure(r, 'Points', []);
         if (k === 'runinsert') {
@@ -2380,7 +2417,7 @@ function mount(sec     , host     ) {
   svg.addEventListener('pointerup', endPointer);
   svg.addEventListener('pointercancel', (e     ) => { pointers.delete(e.pointerId); gesture = null; pinch = null; marquee = null; dragging = false; rectStart = null; rectEnd = null; drawPlan(); });
   svg.addEventListener('pointerleave', () => { if (hover) { hover = null; drawPlan(); } });
-  svg.addEventListener('dblclick', () => { if (wireDraft) finishWire(''); else if (draft.length >= 3) finishOutline(draft); });
+  svg.addEventListener('dblclick', () => { if (wireDraft) finishWire(''); else if (tool === 'wall' && draft.length >= 2) finishWall(draft); else if (draft.length >= 3) finishOutline(draft); });
 
   // --- The menu a right-click opens, over whatever it was aimed at ----------------------------------
 
@@ -2401,7 +2438,7 @@ function mount(sec     , host     ) {
       { label: 'Select none', run: () => { selection = null; extra = []; render(); } },
     ];
     if (hit.corner != null) return [{ label: 'Corner', head: true }, { label: 'Remove corner', danger: true, run: onEdit(() => { selectedCorner = hit.corner; removeCorner(); })}];
-    if (hit.runpt != null) return [{ label: 'Wire bend', head: true }, { label: 'Remove bend', danger: true, run: onEdit(() => { selectedBend = hit.runpt; removeBend(); })}];
+    if (hit.runpt != null) return [{ label: selection?.type === 'wall' ? 'Wall point' : 'Wire bend', head: true }, { label: selection?.type === 'wall' ? 'Remove point' : 'Remove bend', danger: true, run: onEdit(() => { selectedBend = hit.runpt; removeBend(); })}];
     if (hit.mid != null) {
       const sh = shapeOf(selection);
       const locked = !!sh && ((sh.LockedWalls || []).includes(hit.mid) || sh.Locked);
@@ -2442,6 +2479,7 @@ function mount(sec     , host     ) {
         { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())},
       ];
     }
+    if (hit.wall) return [{ label: 'Wall', head: true }, { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())}];
     if (hit.run) {
       const r = runOf(hit.run);
       return [
@@ -2530,6 +2568,14 @@ function mount(sec     , host     ) {
       const q = drawSnap(draft[draft.length - 1], p);
       const first = draft[0];
       if (first && draft.length >= 3 && Math.hypot(q.X - first.X, q.Y - first.Y) <= 14 * upp()) finishOutline(draft);
+      else { draft.push(q); render(); }
+      return;
+    }
+    if (tool === 'wall') {
+      const q = drawSnap(draft[draft.length - 1], p);
+      const last = draft[draft.length - 1];
+      // Tapping the last point again finishes the wall.
+      if (last && draft.length >= 2 && Math.hypot(q.X - last.X, q.Y - last.Y) <= 14 * upp()) finishWall(draft);
       else { draft.push(q); render(); }
       return;
     }
@@ -2626,6 +2672,16 @@ function mount(sec     , host     ) {
     setTimeout(() => (side.querySelector?.('.fp-name')       )?.focus?.(), 0);
   };
 
+  /// A standalone wall from the points tapped, selected so its thickness can be set.
+  const finishWall = (pts      ) => {
+    draft = []; hover = null;
+    const clean = pts.filter((q, i) => i === 0 || Math.hypot(q.X - pts[i - 1].X, q.Y - pts[i - 1].Y) > 1e-6);
+    if (clean.length < 2) { render(); return; }
+    const id = freshIn(wallsNow(), 'wall');
+    tool = 'select';
+    act(() => { wallsNow().push({ Id: id, Points: clean.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) })), Thickness: 0 }); selection = { type: 'wall', id }; });
+  };
+
   /// A wire drawn between two items, or out to a bare point. Its circuit comes from whichever end knows one.
   const finishWire = (to        ) => {
     const d = wireDraft;
@@ -2713,6 +2769,17 @@ function mount(sec     , host     ) {
         cancel.onclick = () => { draft = []; render(); };
         add(done, back, cancel, el('span', { class: 'fp-opts-note', text: `${draft.length} corner${draft.length === 1 ? '' : 's'}` }));
       } else add(el('span', { class: 'fp-opts-note', text: 'Tap the first corner. Double-tap or tap the first corner again to close.' }));
+    } else if (tool === 'wall') {
+      if (draft.length) {
+        const done = btn('Finish wall', 'primary');
+        done.disabled = draft.length < 2;
+        done.onclick = () => finishWall(draft);
+        const back = btn('Undo point');
+        back.onclick = () => { draft.pop(); render(); };
+        const cancel = btn('Cancel');
+        cancel.onclick = () => { draft = []; render(); };
+        add(done, back, cancel, el('span', { class: 'fp-opts-note', text: draft.length >= 2 ? len(planPathLength(draft)) : 'Tap where it goes next.' }));
+      } else add(el('span', { class: 'fp-opts-note', text: 'Tap one end of the wall, each bend, then the other end; tap it again or double-tap to finish.' }));
     } else if (tool === 'door') {
       add(seg(PLAN_OPENINGS.filter(o => o[0] !== 'window'), doorKind, v => { doorKind = v; render(); }));
     } else if (tool === 'item') {
@@ -2958,6 +3025,7 @@ function mount(sec     , host     ) {
     if (selection?.type === 'item') return drawItem(itemOf(selection.id), editing);
     if (selection?.type === 'opening') return drawOpening(openingOf(selection.id), editing);
     if (selection?.type === 'run') return drawRun(runOf(selection.id), editing);
+    if (selection?.type === 'wall') return drawWall(standaloneOf(selection.id), editing);
     if (selection && shapeOf(selection)) return drawShape(selection.type                   , shapeOf(selection), editing);
     drawFloorSummary(fl);
   };
@@ -3415,6 +3483,20 @@ function mount(sec     , host     ) {
     if (c) side.appendChild(circuitRow(c));
   };
 
+  const drawWall = (w     , editing         ) => {
+    if (!w) { selection = null; return drawSide(); }
+    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: 'Wall' }), el('span', { class: 'fp-pill', text: 'standalone' })));
+    side.appendChild(row('Length', len(planPathLength(w.Points || []))));
+    if (!editing) { side.appendChild(row('Thickness', len(wallThick(w)))); return; }
+    side.appendChild(field('Thickness', lenInput(wallThick(w), v => act(() => { w.Thickness = planRound(v); })), 'An interior wall is about 4½ in; an exterior one about 6 in.'));
+    const del = btn('Delete', 'danger');
+    del.onclick = () => deleteSelection();
+    const btns2        = [];
+    if (selectedBend >= 0 && selectedBend < (w.Points || []).length) { const rb = btn('Remove point'); rb.onclick = () => removeBend(); btns2.push(rb); }
+    side.appendChild(actions(...btns2, del));
+    side.appendChild(el('div', { class: 'desc', text: 'Drag an end or bend to move it, a small dot to add a bend; double-click a point to remove it.' }));
+  };
+
   /// A copy of the selection beside it, selected: an item, a door or window, or a room with nothing in it.
   const duplicate = () => {
     if (!selection) return;
@@ -3472,9 +3554,9 @@ function mount(sec     , host     ) {
   };
   /// Take out the selected bend of a wire; its path joins straight across.
   const removeBend = () => {
-    const r = !extra.length && selection?.type === 'run' ? runOf(selection.id) : null;
+    const r = lineSel();
     if (!r || selectedBend < 0 || selectedBend >= (r.Points || []).length) return false;
-    if ((r.From ? 1 : 0) + (r.To ? 1 : 0) + r.Points.length <= 2) { toast('A wire needs two ends.', false); return true; }
+    if ((r.From ? 1 : 0) + (r.To ? 1 : 0) + r.Points.length <= 2) { toast(selection?.type === 'wall' ? 'A wall needs two ends.' : 'A wire needs two ends.', false); return true; }
     const at = selectedBend;
     act(() => { r.Points.splice(at, 1); selectedBend = -1; });
     return true;
@@ -3499,6 +3581,7 @@ function mount(sec     , host     ) {
           runsIn().forEach((r     ) => { if (r.From === it.Id) { ensure(r, 'Points', []).unshift({ X: it.X, Y: it.Y }); r.From = ''; } if (r.To === it.Id) { ensure(r, 'Points', []).push({ X: it.X, Y: it.Y }); r.To = ''; } });
         } else if (x.type === 'opening') { const o = openingOf(x.id); if (o) openingsNow().splice(openingsNow().indexOf(o), 1); }
         else if (x.type === 'run') { const r = runOf(x.id); if (r) runsIn().splice(runsIn().indexOf(r), 1); }
+        else if (x.type === 'wall') { const w = standaloneOf(x.id); if (w) wallsNow().splice(wallsNow().indexOf(w), 1); }
         else {
           const sh = shapeOf(x);
           if (!sh || sh.Locked) return;
@@ -3517,7 +3600,7 @@ function mount(sec     , host     ) {
   const drawMany = (editing         ) => {
     const all = selected();
     const count = (t         ) => all.filter(x => x.type === t).length;
-    const words = ([['room', 'room', 'rooms'], ['area', 'area', 'areas'], ['item', 'item', 'items'], ['opening', 'door or window', 'doors and windows'], ['run', 'wire', 'wires']]                               )
+    const words = ([['room', 'room', 'rooms'], ['area', 'area', 'areas'], ['item', 'item', 'items'], ['opening', 'door or window', 'doors and windows'], ['run', 'wire', 'wires'], ['wall', 'wall', 'walls']]                               )
       .map(([t, one, many]) => { const n = count(t); return n ? `${n} ${n > 1 ? many : one}` : ''; }).filter(Boolean);
     side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: `${all.length} selected` })));
     side.appendChild(el('div', { class: 'desc', text: words.join(', ') + '. Drag any of them to move them all; arrow keys nudge them; Shift-click adds or removes one.' }));
@@ -4129,6 +4212,7 @@ function mount(sec     , host     ) {
       return;
     }
     if (k === 'Enter' && wireDraft) { finishWire(''); return; }
+    if (k === 'Enter' && tool === 'wall' && draft.length >= 2) { finishWall(draft); return; }
     if (k === 'Enter' && draft.length >= 3) { finishOutline(draft); return; }
     if (k === '+' || k === '=') { zoomAt(centre(), 1.4); return; }
     if (k === '-' || k === '_') { zoomAt(centre(), 1 / 1.4); return; }

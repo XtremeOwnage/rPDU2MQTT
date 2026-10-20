@@ -715,6 +715,31 @@ if (!button('On wall', sec)) fail(`a corner and a wall picked offer no On wall: 
 button('Clear', sec).onclick();
 toolBtn('Select').onclick();
 
+// A standalone wall: drawn end to end with the Wall tool, its end dragged, a door put in it, and deleted.
+toolBtn('Wall').onclick();
+tap(svg, 100, 500); tap(svg, 300, 500); tap(svg, 300, 500);
+const wl = (floor().Walls || [])[0];
+if (!wl || wl.Points.length !== 2 || Math.abs(wl.Points[1].X - wl.Points[0].X - 200) > 16 || wl.Points[0].Y !== wl.Points[1].Y) fail(`the Wall tool did not draw a wall: ${JSON.stringify(floor().Walls)}`);
+if (!/Wall/.test(textOf(side())) || !/Thickness/.test(textOf(side()))) fail('a new wall is not selected with its thickness');
+const wEnd = query(sec, 'circle', true).find(c => c.dataset?.runpt === '1');
+if (!wEnd) fail('a selected wall has no handle on its end');
+const wY = wl.Points[0].Y;
+drag(wEnd, [300, 500], [300, 600]);
+if (Math.abs(floor().Walls[0].Points[1].Y - 600) > 16) fail(`dragging a wall's end did not move it: ${JSON.stringify(floor().Walls[0])}`);
+key('z', { ctrlKey: true });
+toolBtn('Door').onclick();
+tap(svg, 200, 505);
+const wDoor = floor().Openings.find(o => near1(o.Y, wY));
+if (!wDoor || Math.abs(Number(wDoor.Angle) % 180) > 0.5) fail(`a door tapped onto a standalone wall did not sit in it: ${JSON.stringify(floor().Openings)}`);
+key('z', { ctrlKey: true });
+toolBtn('Select').onclick();
+tap(query(sec, 'polyline', true).find(l => l.dataset?.wall), 150, 500);
+if (!/standalone/.test(textOf(side()))) fail('tapping a wall does not select it');
+key('Delete');
+if ((floor().Walls || []).length) fail(`Delete did not remove the wall: ${JSON.stringify(floor().Walls)}`);
+key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
+if ((floor().Walls || []).length) fail(`undo did not take the wall back: ${JSON.stringify(floor().Walls)}`);
+
 // A locked room does not move, reshape or delete.
 tap(polygonFor('kitchen'), 200, 150);
 button(' Lock', side())?.onclick?.() ?? query(side(), 'button', true).find(b => b.classList.contains('fp-lock')).onclick();

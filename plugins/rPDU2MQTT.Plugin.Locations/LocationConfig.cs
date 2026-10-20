@@ -75,6 +75,9 @@ public class FloorConfig
     [Description("Doors, windows and openings in the walls on this floor.")]
     public List<OpeningConfig> Openings { get; set; } = new();
 
+    [Description("Walls drawn on their own rather than as the side of a room: a half wall, a partition, a wall not yet closed into a room.")]
+    public List<WallConfig> Walls { get; set; } = new();
+
     [Description("Geometric constraints between the corners and walls of this floor's rooms and areas: coincident, colinear, parallel, perpendicular, horizontal, vertical, a fixed angle or a fixed length. Kept as the plan is edited.")]
     public List<PlanConstraintConfig> Constraints { get; set; } = new();
 }
@@ -183,6 +186,20 @@ public class OpeningConfig
     [DefaultValue(false)]
     [Description("Swing the door to the other side of the wall.")]
     public bool Flip { get; set; }
+}
+
+/// <summary>A wall drawn on its own, as a line with bends (#601).</summary>
+public class WallConfig
+{
+    [Description("Stable unique id for this wall.")]
+    public string Id { get; set; } = "";
+
+    [Description("Its ends and bends, in order, in drawing units.")]
+    public List<PlanPoint> Points { get; set; } = new();
+
+    [DefaultValue(0)]
+    [Description("How thick it is, in drawing units. 0 draws an interior wall's 4½ inches at the floor's scale.")]
+    public double Thickness { get; set; }
 }
 
 /// <summary>A room on a floor, outlined on the plan (#461, #463).</summary>
