@@ -107,8 +107,14 @@ await wait(50);
 
 // --- The geometry, the units and the history the editor stands on ---
 // The page's own helpers, from the plugin's script.
-const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle, planUnion, planRefsAfterMerge };\n') + '})()', sandbox);
-const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planUnion, planRefsAfterMerge } = lib;
+const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea };\n') + '})()', sandbox);
+const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea } = lib;
+// The space left enclosed between rooms is found as its own region, and regions join back into one outline.
+const ring = [rect(0, 0, 300, 100), rect(0, 200, 300, 300), rect(0, 100, 100, 200), rect(200, 100, 300, 200)];
+const hole = planFaces(ring).filter(f => !planShapeAt(ring.map((r, i) => ({ Id: 'r' + i, Shape: r })), f.at));
+if (hole.length !== 1 || Math.abs(Math.abs(planArea(hole[0].shape)) - 10000) > 1) fail(`the space enclosed by rooms was not found: ${JSON.stringify(hole)}`);
+const cut = planFaces([rect(0, 0, 200, 100), rect(150, 0, 250, 100)]);
+if (cut.length !== 3 || planJoin(cut.map(f => f.shape))?.length !== 4) fail(`overlapping outlines did not cut into three regions that join back up: ${JSON.stringify(cut)}`);
 // Merging: two rooms sharing all or part of a wall become one outline; apart or overlapping, they cannot.
 const ell = planUnion(rect(0, 0, 400, 100), rect(300, 100, 400, 300));
 if (!ell || ell.length !== 6) fail(`an L-shaped merge came out wrong: ${JSON.stringify(ell)}`);
@@ -444,6 +450,14 @@ if (roomById('office') || roomById('kitchen')?.Shape.length !== 4 || Math.max(..
 if (floor().Areas[0].Rooms.join() !== 'kitchen') fail(`the area still names the merged room: ${floor().Areas[0].Rooms}`);
 key('z', { ctrlKey: true });
 if (!roomById('office') || roomById('kitchen').Shape.length !== 4) fail('undo did not split the merged rooms');
+// Take in space: the office grows over the kitchen's right-hand strip, which the kitchen gives up.
+tap(polygonFor('office'), 600, 150);
+button('Take in space', side()).onclick();
+drag(svg, [300, 0], [400, 300]);
+const kx = Math.max(...roomById('kitchen').Shape.map(q => q.X)), ox = Math.min(...roomById('office').Shape.map(q => q.X));
+if (Math.abs(kx - 300) > 1 || Math.abs(ox - 300) > 1 || roomById('office').Shape.length !== 4) fail(`the office did not take in the strip from the kitchen: kitchen ${JSON.stringify(roomById('kitchen').Shape)}, office ${JSON.stringify(roomById('office').Shape)}`);
+key('z', { ctrlKey: true });
+if (Math.max(...roomById('kitchen').Shape.map(q => q.X)) !== 400) fail('undo did not give the kitchen its strip back');
 key('a', { ctrlKey: true });
 if (!/\d+ selected/.test(textOf(side()))) fail('Ctrl+A did not select everything');
 key('Escape');

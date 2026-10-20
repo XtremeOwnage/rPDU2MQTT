@@ -207,10 +207,92 @@ export function planUnion(a: Pt[], b: Pt[], eps = 0.5): Pt[] | null {
     loop.push(at[0]);
   }
   if (!same(at[1], loop[0])) return null;
-  // Corners left standing in the middle of a straight wall are dropped.
+  return planStraighten(loop, eps);
+}
+
+/// Corners left standing in the middle of a straight wall are dropped. Null when nothing of an outline is left.
+export function planStraighten(loop: Pt[], eps = 0.5): Pt[] | null {
   const out = loop.filter((p, i) => {
     const s = loop[(i - 1 + loop.length) % loop.length], t = loop[(i + 1) % loop.length];
-    return !same(planNearestOnSegment(p, s, t), p);
+    const n = planNearestOnSegment(p, s, t);
+    return Math.hypot(n.X - p.X, n.Y - p.Y) > eps;
   });
   return out.length >= 3 ? out : null;
+}
+
+/// Every enclosed region the outlines carve the floor into, the empty spaces between rooms included: each edge is
+/// cut wherever another edge or corner meets it, and the regions are traced edge to edge. `at` is a point just
+/// inside each one, beside its first wall.
+export function planFaces(polys: Pt[][], eps = 0.5): { shape: Pt[]; at: Pt }[] {
+  const nodes: Pt[] = [];
+  const node = (p: Pt) => {
+    let i = nodes.findIndex(q => Math.hypot(p.X - q.X, p.Y - q.Y) <= eps);
+    if (i < 0) { nodes.push({ X: p.X, Y: p.Y }); i = nodes.length - 1; }
+    return i;
+  };
+  const segs: [Pt, Pt][] = [];
+  polys.filter(p => p.length >= 3).forEach(p => p.forEach((s, i) => segs.push([s, p[(i + 1) % p.length]])));
+  const cross = (s: [Pt, Pt], t: [Pt, Pt]): Pt | null => {
+    const [a, b] = s, [c, d] = t;
+    const den = (b.X - a.X) * (d.Y - c.Y) - (b.Y - a.Y) * (d.X - c.X);
+    if (Math.abs(den) < 1e-9) return null;
+    const u = ((c.X - a.X) * (d.Y - c.Y) - (c.Y - a.Y) * (d.X - c.X)) / den;
+    const v = ((c.X - a.X) * (b.Y - a.Y) - (c.Y - a.Y) * (b.X - a.X)) / den;
+    return u > 0 && u < 1 && v > 0 && v < 1 ? { X: a.X + u * (b.X - a.X), Y: a.Y + u * (b.Y - a.Y) } : null;
+  };
+  const links = new Set<string>();
+  segs.forEach(sg => {
+    const [s, t] = sg;
+    const len = Math.hypot(t.X - s.X, t.Y - s.Y);
+    if (len <= eps) return;
+    const cuts: Pt[] = [];
+    segs.forEach(o => {
+      if (o === sg) return;
+      o.forEach(p => { const n = planNearestOnSegment(p, s, t); if (Math.hypot(n.X - p.X, n.Y - p.Y) <= eps) cuts.push(n); });
+      const x = cross(sg, o);
+      if (x) cuts.push(x);
+    });
+    const along = (p: Pt) => ((p.X - s.X) * (t.X - s.X) + (p.Y - s.Y) * (t.Y - s.Y)) / len;
+    const ids = [s, ...cuts.sort((a, b) => along(a) - along(b)), t].map(node);
+    for (let i = 1; i < ids.length; i++) if (ids[i] !== ids[i - 1]) links.add(Math.min(ids[i], ids[i - 1]) + ',' + Math.max(ids[i], ids[i - 1]));
+  });
+  const out = new Map<number, number[]>();
+  links.forEach(k => { const [a, b] = k.split(',').map(Number); (out.get(a) || out.set(a, []).get(a)!).push(b); (out.get(b) || out.set(b, []).get(b)!).push(a); });
+  const ang = (a: number, b: number) => Math.atan2(nodes[b].Y - nodes[a].Y, nodes[b].X - nodes[a].X);
+  out.forEach((list, a) => list.sort((x, y) => ang(a, x) - ang(a, y)));
+  // Arriving at b from a, carry on along the edge next round from the one back to a: each region is traced
+  // with its inside on the same hand, and the outline around each group of rooms comes out the other way round.
+  const used = new Set<string>();
+  const faces: { shape: Pt[]; at: Pt }[] = [];
+  out.forEach((list, a0) => list.forEach(b0 => {
+    if (used.has(a0 + '>' + b0)) return;
+    const loop: number[] = [];
+    let a = a0, b = b0;
+    for (let guard = 0; guard < 10000 && !used.has(a + '>' + b); guard++) {
+      used.add(a + '>' + b); loop.push(a);
+      const around = out.get(b)!;
+      const next = around[(around.indexOf(a) - 1 + around.length) % around.length];
+      a = b; b = next;
+    }
+    const shape = loop.map(i => nodes[i]);
+    if (shape.length < 3 || planArea(shape) <= eps * eps) return;
+    // A point a hair inside, off the middle of the longest wall, so it is in this region and not an island in it.
+    let best = 0, bl = -1;
+    shape.forEach((p, i) => { const q = shape[(i + 1) % shape.length]; const l = Math.hypot(q.X - p.X, q.Y - p.Y); if (l > bl) { bl = l; best = i; } });
+    const p = shape[best], q = shape[(best + 1) % shape.length];
+    const off = Math.min(eps * 2, bl / 4);
+    faces.push({ shape, at: { X: (p.X + q.X) / 2 - (q.Y - p.Y) / bl * off, Y: (p.Y + q.Y) / 2 + (q.X - p.X) / bl * off } });
+  }));
+  return faces;
+}
+
+/// Regions traced by planFaces, joined back into one outline where they meet. Null when they do not make one piece.
+export function planJoin(parts: Pt[][], eps = 0.5): Pt[] | null {
+  if (!parts.length) return null;
+  let shape = parts[0], rest = parts.slice(1);
+  for (let progress = true; progress && rest.length;) {
+    progress = false;
+    for (const r of [...rest]) { const next = planUnion(shape, r, eps); if (next) { shape = next; rest = rest.filter(x => x !== r); progress = true; } }
+  }
+  return rest.length ? null : planStraighten(shape, eps);
 }

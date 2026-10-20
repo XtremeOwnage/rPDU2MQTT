@@ -139,6 +139,8 @@ export default function mount(sec: any, host: any) {
   let floorId = remembered('floor', '');
   let mode: 'view' | 'edit' = 'view';
   let tool: Tool = 'select';
+  /// The room a rectangle drawn with the Room tool is added to, taking the space from the rooms under it.
+  let claimFor = '';
   let itemKind = remembered('kind', 'outlet');
   let doorKind = 'door';
   let wireKind = 'circuit';
@@ -349,7 +351,7 @@ export default function mount(sec: any, host: any) {
 
   const pickTool = (t: Tool) => {
     if (mode !== 'edit') mode = 'edit';
-    tool = t; draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; selectedCorner = -1;
+    tool = t; claimFor = ''; draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; selectedCorner = -1;
     render();
   };
 
@@ -1510,7 +1512,8 @@ export default function mount(sec: any, host: any) {
     if (g.kind === 'rect' && rectStart && rectEnd) {
       const poly = planRect(rectStart, rectEnd);
       rectStart = null; rectEnd = null;
-      if (Math.abs(planArea(poly)) > (0.3 * scale()) ** 2) finishOutline(poly);
+      if (Math.abs(planArea(poly)) > (0.3 * scale()) ** 2) { if (claimFor && tool === 'room') claimSpace(claimFor, poly); else finishOutline(poly); }
+      else if (!claimFor && tool !== 'area') { const gap = gapAt(p); if (gap) finishOutline(gap); else render(); }
       else render();
       return;
     }
@@ -1621,6 +1624,7 @@ export default function mount(sec: any, host: any) {
         { label: sh.Name || sh.Id, head: true },
         { label: sh.Locked ? 'Unlock it' : 'Lock it', run: onEdit(() => act(() => { if (sh.Locked) delete sh.Locked; else sh.Locked = true; }))},
         { label: 'Redraw its outline', disabled: !!sh.Locked, run: onEdit(() => { act(() => { sh.Shape = []; setConstraints(planRefsWithout(constraintsNow(), sh.Id)); }); tool = hit.area ? 'area' : sh.Outdoor ? 'zone' : 'room'; render(); })},
+        ...(hit.room ? [{ label: 'Take in space…', disabled: !!sh.Locked, run: onEdit(() => { pickTool('room'); claimFor = sh.Id; render(); })}] : []),
         { label: 'Duplicate', disabled: !!hit.area, run: onEdit(() => duplicate())},
         { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())},
         ...(editing ? [] : [toEdit]),
@@ -1629,6 +1633,7 @@ export default function mount(sec: any, host: any) {
     // Bare plot.
     return [
       { label: 'Here', head: true },
+      ...(gapAt(p) ? [{ label: 'Make this space a room', run: () => { mode = 'edit'; tool = 'room'; const gap = gapAt(p); if (gap) finishOutline(gap); } }] : []),
       { label: 'Add a room here', disabled: !floorNow(), run: () => { mode = 'edit'; tool = 'room'; render(); roomBySize(false); } },
       { label: `Place ${kindName(itemKind).toLowerCase()} here`, disabled: !floorNow(), run: () => { mode = 'edit'; tool = 'item'; render(); tap({ hit: {}, additive: false }, p); } },
       { label: 'Background image…', disabled: !floorNow(), run: () => backgroundSheet() },
@@ -1765,6 +1770,58 @@ export default function mount(sec: any, host: any) {
     }
   };
 
+  /// The empty space enclosed by rooms around a point, as an outline: tapping it with the Room tool makes it a room.
+  const gapAt = (p: Pt): Pt[] | null => {
+    const rooms = roomsNow().filter(r => (r.Shape || []).length >= 3);
+    if (planShapeAt(rooms, p)) return null;
+    const gaps = planFaces(rooms.map(r => r.Shape)).filter(f => planContains(f.shape, p) && !planShapeAt(rooms, f.at));
+    gaps.sort((a, b) => planArea(a.shape) - planArea(b.shape));
+    return gaps[0]?.shape || null;
+  };
+
+  /// A room grown over a drawn rectangle: the space is cut out of the rooms it covered, and what stood there moves in.
+  const claimSpace = (id: string, rect: Pt[]) => {
+    const keep = roomsNow().find(r => r.Id === id);
+    claimFor = ''; tool = 'select';
+    if (!keep) return render();
+    const box = (poly: Pt[]) => planBounds(poly);
+    const hits = (a: any, b: any) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    const area = box([...keep.Shape, ...rect]);
+    const near = roomsNow().filter(r => r !== keep && (r.Shape || []).length >= 3 && hits(box(r.Shape), area));
+    const faces = planFaces([keep.Shape, rect, ...near.map(r => r.Shape)]);
+    const inRect = (f: any) => planContains(rect, f.at);
+    const changed = near.filter(r => faces.some(f => inRect(f) && planContains(r.Shape, f.at)));
+    if (changed.some(r => r.Locked) || keep.Locked) return toast('Unlock the rooms involved to move space between them.', false);
+    const grown = planJoin(faces.filter(f => inRect(f) || planContains(keep.Shape, f.at)).map(f => f.shape));
+    if (!grown) return toast(`That space does not join on to ${keep.Name || keep.Id}, so it was not added.`, false);
+    const rest = new Map<any, Pt[] | null>();
+    for (const r of changed) {
+      const left = faces.filter(f => !inRect(f) && planContains(r.Shape, f.at)).map(f => f.shape);
+      const shape = left.length ? planJoin(left) : null;
+      if (left.length && !shape) return toast(`That would split ${r.Name || r.Id} in two, so nothing was changed.`, false);
+      rest.set(r, shape);
+    }
+    act(() => {
+      let cons = constraintsNow();
+      const reshape = (r: any, shape: Pt[]) => {
+        cons = planRefsAfterMerge(cons, r.Id, '', { [r.Id]: r.Shape }, shape).constraints;
+        r.Shape = shape.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) }));
+        delete r.LockedWalls;
+      };
+      reshape(keep, grown);
+      rest.forEach((shape, r) => {
+        if (shape) return reshape(r, shape);
+        cons = planRefsWithout(cons, r.Id);
+        roomsNow().splice(roomsNow().indexOf(r), 1);
+        areasNow().forEach(ar => { if ((ar.Rooms || []).includes(r.Id)) ar.Rooms = [...new Set((ar.Rooms as string[]).map(x => x === r.Id ? keep.Id : x))]; });
+      });
+      setConstraints(cons);
+      itemsIn().forEach((it: any) => { if (it.Room && it.Room !== keep.Id && changed.some(r => r.Id === it.Room) && planContains(rect, { X: it.X, Y: it.Y })) it.Room = keep.Id; });
+      itemsIn().forEach((it: any) => { if (it.Room && !roomsNow().some(r => r.Id === it.Room) && changed.some(r => r.Id === it.Room)) it.Room = keep.Id; });
+      selection = { type: 'room', id: keep.Id }; extra = [];
+    });
+  };
+
   /// A drawn outline becomes the selected room or area when it has none yet, and a new one otherwise.
   const finishOutline = (poly: Pt[]) => {
     const { w, h } = floorSize();
@@ -1879,10 +1936,15 @@ export default function mount(sec: any, host: any) {
 
   const drawOpts = () => {
     const add = (...n: any[]) => n.forEach(x => opts.appendChild(x));
-    if (tool === 'room' || tool === 'zone') {
+    if (tool === 'room' && claimFor) {
+      const who = roomsNow().find(r => r.Id === claimFor);
+      const cancel = btn('Cancel');
+      cancel.onclick = () => pickTool('select');
+      add(el('span', { class: 'fp-opts-note', text: `Drag over the space ${who?.Name || 'the room'} should take in. It is cut out of the rooms there.` }), cancel);
+    } else if (tool === 'room' || tool === 'zone') {
       const bySize = btn(tool === 'zone' ? 'Add an outdoor zone by size…' : 'Add a room by size…', 'primary');
       bySize.onclick = () => roomBySize(tool === 'zone');
-      add(bySize, el('span', { class: 'fp-opts-note', text: 'or drag across the plan.' }));
+      add(bySize, el('span', { class: 'fp-opts-note', text: 'or drag across the plan, or tap an empty space between rooms to fill it.' }));
     } else if (tool === 'outline') {
       if (draft.length) {
         const done = btn('Finish outline', 'primary');
@@ -2243,7 +2305,11 @@ export default function mount(sec: any, host: any) {
       lock.setAttribute('aria-pressed', String(held));
       lock.onclick = () => act(() => { if (s.Locked) delete s.Locked; else s.Locked = true; });
       const sq = poly.length >= 3 ? squareUp(s) : null;
-      side.appendChild(sq ? actions(lock, sq) : actions(lock));
+      const grow = btn('Take in space');
+      grow.title = 'Drag a rectangle over space this room should cover; it is cut out of the rooms there.';
+      grow.disabled = !!s.Locked || type !== 'room' || poly.length < 3;
+      grow.onclick = () => { pickTool('room'); claimFor = s.Id; render(); };
+      side.appendChild(actions(lock, ...(sq ? [sq] : []), grow));
     }
     /// A length typed for a wall keeps any length it is fixed at in step, then the rest of the plan follows.
     const settle = () => {
