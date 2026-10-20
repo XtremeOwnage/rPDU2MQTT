@@ -72,6 +72,7 @@ const planDist = (a    , b    ) => Math.hypot(a.X - b.X, a.Y - b.Y);
 
 /// Where a point lands once snapped: onto another outline's corner, else its edge, else the grid. Corners win
 /// over edges so two rooms drawn side by side share their corners exactly.
+/// `others` may hold standalone walls as two-point lines, which snap without a far face.
 /// `wall`: how thick a wall is. A point also snaps to the far face of a wall from a room, so a room drawn next door
 /// leaves the wall between them.
 function planSnap(p    , others        , threshold        , grid = 0, wall = 0)                                                      {
@@ -84,17 +85,17 @@ function planSnap(p    , others        , threshold        , grid = 0, wall = 0) 
   // Level and plumb walls nearby, each way on its own: X to the nearest upright wall, Y to the nearest level one.
   let sx                = null, sy                = null, dx = threshold, dy = threshold;
   for (const poly of others) {
-    const turn = Math.sign(planArea(poly)) || 1;
+    const turn = Math.sign(planArea(poly));
     for (let i = 0; i < poly.length; i++) {
       const a = poly[i], b = poly[(i + 1) % poly.length];
       const reach = threshold * 3;
       if (Math.abs(a.X - b.X) < 1e-6 && p.Y >= Math.min(a.Y, b.Y) - reach && p.Y <= Math.max(a.Y, b.Y) + reach) {
         const out = Math.sign(b.Y - a.Y) * turn;
-        for (const x of wall > 0 ? [a.X, a.X + out * wall] : [a.X]) { const d = Math.abs(p.X - x); if (d <= dx) { dx = d; sx = x; } }
+        for (const x of wall > 0 && turn ? [a.X, a.X + out * wall] : [a.X]) { const d = Math.abs(p.X - x); if (d <= dx) { dx = d; sx = x; } }
       }
       if (Math.abs(a.Y - b.Y) < 1e-6 && p.X >= Math.min(a.X, b.X) - reach && p.X <= Math.max(a.X, b.X) + reach) {
         const out = Math.sign(a.X - b.X) * turn;
-        for (const y of wall > 0 ? [a.Y, a.Y + out * wall] : [a.Y]) { const d = Math.abs(p.Y - y); if (d <= dy) { dy = d; sy = y; } }
+        for (const y of wall > 0 && turn ? [a.Y, a.Y + out * wall] : [a.Y]) { const d = Math.abs(p.Y - y); if (d <= dy) { dy = d; sy = y; } }
       }
     }
   }
@@ -1506,7 +1507,9 @@ function mount(sec     , host     ) {
   zoomFit.onclick = () => { fit(); drawPlan(); };
 
   const outlinesOf = (list       ) => list.filter(s => (s.Shape || []).length >= 3).map(s => s.Shape        );
-  const othersFor = (exclude     ) => outlinesOf([...roomsNow(), ...areasNow()].filter(s => s !== exclude));
+  // Standalone walls snap too, each stretch a line of its own: their ends, along them, and level with them.
+  const othersFor = (exclude     ) => [...outlinesOf([...roomsNow(), ...areasNow()].filter(s => s !== exclude)),
+    ...wallsNow().filter((w     ) => w !== exclude).flatMap((w     ) => (w.Points || []).slice(1).map((q    , i        ) => [w.Points[i], q]))];
   const snapStep = () => planSnapStep(sys()) * scale();
   /// A 2x4 wall with drywall both sides, 4½ in: the far face of a room's wall is a snap line too.
   const wallFace = () => 0.1143 * scale();
@@ -1527,7 +1530,7 @@ function mount(sec     , host     ) {
   /// A drawn point: onto a wall corner or edge when one is near, else level or plumb from the last point, else the grid.
   const drawSnap = (prev                       , p    , grid = true) => {
     if (!snapOn) return clampPt(p);
-    const sn = planSnap(p, othersFor(null), 16 * upp() * hs(), grid ? snapStep() : 0, wallFace());
+    const sn = planSnap(p, othersFor(selection?.type === 'wall' ? standaloneOf(selection.id) : null), 16 * upp() * hs(), grid ? snapStep() : 0, wallFace());
     return clampPt(sn.to === 'corner' || sn.to === 'edge' ? sn.pt : ortho(prev, sn.pt));
   };
   /// The point a wire's next bend follows on from.

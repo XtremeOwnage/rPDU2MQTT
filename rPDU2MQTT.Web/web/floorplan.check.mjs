@@ -779,6 +779,14 @@ tap(svg, 100, 500); tap(svg, 300, 500); tap(svg, 300, 500);
 const wl = (floor().Walls || [])[0];
 if (!wl || wl.Points.length !== 2 || Math.abs(wl.Points[1].X - wl.Points[0].X - 200) > 16 || wl.Points[0].Y !== wl.Points[1].Y) fail(`the Wall tool did not draw a wall: ${JSON.stringify(floor().Walls)}`);
 if (!/Wall/.test(textOf(side())) || !/Thickness/.test(textOf(side()))) fail('a new wall is not selected with its thickness');
+// A second wall started beside the first's end begins exactly on it.
+toolBtn('Wall').onclick();
+tap(svg, wl.Points[1].X + 4, wl.Points[1].Y + 5); tap(svg, wl.Points[1].X + 4, 700); tap(svg, wl.Points[1].X + 4, 700);
+const wNext = floor().Walls[1];
+if (!wNext || wNext.Points[0].X !== wl.Points[1].X || wNext.Points[0].Y !== wl.Points[1].Y) fail(`a wall started by another's end did not snap to it: ${JSON.stringify(floor().Walls)}`);
+key('z', { ctrlKey: true });
+toolBtn('Select').onclick();
+tap(query(sec, 'polyline', true).find(l => l.dataset?.wall), 150, 500);
 const wEnd = query(sec, 'circle', true).find(c => c.dataset?.runpt === '1');
 if (!wEnd) fail('a selected wall has no handle on its end');
 const wY = wl.Points[0].Y;

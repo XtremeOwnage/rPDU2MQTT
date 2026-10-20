@@ -394,7 +394,9 @@ export default function mount(sec: any, host: any) {
   zoomFit.onclick = () => { fit(); drawPlan(); };
 
   const outlinesOf = (list: any[]) => list.filter(s => (s.Shape || []).length >= 3).map(s => s.Shape as Pt[]);
-  const othersFor = (exclude: any) => outlinesOf([...roomsNow(), ...areasNow()].filter(s => s !== exclude));
+  // Standalone walls snap too, each stretch a line of its own: their ends, along them, and level with them.
+  const othersFor = (exclude: any) => [...outlinesOf([...roomsNow(), ...areasNow()].filter(s => s !== exclude)),
+    ...wallsNow().filter((w: any) => w !== exclude).flatMap((w: any) => (w.Points || []).slice(1).map((q: Pt, i: number) => [w.Points[i], q]))];
   const snapStep = () => planSnapStep(sys()) * scale();
   /// A 2x4 wall with drywall both sides, 4½ in: the far face of a room's wall is a snap line too.
   const wallFace = () => 0.1143 * scale();
@@ -415,7 +417,7 @@ export default function mount(sec: any, host: any) {
   /// A drawn point: onto a wall corner or edge when one is near, else level or plumb from the last point, else the grid.
   const drawSnap = (prev: Pt | null | undefined, p: Pt, grid = true) => {
     if (!snapOn) return clampPt(p);
-    const sn = planSnap(p, othersFor(null), 16 * upp() * hs(), grid ? snapStep() : 0, wallFace());
+    const sn = planSnap(p, othersFor(selection?.type === 'wall' ? standaloneOf(selection.id) : null), 16 * upp() * hs(), grid ? snapStep() : 0, wallFace());
     return clampPt(sn.to === 'corner' || sn.to === 'edge' ? sn.pt : ortho(prev, sn.pt));
   };
   /// The point a wire's next bend follows on from.

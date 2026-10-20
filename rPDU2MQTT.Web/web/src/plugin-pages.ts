@@ -48,8 +48,8 @@ export function pluginPageTool(p: PluginPage) {
     const mount = async () => {
       if (page) return;
       try {
-        const [js, css] = await Promise.all([fetch(base + '.js').then(r => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status))),
-          fetch(base + '.css').then(r => r.ok ? r.text() : '')]);
+        const [js, css] = await Promise.all([fetch(base + '.js', { cache: 'no-cache' }).then(r => r.ok ? r.text() : Promise.reject(new Error('HTTP ' + r.status))),
+          fetch(base + '.css', { cache: 'no-cache' }).then(r => r.ok ? r.text() : '')]);
         if (css) (document.head ?? document.body).appendChild(el('style', { text: css }));
         page = new Function(js)()(sec, pluginPageHost()) || {};
       } catch (e: any) {
