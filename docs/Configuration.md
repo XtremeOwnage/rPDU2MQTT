@@ -1482,6 +1482,7 @@ room's walls, and the Constrain tool picks their ends and stretches as it does a
 - A room keeps its level and plumb walls while a corner or wall is dragged; hold Shift to drag it free. *Square up* straightens a nearly square room once, storing no constraints.
 - *Merge rooms* (with two or more rooms selected) makes rooms that share a wall one room. The first picked keeps its name; items, areas, breakers and constraints that named the others move to it, and constraints on the wall between them are dropped.
 - With the *Room* tool, tapping an empty space enclosed by rooms makes it a room that fills it exactly. *Take in space* (a selected room's panel or right-click menu) grows the room over a rectangle you drag, cutting that space out of the rooms under it.
+- A wall drawn with the *Wall* tool right across a room, side to side, splits it into two rooms; the larger piece keeps its name. A standalone wall already across a room offers *Split the room*.
 - An unsatisfiable constraint is marked red, and the floor names it.
 - Each room lists its constraints, each removable. A wall's *Fix* button holds its length.
 - The *Constraints* checkbox shows or hides the markers.

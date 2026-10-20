@@ -211,19 +211,34 @@ export function planUnion(a: Pt[], b: Pt[], eps = 0.5): Pt[] | null {
 }
 
 /// Corners left standing in the middle of a straight wall are dropped. Null when nothing of an outline is left.
+/// A wall that ends inside a region traces out and back; those spikes go too.
 export function planStraighten(loop: Pt[], eps = 0.5): Pt[] | null {
-  const out = loop.filter((p, i) => {
-    const s = loop[(i - 1 + loop.length) % loop.length], t = loop[(i + 1) % loop.length];
-    const n = planNearestOnSegment(p, s, t);
-    return Math.hypot(n.X - p.X, n.Y - p.Y) > eps;
-  });
+  let out = loop;
+  for (let before = -1; before !== out.length && out.length >= 3;) {
+    before = out.length;
+    const cur = out;
+    out = cur.filter((p, i) => {
+      const s = cur[(i - 1 + cur.length) % cur.length], t = cur[(i + 1) % cur.length];
+      if (Math.hypot(s.X - t.X, s.Y - t.Y) <= eps) return false;
+      const n = planNearestOnSegment(p, s, t);
+      return Math.hypot(n.X - p.X, n.Y - p.Y) > eps;
+    });
+    out = out.filter((p, i) => Math.hypot(p.X - out[(i + 1) % out.length].X, p.Y - out[(i + 1) % out.length].Y) > eps);
+  }
   return out.length >= 3 ? out : null;
+}
+
+/// A room cut by a line drawn across it, wall to wall: the pieces, largest first. One piece when the line does not
+/// reach across.
+export function planSplit(room: Pt[], line: Pt[], eps = 0.5): Pt[][] {
+  const parts = planFaces([room], eps, [line]).filter(f => planContains(room, f.at)).map(f => planStraighten(f.shape, eps)).filter((x): x is Pt[] => !!x);
+  return parts.sort((a, b) => Math.abs(planArea(b)) - Math.abs(planArea(a)));
 }
 
 /// Every enclosed region the outlines carve the floor into, the empty spaces between rooms included: each edge is
 /// cut wherever another edge or corner meets it, and the regions are traced edge to edge. `at` is a point just
 /// inside each one, beside its first wall.
-export function planFaces(polys: Pt[][], eps = 0.5): { shape: Pt[]; at: Pt }[] {
+export function planFaces(polys: Pt[][], eps = 0.5, lines: Pt[][] = []): { shape: Pt[]; at: Pt }[] {
   const nodes: Pt[] = [];
   const node = (p: Pt) => {
     let i = nodes.findIndex(q => Math.hypot(p.X - q.X, p.Y - q.Y) <= eps);
@@ -232,6 +247,7 @@ export function planFaces(polys: Pt[][], eps = 0.5): { shape: Pt[]; at: Pt }[] {
   };
   const segs: [Pt, Pt][] = [];
   polys.filter(p => p.length >= 3).forEach(p => p.forEach((s, i) => segs.push([s, p[(i + 1) % p.length]])));
+  lines.forEach(l => l.slice(1).forEach((t, i) => segs.push([l[i], t])));
   const cross = (s: [Pt, Pt], t: [Pt, Pt]): Pt | null => {
     const [a, b] = s, [c, d] = t;
     const den = (b.X - a.X) * (d.Y - c.Y) - (b.Y - a.Y) * (d.X - c.X);

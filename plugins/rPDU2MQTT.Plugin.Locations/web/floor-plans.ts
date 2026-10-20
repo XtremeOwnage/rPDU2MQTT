@@ -1607,7 +1607,7 @@ export default function mount(sec: any, host: any) {
         { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())},
       ];
     }
-    if (hit.wall) return [{ label: 'Wall', head: true }, { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())}];
+    if (hit.wall) return [{ label: 'Wall', head: true }, ...(wallSplits(hit.wall).length ? [{ label: 'Split the room with it', run: onEdit(() => splitByWall(hit.wall)) }] : []), { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())}];
     if (hit.run) {
       const r = runOf(hit.run);
       return [
@@ -1859,9 +1859,60 @@ export default function mount(sec: any, host: any) {
     draft = []; hover = null;
     const clean = pts.filter((q, i) => i === 0 || Math.hypot(q.X - pts[i - 1].X, q.Y - pts[i - 1].Y) > 1e-6);
     if (clean.length < 2) { render(); return; }
-    const id = freshIn(wallsNow(), 'wall');
     tool = 'select';
+    // Drawn right across a room, wall to wall, it splits the room in two instead of standing in it.
+    const cuts = roomsNow().filter(r => (r.Shape || []).length >= 3 && !r.Locked).map(r => ({ r, parts: planSplit(r.Shape, clean) })).filter(x => x.parts.length > 1);
+    if (cuts.length) return splitRooms(cuts);
+    const id = freshIn(wallsNow(), 'wall');
     act(() => { wallsNow().push({ Id: id, Points: clean.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) })), Thickness: 0 }); selection = { type: 'wall', id }; });
+  };
+  /// A wall already standing across a room, drawn before walls split rooms, can still split it.
+  const wallSplits = (id: string) => {
+    const w = standaloneOf(id);
+    const pts: Pt[] = w?.Points || [];
+    return pts.length < 2 ? [] : roomsNow().filter(r => (r.Shape || []).length >= 3 && !r.Locked).map(r => ({ r, parts: planSplit(r.Shape, pts) })).filter(x => x.parts.length > 1);
+  };
+  const splitByWall = (id: string) => {
+    const cuts = wallSplits(id);
+    if (!cuts.length) return;
+    splitRooms(cuts, id);
+  };
+  /// Each room cut keeps its name and the largest piece; the others become new rooms beside it, taking what stands
+  /// in them, and the areas and breakers that took in the room take them in too.
+  const splitRooms = (cuts: { r: any; parts: Pt[][] }[], wall = '') => {
+    act(() => {
+      const w = wall ? standaloneOf(wall) : null;
+      if (w) wallsNow().splice(wallsNow().indexOf(w), 1);
+      let cons = w ? planRefsWithout(constraintsNow(), w.Id) : constraintsNow();
+      const round = (shape: Pt[]) => shape.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) }));
+      const born = new Map<string, string[]>();
+      cuts.forEach(({ r, parts }) => {
+        cons = planRefsAfterMerge(cons, r.Id, '', { [r.Id]: r.Shape }, parts[0]).constraints;
+        r.Shape = round(parts[0]);
+        delete r.LockedWalls;
+        const ids: string[] = [];
+        parts.slice(1).forEach((shape, i) => {
+          const name = `${r.Name || r.Id} ${i + 2}`;
+          const id = freshId(name);
+          roomsNow().push({ Id: id, Name: name, Shape: round(shape), Outdoor: !!r.Outdoor, Surface: r.Surface || '' });
+          ids.push(id);
+          itemsIn().forEach((it: any) => { if (it.Room === r.Id && planContains(shape, { X: it.X, Y: it.Y })) it.Room = id; });
+        });
+        born.set(r.Id, ids);
+      });
+      setConstraints(cons);
+      const grow = (list: string[]) => [...new Set(list.flatMap(id => [id, ...(born.get(id) || [])]))];
+      areasNow().forEach(ar => { if ((ar.Rooms || []).some((id: string) => born.has(id))) ar.Rooms = grow(ar.Rooms); });
+      const walk = (o: any) => {
+        if (!o || typeof o !== 'object') return;
+        const loc = o.Ext?.locations;
+        if (loc && Array.isArray(loc.Rooms) && loc.Rooms.some((id: string) => born.has(id))) loc.Rooms = grow(loc.Rooms);
+        Object.values(o).forEach(walk);
+      };
+      walk(flowIn());
+      selection = { type: 'room', id: cuts[0].r.Id }; extra = [];
+    });
+    toast(cuts.length === 1 ? `Split ${cuts[0].r.Name || cuts[0].r.Id} in two.` : `Split ${cuts.length} rooms.`, true);
   };
 
   /// A wire drawn between two items, or out to a bare point. Its circuit comes from whichever end knows one.
@@ -2685,6 +2736,7 @@ export default function mount(sec: any, host: any) {
     del.onclick = () => deleteSelection();
     const btns2: any[] = [];
     if (selectedBend >= 0 && selectedBend < (w.Points || []).length) { const rb = btn('Remove point'); rb.onclick = () => removeBend(); btns2.push(rb); }
+    if (wallSplits(w.Id).length) { const sp = btn('Split the room', 'primary'); sp.title = 'It runs right across a room: make it the wall between two rooms.'; sp.onclick = () => splitByWall(w.Id); btns2.unshift(sp); }
     side.appendChild(actions(...btns2, del));
     side.appendChild(el('div', { class: 'desc', text: 'Drag an end or bend to move it, a small dot to add a bend; double-click a point to remove it.' }));
   };

@@ -756,6 +756,16 @@ if (!button('On wall', sec)) fail(`a corner and a wall picked offer no On wall: 
 button('Clear', sec).onclick();
 toolBtn('Select').onclick();
 
+// A wall drawn right across a room splits it in two; undo puts it back whole.
+toolBtn('Wall').onclick();
+tap(svg, 600, 0); tap(svg, 600, 300); tap(svg, 600, 300);
+const halves = floor().Rooms.filter(r => /^Office/.test(r.Name));
+if (halves.length !== 2 || (floor().Walls || []).length || halves.some(r => Math.abs(Math.max(...r.Shape.map(q => q.X)) - Math.min(...r.Shape.map(q => q.X)) - 200) > 16)) fail(`a wall across the office did not split it: ${JSON.stringify(halves)} walls ${JSON.stringify(floor().Walls)}`);
+if (!floor().Areas[0].Rooms.includes(halves[1].Id)) fail('the area that took in the office does not take in its new half');
+key('z', { ctrlKey: true });
+if (floor().Rooms.filter(r => /^Office/.test(r.Name)).length !== 1) fail('undo did not put the split office back');
+toolBtn('Select').onclick();
+
 // A standalone wall: drawn end to end with the Wall tool, its end dragged, a door put in it, and deleted.
 toolBtn('Wall').onclick();
 tap(svg, 100, 500); tap(svg, 300, 500); tap(svg, 300, 500);
