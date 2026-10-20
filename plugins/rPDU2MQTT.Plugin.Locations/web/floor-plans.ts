@@ -742,9 +742,10 @@ export default function mount(sec: any, host: any) {
       if (room.Outdoor) shape.setAttribute('stroke-dasharray', `${7 * u} ${5 * u}`);
       if (mode === 'view' && st === 'known') shape.style.fill = shadeOf(p!.value, max);
       if (mode === 'view' && st === 'unmetered' && !room.Surface) shape.style.fill = 'url(#fp-hatch)';
-      if (focusRooms.has(room.Id)) { shape.classList.add('is-circuit'); shape.style.stroke = planCircuitColor(focus); }
       shape.dataset.room = room.Id;
       svg.appendChild(shape);
+      if (focusRooms.has(room.Id)) shape.classList.add('is-circuit');
+      if (focusRooms.has(room.Id)) svg.appendChild(svgEl('polygon', { points: points(poly), class: 'fp-circuit-tint', fill: planCircuitColor(focus) }));
       const lines = [room.Name || room.Id];
       if (mode === 'view') lines.push(st === 'known' ? fmt(p!.value) : st === 'unknown' ? 'no data' : 'unmetered');
       if (showSizes || (mode === 'edit' && sel)) lines.push(areaText(poly));
@@ -798,7 +799,12 @@ export default function mount(sec: any, host: any) {
       const colour = r.Kind === 'circuit' ? planCircuitColor(r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
       const lit = downstream ? downstream.runs.has(r.Id) : !!focus && r.Circuit === focus;
       const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (downstream ? ' is-protected' : ' is-focus') : ''}${r.Circuit ? '' : ' is-unknown'}` });
-      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : lit ? 1.8 : 1), 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
+      const sw = (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : lit ? 2.2 : 1);
+      // On the circuit being looked at, a wire is cased in the page's colour so it parts from a wall it runs along.
+      if (lit) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-case', 'stroke-width': sw + 6 * u }));
+      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': sw, 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
+      // And current is shown flowing along it, supply to load.
+      if (lit) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-flow', 'stroke-width': sw * 0.45, 'stroke-dasharray': `${3 * u} ${9 * u}`, style: `--fp-flow:${-12 * u}px` }));
       // While viewing, a branch circuit's run carries the circuit's reading at its middle.
       const cp = mode === 'view' && r.Circuit ? circuitOf(r.Circuit)?.power : undefined;
       if (mode === 'view' && r.Circuit && path.length >= 2) {
