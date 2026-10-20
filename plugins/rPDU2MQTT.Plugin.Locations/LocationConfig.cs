@@ -69,6 +69,11 @@ public class FloorConfig
     [Description("How thick an outside wall is, in drawing units. Rooms are drawn to the inside face of an outside wall, and the wall is drawn beyond it. 0 draws walls as plain lines.")]
     public double ExteriorWall { get; set; }
 
+    [Range(0, 360, ErrorMessage = "North must be between 0 and 360.")]
+    [DefaultValue(0)]
+    [Description("Which way north points on the plan, in degrees clockwise from the top: 0 is up, 90 right, 180 down. The plan's compass follows it.")]
+    public double North { get; set; }
+
     [AllowedValues("", Surfaces.Grass, Surfaces.Concrete, Surfaces.Gravel, Surfaces.Dirt, Surfaces.Pavers, Surfaces.Snow)]
     [Description("What the ground around the rooms looks like: grass, concrete, gravel, dirt, pavers or snow. Blank is plain paper.")]
     public string Ground { get; set; } = "";

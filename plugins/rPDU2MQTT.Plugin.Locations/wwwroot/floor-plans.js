@@ -1516,7 +1516,13 @@ function mount(sec     , host     ) {
   const empty = el('div', { class: 'fp-empty' });
   const fpMenu = makeMenu(() => stage, 'fp-menu');
   const menu = fpMenu.el;
-  const stage = el('div', { class: 'fp-stage' }, svg, menu, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), scaleBar, hint, empty);
+  const compass = el('div', { class: 'fp-compass', title: 'North. Set which way it points in Floor settings.' });
+  const northText = Object.assign(svgEl('text', { y: -6.5, class: 'fp-compass-text' }), { textContent: 'N' });
+  const needle = svgEl('svg', { viewBox: '-20 -20 40 40', 'aria-hidden': 'true' });
+  needle.append(svgEl('circle', { r: 17, class: 'fp-compass-ring' }), svgEl('path', { d: 'M0 -15 L5 0 L0 -3 L-5 0 Z', class: 'fp-compass-n' }),
+    svgEl('path', { d: 'M0 15 L5 0 L0 3 L-5 0 Z', class: 'fp-compass-s' }), northText);
+  compass.append(needle);
+  const stage = el('div', { class: 'fp-stage' }, svg, menu, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), compass, scaleBar, hint, empty);
   const side = el('aside', { class: 'fp-side' });
   const legend = el('div', { class: 'fp-legend' });
   const body = el('div', { class: 'fp-body' }, palette, el('div', { class: 'fp-main' }, opts, stage, legend), side);
@@ -2387,6 +2393,10 @@ function mount(sec     , host     ) {
     (scaleBar.children[0]       ).style.width = `${Math.round(px)}px`;
     scaleBar.children[1].textContent = bar.label;
     scaleBar.hidden = !floorNow();
+    const north = Number(floorNow()?.floor.North) || 0;
+    compass.hidden = !floorNow();
+    needle.style.transform = `rotate(${north}deg)`;
+    northText.setAttribute('transform', `rotate(${-north} 0 -6.5)`);
   };
 
   // --- Pointer handling ----------------------------------------------------------------------------
@@ -3398,6 +3408,11 @@ function mount(sec     , host     ) {
   // --- Side panel ----------------------------------------------------------------------------------
   const row = (label        , value     , cls = '') => el('div', { class: 'fp-row ' + cls }, el('span', { class: 'fp-row-k', text: label }), typeof value === 'string' ? el('span', { class: 'fp-row-v', text: value }) : value);
   const field = (label        , input     , hintText = '') => el('label', { class: 'fp-field' }, el('span', { class: 'fp-field-k', text: label }), input, ...(hintText ? [el('span', { class: 'fp-field-hint', text: hintText })] : []));
+  const northChoices = (f     )                     => {
+    const c                     = [['0', 'Up'], ['45', 'Up and right'], ['90', 'Right'], ['135', 'Down and right'], ['180', 'Down'], ['225', 'Down and left'], ['270', 'Left'], ['315', 'Up and left']];
+    const now = String(Number(f.North) || 0);
+    return c.some(x => x[0] === now) ? c : [...c, [now, `${now}\u00b0`]];
+  };
   const select = (choices                    , value        , onPick                     ) => {
     const s = el('select', {})                     ;
     choices.forEach(([v, t]) => s.appendChild(el('option', { value: v, text: t })));
@@ -4394,6 +4409,7 @@ function mount(sec     , host     ) {
         field('Plot width', lenInput(w, v => act(() => { f.Width = Math.max(100, Math.round(v)); viewFor = ''; }))),
         field('Plot depth', lenInput(h, v => act(() => { f.Height = Math.max(100, Math.round(v)); viewFor = ''; })))),
       field('Ground', select(PLAN_GROUNDS, f.Ground || '', v => act(() => { f.Ground = v; })), 'What is drawn around the rooms: a lawn, a slab, gravel.'),
+      field('North points', select(northChoices(f), String(Number(f.North) || 0), v => act(() => { f.North = Number(v); })), 'Which way north is on this drawing. The compass on the plan follows it.'),
       el('h4', { text: 'Walls' }),
       el('div', { class: 'fp-two' },
         field('Interior walls', lenInput(Number(f.InteriorWall) || 0, v => act(() => { f.InteriorWall = Math.max(0, planRound(v)); }), '4½ in')),
