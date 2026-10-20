@@ -68,13 +68,36 @@ const planDist = (a: Pt, b: Pt) => Math.hypot(a.X - b.X, a.Y - b.Y);
 
 /// Where a point lands once snapped: onto another outline's corner, else its edge, else the grid. Corners win
 /// over edges so two rooms drawn side by side share their corners exactly.
-export function planSnap(p: Pt, others: Pt[][], threshold: number, grid = 0): { pt: Pt; to: 'corner' | 'edge' | 'grid' | 'none' } {
+/// `wall`: how thick a wall is. A point also snaps to the far face of a wall from a room, so a room drawn next door
+/// leaves the wall between them.
+export function planSnap(p: Pt, others: Pt[][], threshold: number, grid = 0, wall = 0): { pt: Pt; to: 'corner' | 'edge' | 'grid' | 'none' } {
   let best: Pt | null = null, bestD = threshold;
   for (const poly of others) for (const v of poly) {
     const d = planDist(p, v);
     if (d <= bestD) { best = v; bestD = d; }
   }
   if (best) return { pt: { X: best.X, Y: best.Y }, to: 'corner' };
+  // Level and plumb walls nearby, each way on its own: X to the nearest upright wall, Y to the nearest level one.
+  let sx: number | null = null, sy: number | null = null, dx = threshold, dy = threshold;
+  for (const poly of others) {
+    const turn = Math.sign(planArea(poly)) || 1;
+    for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      const reach = threshold * 3;
+      if (Math.abs(a.X - b.X) < 1e-6 && p.Y >= Math.min(a.Y, b.Y) - reach && p.Y <= Math.max(a.Y, b.Y) + reach) {
+        const out = Math.sign(b.Y - a.Y) * turn;
+        for (const x of wall > 0 ? [a.X, a.X + out * wall] : [a.X]) { const d = Math.abs(p.X - x); if (d <= dx) { dx = d; sx = x; } }
+      }
+      if (Math.abs(a.Y - b.Y) < 1e-6 && p.X >= Math.min(a.X, b.X) - reach && p.X <= Math.max(a.X, b.X) + reach) {
+        const out = Math.sign(a.X - b.X) * turn;
+        for (const y of wall > 0 ? [a.Y, a.Y + out * wall] : [a.Y]) { const d = Math.abs(p.Y - y); if (d <= dy) { dy = d; sy = y; } }
+      }
+    }
+  }
+  if (sx != null || sy != null) {
+    const g = (v: number) => grid > 0 ? Math.round(v / grid) * grid : v;
+    return { pt: { X: sx ?? g(p.X), Y: sy ?? g(p.Y) }, to: 'edge' };
+  }
   bestD = threshold;
   for (const poly of others) for (let i = 0; i < poly.length; i++) {
     const q = planNearestOnSegment(p, poly[i], poly[(i + 1) % poly.length]);

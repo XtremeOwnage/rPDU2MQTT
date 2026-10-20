@@ -134,6 +134,13 @@ const s1 = planSnap({ X: 405, Y: 4 }, [office], 12, 10);
 if (s1.to !== 'corner' || s1.pt.X !== 400 || s1.pt.Y !== 0) fail(`a point beside a corner did not snap to it: ${JSON.stringify(s1)}`);
 const s2 = planSnap({ X: 395, Y: 150 }, [office], 12, 10);
 if (s2.to !== 'edge' || s2.pt.X !== 400 || s2.pt.Y !== 150) fail(`a point beside an edge did not snap onto it: ${JSON.stringify(s2)}`);
+// Next door, a point snaps to the far face of the wall, and each way on its own to the walls it is near.
+const s3 = planSnap({ X: 386, Y: 147 }, [office], 12, 10, 11.4);
+if (s3.to !== 'edge' || Math.abs(s3.pt.X - 388.6) > 0.01 || s3.pt.Y !== 150) fail(`a point beside a room did not snap to the far face of its wall: ${JSON.stringify(s3)}`);
+const s4 = planSnap({ X: 386, Y: 147 }, [office.slice().reverse()], 12, 10, 11.4);
+if (Math.abs(s4.pt.X - 388.6) > 0.01) fail(`the wall face depends on which way the room was drawn: ${JSON.stringify(s4)}`);
+const s5 = planSnap({ X: 412, Y: 150 }, [office], 12, 10, 11.4);
+if (s5.pt.X !== 400) fail(`a point inside a room snapped to the outside face of its wall: ${JSON.stringify(s5)}`);
 if (!planContains(office, { X: 500, Y: 100 }) || planContains(office, { X: 100, Y: 100 })) fail('containment is wrong');
 if (planShapeAt([{ Id: 'office', Shape: office }, { Id: 'closet', Shape: rect(420, 20, 480, 80) }], { X: 450, Y: 50 })?.Id !== 'closet') fail('a point in a closet inside a room is not in the closet');
 const c = planCentroid(planRect({ X: 0, Y: 0 }, { X: 100, Y: 50 }));
@@ -455,7 +462,7 @@ tap(polygonFor('office'), 600, 150);
 button('Take in space', side()).onclick();
 drag(svg, [300, 0], [400, 300]);
 const kx = Math.max(...roomById('kitchen').Shape.map(q => q.X)), ox = Math.min(...roomById('office').Shape.map(q => q.X));
-if (Math.abs(kx - 300) > 1 || Math.abs(ox - 300) > 1 || roomById('office').Shape.length !== 4) fail(`the office did not take in the strip from the kitchen: kitchen ${JSON.stringify(roomById('kitchen').Shape)}, office ${JSON.stringify(roomById('office').Shape)}`);
+if (Math.abs(kx - 300) > 4 || Math.abs(kx - ox) > 0.5 || roomById('office').Shape.length !== 4) fail(`the office did not take in the strip from the kitchen: kitchen ${JSON.stringify(roomById('kitchen').Shape)}, office ${JSON.stringify(roomById('office').Shape)}`);
 key('z', { ctrlKey: true });
 if (Math.max(...roomById('kitchen').Shape.map(q => q.X)) !== 400) fail('undo did not give the kitchen its strip back');
 key('a', { ctrlKey: true });
@@ -710,7 +717,7 @@ tap(polygonFor('kitchen'), 200, 150);
 if (!button('Square up', side())?.disabled) fail('a square room offers to be squared up');
 drag(kCorner(2), [400, 300], [450, 350]);
 const sqK = roomById('kitchen').Shape, sqO = roomById('office').Shape;
-if (!(sqK[0].X === 0 && sqK[0].Y === 0 && sqK[1].Y === 0 && sqK[1].X === sqK[2].X && sqK[2].Y === sqK[3].Y && sqK[3].X === 0 && near1(sqK[2].X, 450) && near1(sqK[2].Y, 350)))
+if (!(sqK[0].X === 0 && sqK[0].Y === 0 && sqK[1].Y === 0 && sqK[1].X === sqK[2].X && sqK[2].Y === sqK[3].Y && sqK[3].X === 0 && Math.abs(sqK[2].X - 450) < 16 && Math.abs(sqK[2].Y - 350) < 16))
   fail(`a room did not stay a rectangle while its corner was dragged: ${JSON.stringify(sqK)}`);
 if (sqO[0].X !== sqK[1].X || sqO[2].Y !== sqK[2].Y || sqO[1].X !== 800) fail(`the office did not follow the corners it shares, square: ${JSON.stringify(roomById('office').Shape)}`);
 key('z', { ctrlKey: true });

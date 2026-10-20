@@ -396,10 +396,12 @@ export default function mount(sec: any, host: any) {
   const outlinesOf = (list: any[]) => list.filter(s => (s.Shape || []).length >= 3).map(s => s.Shape as Pt[]);
   const othersFor = (exclude: any) => outlinesOf([...roomsNow(), ...areasNow()].filter(s => s !== exclude));
   const snapStep = () => planSnapStep(sys()) * scale();
+  /// A 2x4 wall with drywall both sides, 4½ in: the far face of a room's wall is a snap line too.
+  const wallFace = () => 0.1143 * scale();
   const clampPt = (p: Pt) => { const { w, h } = floorSize(); return { X: planRound(Math.max(0, Math.min(w, p.X))), Y: planRound(Math.max(0, Math.min(h, p.Y))) }; };
   const snapped = (p: Pt, exclude: any = null) => {
     if (!snapOn) return clampPt(p);
-    return clampPt(planSnap(p, othersFor(exclude), 12 * upp(), snapStep()).pt);
+    return clampPt(planSnap(p, othersFor(exclude), 12 * upp(), snapStep(), wallFace()).pt);
   };
   /// Within a few degrees of level or plumb from the last point, a line is made exactly so.
   const ortho = (prev: Pt | null | undefined, q: Pt) => {
@@ -413,7 +415,7 @@ export default function mount(sec: any, host: any) {
   /// A drawn point: onto a wall corner or edge when one is near, else level or plumb from the last point, else the grid.
   const drawSnap = (prev: Pt | null | undefined, p: Pt, grid = true) => {
     if (!snapOn) return clampPt(p);
-    const sn = planSnap(p, othersFor(null), 16 * upp() * hs(), grid ? snapStep() : 0);
+    const sn = planSnap(p, othersFor(null), 16 * upp() * hs(), grid ? snapStep() : 0, wallFace());
     return clampPt(sn.to === 'corner' || sn.to === 'edge' ? sn.pt : ortho(prev, sn.pt));
   };
   /// The point a wire's next bend follows on from.
