@@ -71,13 +71,19 @@
   backdrop-filter: blur(6px);
 }
 .fp-hint[hidden] { display: none; }
-.fp-compass { position: absolute; right: 12px; bottom: 12px; width: 60px; height: 60px; pointer-events: auto; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
+.fp-compass { position: absolute; left: 12px; top: 12px; width: 72px; height: 72px; pointer-events: auto; filter: drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
+.fp-show { position: relative; }
+.fp-show > summary { list-style: none; cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; }
+.fp-show > summary::-webkit-details-marker { display: none; }
+.fp-show > summary::after { content: '\25BE'; margin-left: 6px; opacity: .7; }
+.fp-show-menu { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; gap: 2px; min-width: 210px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-sm); box-shadow: 0 6px 20px rgba(0,0,0,.25); }
 .fp-compass[hidden] { display: none; }
 .fp-compass svg { width: 100%; height: 100%; transition: transform .2s; }
 .fp-compass-ring { fill: var(--panel); fill-opacity: .85; stroke: var(--border); stroke-width: 1.5; }
 .fp-compass-n { fill: var(--bad, #e5484d); }
+.fp-compass-text.is-n { fill: var(--bad, #e5484d); }
 .fp-compass-s { fill: var(--muted, #8a8f98); }
-.fp-compass-text { fill: var(--fg); font-size: 7px; font-weight: 800; text-anchor: middle; dominant-baseline: middle; }
+.fp-compass-text { fill: var(--muted); font-size: 8.5px; font-weight: 800; text-anchor: middle; dominant-baseline: middle; }
 .fp-scalebar { position: absolute; left: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 2px; pointer-events: none; }
 .fp-scalebar[hidden] { display: none; }
 .fp-scalebar-bar { height: 6px; border: 2px solid var(--fg); border-top: 0; }
@@ -111,6 +117,7 @@
   fill: var(--fg); text-anchor: middle; dominant-baseline: middle; font-weight: 700; pointer-events: none;
   paint-order: stroke; stroke: var(--panel); stroke-width: .32em; stroke-linejoin: round;
 }
+.fp-label.is-movable { pointer-events: auto; cursor: move; }
 .fp-label .fp-label-sub { font-weight: 500; fill: var(--muted); }
 .fp-label.is-known .is-reading { fill: var(--fg); font-weight: 600; }
 .fp-label.is-unknown .is-reading { fill: var(--warn); }

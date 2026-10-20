@@ -248,6 +248,12 @@ public class RoomConfig
     [Description("Walls that are locked in place, by number: wall n runs from corner n to the next.")]
     public List<int> LockedWalls { get; set; } = new();
 
+    [Description("Where the room's name is drawn, across the plan in drawing units. Blank puts it in the widest part of the room.")]
+    public double? LabelX { get; set; }
+
+    [Description("Where the room's name is drawn, down the plan in drawing units. Blank puts it in the widest part of the room.")]
+    public double? LabelY { get; set; }
+
     [Description("The Home Assistant area this room was linked to, by area id. Written when rooms are published to Home Assistant, so a rename updates the same area.")]
     public string HaArea { get; set; } = "";
 

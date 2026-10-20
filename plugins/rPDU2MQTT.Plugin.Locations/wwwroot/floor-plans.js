@@ -38,6 +38,31 @@ function planCentroid(poly      )     {
   return { X: cx / (6 * a), Y: cy / (6 * a) };
 }
 
+/// Where a room's name goes by default: the point inside it furthest from its walls, so an L-shaped hall is labelled
+/// in its widest part rather than at a centre that may fall outside it. A plain rectangle gets its centre.
+function planLabelPoint(poly      )     {
+  const c = planCentroid(poly);
+  if (poly.length < 3) return c;
+  const edge = (p    ) => {
+    let d = Infinity;
+    for (let i = 0; i < poly.length; i++) { const q = planNearestOnSegment(p, poly[i], poly[(i + 1) % poly.length]); d = Math.min(d, Math.hypot(q.X - p.X, q.Y - p.Y)); }
+    return planContains(poly, p) ? d : -d;
+  };
+  let best = c, bd = edge(c);
+  const xs = poly.map(p => p.X), ys = poly.map(p => p.Y);
+  let x0 = Math.min(...xs), y0 = Math.min(...ys), w = Math.max(...xs) - x0, h = Math.max(...ys) - y0;
+  // A coarse grid, then finer ones round the best so far; the centroid wins a near tie, so symmetric rooms keep it.
+  for (let pass = 0; pass < 4; pass++) {
+    const n = 24;
+    for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) {
+      const p = { X: x0 + w * i / n, Y: y0 + h * j / n }, d = edge(p);
+      if (d > bd * 1.02 + 1e-9) { best = p; bd = d; }
+    }
+    x0 = best.X - w / 8; y0 = best.Y - h / 8; w /= 4; h /= 4;
+  }
+  return best;
+}
+
 /// Is a point inside an outline? Even-odd ray casting; a point on an edge may land either side.
 function planContains(poly      , p    )          {
   let inside = false;
@@ -1319,6 +1344,13 @@ function mount(sec     , host     ) {
   let snapOn = remembered('snap', '1') === '1';
   let showWiring = remembered('wiring', '1') === '1';
   let showSizes = remembered('sizes', '0') === '1';
+  /// What the plan leaves out, by kind of item, and the compass: chosen under Show and kept per browser.
+  const SHOW_GROUPS                               = [
+    ['outlets', 'Outlets and switches', ['outlet', 'switch', 'junction']], ['lights', 'Lights and fans', ['fixture', 'fan']],
+    ['appliances', 'Appliances and devices', ['appliance', 'device', 'hvac', 'ev-charger']], ['power', 'Panels and power', PLAN_SUPPLY_KINDS],
+  ];
+  const hidden = new Set(remembered('hide', '').split(',').filter(Boolean));
+  const shown = (item     ) => !hidden.has((SHOW_GROUPS.find(g => g[2].includes(item.Kind)) || SHOW_GROUPS[2])[0]);
   let period = remembered('period', 'now');
   let selection            = null;
   /// Everything else selected with it: Shift, Ctrl or ⌘ adds to a selection, and a box drag selects all it holds.
@@ -1517,10 +1549,14 @@ function mount(sec     , host     ) {
   const fpMenu = makeMenu(() => stage, 'fp-menu');
   const menu = fpMenu.el;
   const compass = el('div', { class: 'fp-compass', title: 'North. Set which way it points in Floor settings.' });
-  const northText = Object.assign(svgEl('text', { y: -6.5, class: 'fp-compass-text' }), { textContent: 'N' });
-  const needle = svgEl('svg', { viewBox: '-20 -20 40 40', 'aria-hidden': 'true' });
-  needle.append(svgEl('circle', { r: 17, class: 'fp-compass-ring' }), svgEl('path', { d: 'M0 -15 L5 0 L0 -3 L-5 0 Z', class: 'fp-compass-n' }),
-    svgEl('path', { d: 'M0 15 L5 0 L0 3 L-5 0 Z', class: 'fp-compass-s' }), northText);
+  // The four points ride round the ring with north; each letter is turned back upright as it goes.
+  const points4 = (['N', 'E', 'S', 'W']         ).map((t, i) => {
+    const a = i * Math.PI / 2, x = Math.round(Math.sin(a) * 20.5 * 10) / 10, y = Math.round(-Math.cos(a) * 20.5 * 10) / 10;
+    return { x, y, el: Object.assign(svgEl('text', { x, y, class: 'fp-compass-text' + (t === 'N' ? ' is-n' : '') }), { textContent: t }) };
+  });
+  const needle = svgEl('svg', { viewBox: '-30 -30 60 60', 'aria-hidden': 'true' });
+  needle.append(svgEl('circle', { r: 28, class: 'fp-compass-ring' }), svgEl('path', { d: 'M0 -14 L4 0 L0 -2 L-4 0 Z', class: 'fp-compass-n' }),
+    svgEl('path', { d: 'M0 14 L4 0 L0 2 L-4 0 Z', class: 'fp-compass-s' }), ...points4.map(q => q.el));
   compass.append(needle);
   const stage = el('div', { class: 'fp-stage' }, svg, menu, el('div', { class: 'fp-zoom' }, zoomIn, zoomOut, zoomFit), compass, scaleBar, hint, empty);
   const side = el('aside', { class: 'fp-side' });
@@ -1723,7 +1759,7 @@ function mount(sec     , host     ) {
     });
     runsNow().forEach(r => { if ([r.From, r.To].some(id => [...items].some((it     ) => it.Id === id))) runs.add(r); });
     return {
-      shapes: [...shapes].map(sh => ({ sh, pts: sh.Shape.map((q    ) => ({ ...q })) })),
+      shapes: [...shapes].map(sh => ({ sh, pts: sh.Shape.map((q    ) => ({ ...q })), lab: sh.LabelX != null && sh.LabelY != null ? { X: Number(sh.LabelX), Y: Number(sh.LabelY) } : null })),
       items: [...items].map(it => ({ it, X: Number(it.X) || 0, Y: Number(it.Y) || 0 })),
       openings: [...openings].map(o => ({ o, X: Number(o.X) || 0, Y: Number(o.Y) || 0 })),
       runs: [...runs].map(r => ({ r, pts: (r.Points || []).map((q    ) => ({ ...q })) })),
@@ -1731,7 +1767,10 @@ function mount(sec     , host     ) {
     };
   };
   const shift = (m                            , dx        , dy        ) => {
-    m.shapes.forEach(x => { x.sh.Shape = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
+    m.shapes.forEach(x => {
+      x.sh.Shape = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) }));
+      if (x.lab) { x.sh.LabelX = planRound(x.lab.X + dx); x.sh.LabelY = planRound(x.lab.Y + dy); }
+    });
     m.items.forEach(x => { x.it.X = planRound(x.X + dx); x.it.Y = planRound(x.Y + dy); });
     m.openings.forEach(x => { x.o.X = planRound(x.X + dx); x.o.Y = planRound(x.Y + dy); });
     [...m.runs, ...m.walls].forEach(x => { x.r.Points = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
@@ -1906,8 +1945,8 @@ function mount(sec     , host     ) {
       while (at < words.length - 1 && words.slice(0, at + 1).join(' ').length <= name.length / 2) at++;
       return [words.slice(0, at).join(' '), words.slice(at).join(' ')];
     };
-    const label = (poly      , given          , cls        ) => {
-      const c = planCentroid(poly), b = planBounds(poly);
+    const label = (poly      , given          , cls        , at     ) => {
+      const c = at || planLabelPoint(poly), b = planBounds(poly);
       const [name, ...rest] = given, split = broken(name);
       const tries = [given, split && [...split, ...rest], [name], split].filter(Boolean)              ;
       let lines                  = null, f = font;
@@ -1956,7 +1995,10 @@ function mount(sec     , host     ) {
       const lines = [room.Name || room.Id];
       if (mode === 'view' && !trace) lines.push(st === 'known' ? fmt(p .value) : st === 'unknown' ? 'no data' : 'unmetered');
       if (showSizes || (mode === 'edit' && sel)) lines.push(areaText(insideOf(room, mass)));
-      labels.push(label(poly, lines, 'fp-label' + (mode === 'view' ? ' is-' + st : '') + (room.Outdoor ? ' is-outdoor' : '')));
+      const moved = room.LabelX != null && room.LabelY != null ? { X: Number(room.LabelX), Y: Number(room.LabelY) } : undefined;
+      const lab = label(poly, lines, 'fp-label' + (mode === 'view' ? ' is-' + st : '') + (room.Outdoor ? ' is-outdoor' : '') + (mode === 'edit' && tool === 'select' && !room.Locked ? ' is-movable' : ''), moved);
+      if (lab) lab.dataset.label = room.Id;
+      labels.push(lab);
     });
 
     // The walls at the floor's thickness: between rooms on their middle, outside walls beyond the rooms. The selected
@@ -2074,6 +2116,7 @@ function mount(sec     , host     ) {
     const r = 12 * u;
     itemsNow().forEach((item     ) => {
       const sel = isSel('item', item.Id);
+      if (!sel && !shown(item)) return;
       const supply = PLAN_SUPPLY_KINDS.includes(item.Kind);
       const known = supply || (!!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true));
       const prot = !!downstream?.items.has(item.Id);
@@ -2394,9 +2437,9 @@ function mount(sec     , host     ) {
     scaleBar.children[1].textContent = bar.label;
     scaleBar.hidden = !floorNow();
     const north = Number(floorNow()?.floor.North) || 0;
-    compass.hidden = !floorNow();
+    compass.hidden = !floorNow() || hidden.has('compass');
     needle.style.transform = `rotate(${north}deg)`;
-    northText.setAttribute('transform', `rotate(${-north} 0 -6.5)`);
+    points4.forEach(q => q.el.setAttribute('transform', `rotate(${-north} ${q.x} ${q.y})`));
   };
 
   // --- Pointer handling ----------------------------------------------------------------------------
@@ -2419,7 +2462,7 @@ function mount(sec     , host     ) {
       if (d.run) return { run: d.run           };
       if (d.wall) return { wall: d.wall           };
       if (d.area) return { area: d.area           };
-      if (d.room) return { room: d.room           };
+      if (d.room || d.label) return { room: (d.room || d.label)           };
     }
     return {}       ;
   };
@@ -2521,6 +2564,8 @@ function mount(sec     , host     ) {
   };
   svg.addEventListener('pointerleave', () => { if (grabLit) { grabLit = null; drawPlan(); } svg.style.cursor = ''; });
 
+  /// The room whose name was pressed, if it was one.
+  const labelOf = (e     )         => { for (let n = e.target; n && n !== svg; n = n.parentNode || n.parent) if (n.dataset?.label) return n.dataset.label          ; return ''; };
   svg.addEventListener('pointerdown', (e     ) => {
     // The middle button pans in every tool, as it does in drawing programs; the right button is left to the browser.
     if (e.button != null && e.button > 1) return;
@@ -2547,6 +2592,14 @@ function mount(sec     , host     ) {
       gesture.orig = { w: Number(f.Width) || 1000, h: Number(f.Height) || 700 };
       gesture.all = movable(everything());
       gesture.box = boundsOf(gesture.all);
+    } else if (mode === 'edit' && tool === 'select' && labelOf(e) && !additive) {
+      // A room's name drags on its own, to wherever in the room reads best.
+      const room = roomsNow().find(r => r.Id === labelOf(e));
+      if (room?.Locked) { gesture.kind = 'none'; saidLocked(); }
+      else if (room) {
+        const at = room.LabelX != null && room.LabelY != null ? { X: Number(room.LabelX), Y: Number(room.LabelY) } : planLabelPoint(room.Shape);
+        gesture.kind = 'label'; gesture.room = room; gesture.off = { X: at.X - p.X, Y: at.Y - p.Y };
+      }
     } else if (mode === 'edit' && tool === 'select') {
       const target = extra.length ? null : shapeOf(selection);
       const run = lineSel();
@@ -2620,6 +2673,9 @@ function mount(sec     , host     ) {
       vb = { ...gesture.vb, x: gesture.vb.x - (e.clientX - gesture.sx) / sc, y: gesture.vb.y - (e.clientY - gesture.sy) / sc };
     } else if (k === 'marquee') {
       marquee = { a: gesture.start, b: p };
+    } else if (k === 'label') {
+      begin();
+      gesture.room.LabelX = planRound(p.X + gesture.off.X); gesture.room.LabelY = planRound(p.Y + gesture.off.Y);
     } else if (k === 'plot') {
       begin();
       // Growing to the left or top moves everything drawn along with the edge, so the drawing stays put on screen.
@@ -2801,7 +2857,12 @@ function mount(sec     , host     ) {
   svg.addEventListener('pointerup', endPointer);
   svg.addEventListener('pointercancel', (e     ) => { pointers.delete(e.pointerId); gesture = null; pinch = null; marquee = null; dragging = false; rectStart = null; rectEnd = null; drawPlan(); });
   svg.addEventListener('pointerleave', () => { if (hover) { hover = null; drawPlan(); } });
-  svg.addEventListener('dblclick', () => { if (wireDraft) finishWire(''); else if (tool === 'wall' && draft.length >= 2) finishWall(draft); else if (draft.length >= 3) finishOutline(draft); });
+  svg.addEventListener('dblclick', (e     ) => {
+    // Double-clicking a moved name puts it back where the room would put it.
+    const id = mode === 'edit' && tool === 'select' ? labelOf(e) : '';
+    const room = id && roomsNow().find(r => r.Id === id);
+    if (room && room.LabelX != null && !room.Locked) { act(() => { delete room.LabelX; delete room.LabelY; }); return; }
+    if (wireDraft) finishWire(''); else if (tool === 'wall' && draft.length >= 2) finishWall(draft); else if (draft.length >= 3) finishOutline(draft); });
 
   // --- The menu a right-click opens, over whatever it was aimed at ----------------------------------
 
@@ -3220,6 +3281,15 @@ function mount(sec     , host     ) {
     }
     subBar.appendChild(check('Wiring', showWiring, v => { showWiring = v; remember('wiring', v ? '1' : '0'); drawPlan(); }, 'Show cable runs, and ring each item in its circuit’s colour.'));
     if (constraintsNow().length && !(mode === 'view' && window.matchMedia?.('(max-width: 560px)').matches)) subBar.appendChild(check('Constraints', showCons, v => { showCons = v; remember('cons', v ? '1' : '0'); drawPlan(); }, 'Show the constraints held on this floor: fixed lengths, angles, parallel and square walls.'));
+    const show = el('details', { class: 'fp-show' })                      ;
+    const pick = el('div', { class: 'fp-show-menu' });
+    [...SHOW_GROUPS.map(g => [g[0], g[1]]), ['compass', 'Compass']].forEach(([k, label]) => pick.appendChild(check(label, !hidden.has(k), v => {
+      if (v) hidden.delete(k); else hidden.add(k);
+      remember('hide', [...hidden].join(',')); drawPlan();
+    })));
+    show.append(el('summary', { class: 'ld-inst', text: hidden.size ? `Show (${hidden.size} hidden)` : 'Show', title: 'Choose which kinds of item the plan draws, and whether it shows the compass.' }), pick);
+    show.addEventListener('toggle', () => { if (!show.open) drawSub(); });
+    subBar.appendChild(show);
     subBar.appendChild(check('Sizes', showSizes, v => { showSizes = v; remember('sizes', v ? '1' : '0'); drawPlan(); }, 'Show every wall’s length and each room’s floor area.'));
     if (mode === 'edit' && floorBelow()) subBar.appendChild(check('Floor below', showBelow, v => { showBelow = v; remember('below', v ? '1' : '0'); drawPlan(); }, 'Show the floor beneath this one faintly, to line this one up with it.'));
     if (mode === 'edit') subBar.appendChild(check('Snap', snapOn, v => { snapOn = v; remember('snap', v ? '1' : '0'); }, 'Corners snap to other rooms’ corners and edges, and everything to a fine grid.'));

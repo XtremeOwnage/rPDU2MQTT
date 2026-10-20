@@ -107,8 +107,8 @@ await wait(50);
 
 // --- The geometry, the units and the history the editor stands on ---
 // The page's own helpers, from the plugin's script.
-const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea, planWallMass, planInset };\n') + '})()', sandbox);
-const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea, planWallMass, planInset } = lib;
+const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea, planWallMass, planInset, planLabelPoint };\n') + '})()', sandbox);
+const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea, planWallMass, planInset, planLabelPoint } = lib;
 // The space left enclosed between rooms is found as its own region, and regions join back into one outline.
 const ring = [rect(0, 0, 300, 100), rect(0, 200, 300, 300), rect(0, 100, 100, 200), rect(200, 100, 300, 200)];
 const hole = planFaces(ring).filter(f => !planShapeAt(ring.map((r, i) => ({ Id: 'r' + i, Shape: r })), f.at));
@@ -143,6 +143,14 @@ const s5 = planSnap({ X: 412, Y: 150 }, [office], 12, 10, 11.4);
 if (s5.pt.X !== 400) fail(`a point inside a room snapped to the outside face of its wall: ${JSON.stringify(s5)}`);
 if (!planContains(office, { X: 500, Y: 100 }) || planContains(office, { X: 100, Y: 100 })) fail('containment is wrong');
 if (planShapeAt([{ Id: 'office', Shape: office }, { Id: 'closet', Shape: rect(420, 20, 480, 80) }], { X: 450, Y: 50 })?.Id !== 'closet') fail('a point in a closet inside a room is not in the closet');
+{
+  // An L-shaped hall is named in its widest part, inside it; a rectangle at its centre.
+  const L = [{ X: 0, Y: 0 }, { X: 400, Y: 0 }, { X: 400, Y: 40 }, { X: 40, Y: 40 }, { X: 40, Y: 400 }, { X: 0, Y: 400 }];
+  const at = planLabelPoint(L);
+  if (!planContains(L, at)) fail(`an L-shaped room's name fell outside it: ${JSON.stringify(at)}`);
+  const r = planLabelPoint(planRect({ X: 0, Y: 0 }, { X: 100, Y: 50 }));
+  if (Math.abs(r.X - 50) > 1 || Math.abs(r.Y - 25) > 1) fail(`a rectangle's name is not at its middle: ${JSON.stringify(r)}`);
+}
 const c = planCentroid(planRect({ X: 0, Y: 0 }, { X: 100, Y: 50 }));
 if (c.X !== 50 || c.Y !== 25) fail(`the centre of a rectangle is not its middle: ${JSON.stringify(c)}`);
 const near = (a, b) => Math.abs(a - b) < 1e-6;

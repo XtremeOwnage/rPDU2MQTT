@@ -34,6 +34,31 @@ export function planCentroid(poly: Pt[]): Pt {
   return { X: cx / (6 * a), Y: cy / (6 * a) };
 }
 
+/// Where a room's name goes by default: the point inside it furthest from its walls, so an L-shaped hall is labelled
+/// in its widest part rather than at a centre that may fall outside it. A plain rectangle gets its centre.
+export function planLabelPoint(poly: Pt[]): Pt {
+  const c = planCentroid(poly);
+  if (poly.length < 3) return c;
+  const edge = (p: Pt) => {
+    let d = Infinity;
+    for (let i = 0; i < poly.length; i++) { const q = planNearestOnSegment(p, poly[i], poly[(i + 1) % poly.length]); d = Math.min(d, Math.hypot(q.X - p.X, q.Y - p.Y)); }
+    return planContains(poly, p) ? d : -d;
+  };
+  let best = c, bd = edge(c);
+  const xs = poly.map(p => p.X), ys = poly.map(p => p.Y);
+  let x0 = Math.min(...xs), y0 = Math.min(...ys), w = Math.max(...xs) - x0, h = Math.max(...ys) - y0;
+  // A coarse grid, then finer ones round the best so far; the centroid wins a near tie, so symmetric rooms keep it.
+  for (let pass = 0; pass < 4; pass++) {
+    const n = 24;
+    for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) {
+      const p = { X: x0 + w * i / n, Y: y0 + h * j / n }, d = edge(p);
+      if (d > bd * 1.02 + 1e-9) { best = p; bd = d; }
+    }
+    x0 = best.X - w / 8; y0 = best.Y - h / 8; w /= 4; h /= 4;
+  }
+  return best;
+}
+
 /// Is a point inside an outline? Even-odd ray casting; a point on an edge may land either side.
 export function planContains(poly: Pt[], p: Pt): boolean {
   let inside = false;
