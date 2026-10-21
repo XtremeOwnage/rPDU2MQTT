@@ -1344,6 +1344,8 @@ function mount(sec     , host     ) {
   let snapOn = remembered('snap', '1') === '1';
   let showWiring = remembered('wiring', '1') === '1';
   let showSizes = remembered('sizes', '0') === '1';
+  /// The Circuits view coloured by how hard each circuit is working against its breaker, instead of by circuit.
+  let showLoad = remembered('load', '0') === '1';
   /// What the plan leaves out, by kind of item, and the compass: chosen under Show and kept per browser.
   const SHOW_GROUPS                               = [
     ['outlets', 'Outlets and switches', ['outlet', 'switch', 'junction']], ['lights', 'Lights and fans', ['fixture', 'fan']],
@@ -1415,6 +1417,11 @@ function mount(sec     , host     ) {
   const circuitOf = (ref        ) => live?.circuits.find(c => c.ref === ref) || null;
   const circuitLabel = (c         ) => `${c.panelName} · ${c.number}${c.description ? ' — ' + c.description : ''}`;
   const refLabel = (ref        ) => { const c = circuitOf(ref); return c ? circuitLabel(c) : ref; };
+  /// A circuit's measured current as a share of its breaker's rating; null with no current reading or no rating.
+  const loadOf = (ref        ) => { const c = circuitOf(ref); return c?.current == null || !c.amps ? null : c.current / c.amps; };
+  /// The panel schedule's bands: easy under 60%, busy to 80%, over from there. Unmetered is left uncoloured.
+  const loadColor = (ref        ) => { const l = loadOf(ref); return l == null ? null : l >= 0.8 ? 'var(--bad)' : l >= 0.6 ? 'var(--warn)' : 'var(--good)'; };
+  const loadText = (ref        ) => { const c = circuitOf(ref), l = loadOf(ref); return l == null ? 'load unknown' : `${c .current .toFixed(1)} A of ${c .amps} A — ${Math.round(l * 100)}%`; };
   const nodeLabel = (id        ) => live?.nodes.find(n => n.id === id)?.label || id;
   const kindName = (k        ) => PLAN_KINDS.find(x => x[0] === k)?.[1] || k;
   const itemName = (it     ) => it.Label || kindName(it.Kind || 'outlet');
@@ -1927,6 +1934,7 @@ function mount(sec     , host     ) {
     const focus = focusCircuit();
     // The Circuits view: every circuit in its own colour, its wires drawn bold, and the rooms left plain to trace them over.
     const trace = mode === 'view' && period === 'circuits';
+    const loadOn = trace && showLoad;
     // The rooms the focused circuit serves: the breaker's own list, and every room something on it is in.
     const focusRooms = new Set        (focus ? [...(circuitOf(focus)?.rooms || []), ...itemsIn().filter((i     ) => i.Circuit === focus).map((i     ) => i.Room).filter(Boolean)] : []);
     // A selected GFCI shows what it protects, in green, among the rest of its circuit.
@@ -2073,7 +2081,9 @@ function mount(sec     , host     ) {
       const lit = prot || onFocus(r);
       if (!showWiring && !trace && mode !== 'edit' && !lit && !sel) return;
       const dim = !!(focus || downstream) && !lit;
-      const colour = r.Kind === 'circuit' ? planCircuitColor(lit && focus ? focus : r.Circuit) : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
+      const onRef = lit && focus ? focus : r.Circuit || [r.From, r.To].map(id => id && itemOf(id)?.Circuit).find(Boolean) || '';
+      const colour = r.Kind === 'circuit' ? (loadOn ? loadColor(onRef) || 'var(--muted)' : planCircuitColor(lit && focus ? focus : r.Circuit))
+        : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
       const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit ? '' : ' is-unknown'}` });
       const sw = (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : lit ? 2.2 : trace ? 1.8 : 1);
       // On the circuit being looked at, a wire is cased in the page's colour so it parts from a wall it runs along.
@@ -2082,11 +2092,13 @@ function mount(sec     , host     ) {
       // And current is shown flowing along it, supply to load.
       if (lit) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-flow', 'stroke-width': sw * 0.45, 'stroke-dasharray': `${3 * u} ${9 * u}`, style: `--fp-flow:${-12 * u}px` }));
       // While viewing, a branch circuit's run carries the circuit's reading at its middle.
+      // With the load shown, it is the circuit's amps against its breaker instead.
       const cp = mode === 'view' && r.Circuit ? circuitOf(r.Circuit)?.power : undefined;
-      if (mode === 'view' && r.Circuit && path.length >= 2) {
+      const cl = loadOn && r.Circuit ? loadOf(r.Circuit) : null;
+      if (mode === 'view' && r.Circuit && path.length >= 2 && !(loadOn && cl == null)) {
         const mid = path[Math.floor((path.length - 1) / 2)], nxt = path[Math.floor((path.length - 1) / 2) + 1];
-        const t = svgEl('text', { x: (mid.X + nxt.X) / 2, y: (mid.Y + nxt.Y) / 2 - 7 * u, class: 'fp-run-read' + (cp == null ? ' is-nodata' : ''), 'font-size': font * 0.8 });
-        t.textContent = cp == null ? 'no data' : formatMeasure(Math.round(cp), 'W');
+        const t = svgEl('text', { x: (mid.X + nxt.X) / 2, y: (mid.Y + nxt.Y) / 2 - 7 * u, class: 'fp-run-read' + (cp == null && cl == null ? ' is-nodata' : ''), 'font-size': font * 0.8 });
+        t.textContent = cl != null ? `${circuitOf(r.Circuit) .current .toFixed(1)} A · ${Math.round(cl * 100)}%` : cp == null ? 'no data' : formatMeasure(Math.round(cp), 'W');
         g.appendChild(t);
       }
       // Which way it runs, supply to load: a chevron on its longest stretch.
@@ -2139,6 +2151,7 @@ function mount(sec     , host     ) {
       if (facing != null) svg.appendChild(svgEl('line', { x1: item.X + fx, y1: item.Y + fy, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
       const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
       g.dataset.item = item.Id;
+      if (loadOn && item.Circuit && !supply) { const l = loadOf(item.Circuit); g.classList.add(l == null ? 'is-load-none' : l >= 0.8 ? 'is-load-over' : l >= 0.6 ? 'is-load-busy' : 'is-load-easy'); }
       let rr = r;
       let hasArt = false;
       if (sized) {
@@ -2147,7 +2160,8 @@ function mount(sec     , host     ) {
         const shape = item.Round
           ? svgEl('ellipse', { rx: W / 2, ry: D / 2, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u })
           : svgEl('rect', { x: -W / 2, y: -D / 2, width: W, height: D, rx: Math.min(W, D) * 0.07, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u });
-        if (item.Circuit && (showWiring || focus)) shape.style.stroke = planCircuitColor(item.Circuit);
+        if (item.Circuit && loadOn) { const lc = loadColor(item.Circuit); if (lc) shape.style.stroke = lc; }
+        else if (item.Circuit && (showWiring || focus)) shape.style.stroke = planCircuitColor(item.Circuit);
         // On the circuit being looked at: ringed in its colour, well clear of the outline.
         if (lit && !sel) {
           const m = 6 * u;
@@ -2171,7 +2185,8 @@ function mount(sec     , host     ) {
         const bw = item.Kind === 'panel' ? r * 1.55 : r * 1.9, bh = item.Kind === 'panel' ? r * 2.2 : r * 1.9;
         const disc = boxy ? svgEl('rect', { x: -bw / 2, y: -bh / 2, width: bw, height: bh, rx: r * 0.18, class: 'fp-item-disc is-box', 'stroke-width': (sel ? 3 : trace ? 4 : 2) * u })
           : svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : trace ? 4 : 2) * u });
-        if (item.Circuit && (showWiring || focus || trace)) disc.style.stroke = planCircuitColor(item.Circuit);
+        if (item.Circuit && loadOn) { const lc = loadColor(item.Circuit); if (lc) disc.style.stroke = lc; }
+        else if (item.Circuit && (showWiring || focus || trace)) disc.style.stroke = planCircuitColor(item.Circuit);
         if (lit && !sel) {
           const halo = svgEl('circle', { r: r + 7 * u, class: 'fp-halo', 'stroke-width': 3 * u });
           halo.style.stroke = prot ? '' : planCircuitColor(item.Circuit);
@@ -2215,7 +2230,7 @@ function mount(sec     , host     ) {
         g.appendChild(t);
       }
       const title = svgEl('title');
-      title.textContent = `${itemName(item)}${item.Circuit ? ' — ' + refLabel(item.Circuit) : supply ? '' : ' — circuit unknown'}`;
+      title.textContent = `${itemName(item)}${item.Circuit ? ' — ' + refLabel(item.Circuit) + (loadOn ? ', ' + loadText(item.Circuit) : '') : supply ? '' : ' — circuit unknown'}`;
       g.appendChild(title);
       svg.appendChild(g);
     });
@@ -2412,11 +2427,18 @@ function mount(sec     , host     ) {
     }
     // The circuits on this floor, each a way to bring that circuit forward and fade the rest.
     const refs = [...new Set([...itemsNow().map((i     ) => i.Circuit), ...runsNow().map(r => r.Circuit)].filter(Boolean))]            ;
+    if (loadOn) legend.append(
+      el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch-dot', style: { background: 'var(--good)' } }), 'under 60% of the breaker'),
+      el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch-dot', style: { background: 'var(--warn)' } }), '60–80%'),
+      el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch-dot', style: { background: 'var(--bad)' } }), '80% and over'),
+      el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch-dot is-noload' }), 'no current reading'));
     if ((showWiring || trace) && refs.length) {
       const box = el('div', { class: 'fp-circuits' }, el('span', { class: 'fp-circuits-k', text: 'Circuits' }));
       refs.sort().forEach(ref => {
-        const b = el('button', { class: 'fp-chip' + (focused === ref ? ' is-on' : ''), type: 'button', title: 'Bring this circuit forward; tap again to show them all.' },
-          el('span', { class: 'fp-swatch-dot', style: { background: planCircuitColor(ref) } }), refLabel(ref),
+        const lc = loadOn ? loadColor(ref) : null;
+        const b = el('button', { class: 'fp-chip' + (focused === ref ? ' is-on' : ''), type: 'button', title: (loadOn ? loadText(ref) + '. ' : '') + 'Bring this circuit forward; tap again to show them all.' },
+          el('span', { class: 'fp-swatch-dot' + (loadOn && !lc ? ' is-noload' : ''), style: loadOn ? (lc ? { background: lc } : {}) : { background: planCircuitColor(ref) } }), refLabel(ref),
+          ...(loadOn && loadOf(ref) != null ? [el('span', { class: 'fp-chip-load', text: `${Math.round(loadOf(ref)  * 100)}%` })] : []),
           el('span', { class: 'fp-chip-n', text: String(itemsNow().filter((i     ) => i.Circuit === ref).length) }));
         b.setAttribute('aria-pressed', String(focused === ref));
         b.onclick = () => { focused = focused === ref ? '' : ref; drawPlan(); };
@@ -3293,6 +3315,8 @@ function mount(sec     , host     ) {
       if (v) hidden.delete(k); else hidden.add(k);
       remember('hide', [...hidden].join(',')); drawPlan();
     })));
+    if (mode === 'view' && period === 'circuits') pick.appendChild(check('Live load', showLoad, v => { showLoad = v; remember('load', v ? '1' : '0'); drawPlan(); },
+      'Colour each circuit and what is on it by the current it draws against its breaker’s rating. A circuit with no current reading is left uncoloured.'));
     show.append(el('summary', { class: 'ld-inst', text: hidden.size ? `Show (${hidden.size} hidden)` : 'Show', title: 'Choose which kinds of item the plan draws, and whether it shows the compass.' }), pick);
     show.addEventListener('toggle', () => { if (!show.open) drawSub(); });
     subBar.appendChild(show);

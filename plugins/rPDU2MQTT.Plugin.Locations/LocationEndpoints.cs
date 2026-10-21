@@ -141,6 +141,9 @@ internal sealed class LocationEndpoints(IPluginHost host, IPluginStore? store = 
                 node = c.Node,
                 channels = c.Chain.Legs.Select(l => l.Channel).Where(ch => ch is not null).ToArray(),
                 power = c.Power,
+                // Measured amps, never inferred from watts: the breaker's channels, else the node that is the circuit.
+                current = PanelMap.Power(c.Chain, live, "current")
+                    ?? (c.Node is { } cn && live is not null && live.TryGetValue(cn, "current", out var measured) ? measured : (double?)null),
                 gap = c.Gap.ToString().ToLowerInvariant(),
                 devices = c.Devices.Select(d => new { node = d.Node, label = Label(d.Node), value = d.Value }).ToArray(),
                 remainder = c.Remainder,

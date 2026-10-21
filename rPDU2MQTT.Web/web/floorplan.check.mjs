@@ -56,7 +56,7 @@ const places = [
 ];
 const circuits = [{
   ref: 'main/B06', panel: 'main', panelName: 'Main Panel', number: 'B06', description: 'Kitchen', amps: 20, state: 'identified',
-  node: 'ch5', channels: ['ch5'], power: 500, gap: 'none', devices: [{ node: 'plug_fridge', label: 'Fridge plug', value: 150 }],
+  node: 'ch5', channels: ['ch5'], power: 500, current: 8, gap: 'none', devices: [{ node: 'plug_fridge', label: 'Fridge plug', value: 150 }],
   remainder: 350, remainderState: 'known', exceeded: false, rooms: ['kitchen'], placements: ['fridge'],
 }];
 const nodes = [
@@ -322,6 +322,29 @@ if (!query(sec, '.fp-palette').hidden) fail('the drawing tools show while only v
 
 // A metered item shows its reading under it while viewing.
 if (!labels().some(t => t === '150 W')) fail(`the fridge's reading is not shown on the plan: ${JSON.stringify(labels())}`);
+
+// Live load, under Show in the Circuits view: each circuit and what is on it coloured by its amps against its breaker.
+button('Circuits', sec).onclick();
+await wait(20);
+const loadBox = () => query(query(sec, '.fp-show-menu'), 'label', true).find(l => /Live load/.test(textOf(l)));
+if (!loadBox()) fail('the Show menu in the Circuits view does not offer the live load');
+const loadIn = query(loadBox(), 'input', false);
+loadIn.checked = true; loadIn.onchange();
+if (!itemEl('fridge').classList.contains('is-load-easy')) fail(`8 A on a 20 A breaker is not coloured as easy: ${itemEl('fridge').className}`);
+if (!query(sec, '.fp-chip', true).some(b => /B06.*40%/.test(textOf(b)))) fail(`the circuit's chip does not give its load: ${textOf(query(sec, '.fp-legend'))}`);
+if (!/80% and over/.test(textOf(query(sec, '.fp-legend')))) fail('the legend does not give the load bands');
+circuits[0].current = 17;
+button('Power now', sec).onclick(); await wait(20); button('Circuits', sec).onclick(); await wait(20);
+if (!itemEl('fridge').classList.contains('is-load-over')) fail(`17 A on a 20 A breaker is not coloured as over: ${itemEl('fridge').className}`);
+// No current reading: left uncoloured, never guessed from watts.
+circuits[0].current = null;
+button('Power now', sec).onclick(); await wait(20); button('Circuits', sec).onclick(); await wait(20);
+if (!itemEl('fridge').classList.contains('is-load-none') || (itemEl('fridge').children.find(c => c.classList.contains('fp-item-disc'))?.style.stroke)) fail('a circuit with no current reading was coloured');
+circuits[0].current = 8;
+const loadOff = query(loadBox(), 'input', false);
+loadOff.checked = false; loadOff.onchange();
+button('Power now', sec).onclick(); await wait(20);
+if (query(sec, '.fp-show-menu') && loadBox()) fail('the live load is offered outside the Circuits view');
 
 // Tapping an outlet while viewing brings its whole circuit forward: its items, and the rooms it serves.
 tap(itemEl('fridge'), 100, 100);
