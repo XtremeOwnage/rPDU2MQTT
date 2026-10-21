@@ -1,7 +1,11 @@
+using System.Text.Json;
 using rPDU2MQTT.Classes;
+using rPDU2MQTT.Core;
+using rPDU2MQTT.Core.Flow;
 using rPDU2MQTT.Core.Integrations;
 using rPDU2MQTT.Models.Config;
 using rPDU2MQTT.Plugin.Locations;
+using rPDU2MQTT.Services;
 using rPDU2MQTT.Services.Gui;
 using rPDU2MQTT.Startup;
 using Xunit;
@@ -132,6 +136,83 @@ public class LocationsPluginTests
 
         Assert.Equal("new_home", LocationSettings.Of(cfg).Sites.Single().Id);
         Assert.Equal("new_room", EntityExtensions.Read<NodeLocation>(cfg.EnergyFlow.Nodes[0], "locations").Location);
+    }
+
+    private sealed class PastHost(Config cfg, IMeasurementHistory? history) : IPluginHost
+    {
+        public Config Config => cfg;
+        public ISnapshotCache Snapshots { get; } = new SnapshotCache(new ChannelMessageBus());
+        public IFlowValueSource? LiveValues => null;
+        public IMessagePublisher? Publisher => null;
+        public IntegrationStatus Status { get; } = new();
+        public IPeriodAuditor? Auditor => null;
+        public IMeasurementHistory? History => history;
+    }
+
+    /// <summary>The kitchen circuit's clamp read 6 A before noon and 18 A from noon on.</summary>
+    private sealed class PastCurrent : IMeasurementHistory
+    {
+        public static readonly DateTime Noon = new(2026, 8, 3, 12, 0, 0, DateTimeKind.Utc);
+        public string Id => "fake";
+        public Task<IReadOnlyDictionary<string, double>> ValuesAtAsync(IReadOnlyCollection<string> nodeIds, string metric, DateTime atUtc, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyDictionary<string, double>>(metric == "current" && nodeIds.Contains("ch5")
+                ? new Dictionary<string, double> { ["ch5"] = atUtc < Noon ? 6 : 18 }
+                : new Dictionary<string, double>());
+        public Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct) => Task.FromResult((true, ""));
+    }
+
+    private static Config KitchenCircuit() => YamlConfigLoader.DeserializeString("""
+        EnergyFlow:
+          Panels:
+            - Id: main
+              Breakers:
+                - Slot: 6
+                  Number: B06
+                  Amps: 20
+          Clamps:
+            - Panel: main
+              Breaker: B06
+              Channel: ch5
+        """);
+
+    private static async Task<JsonElement> Run(LocationsPlugin plugin, Config cfg, string action, Dictionary<string, string?> args)
+    {
+        var result = await IntegrationActions.Find(plugin, action)!.Handler(new IntegrationActionContext(cfg, args), CancellationToken.None);
+        return JsonSerializer.SerializeToElement(result);
+    }
+
+    [Fact]
+    public async Task APastMoment_ShowsEachCircuitsCurrentAsHistoryHeldIt()
+    {
+        var cfg = KitchenCircuit();
+        var plugin = new LocationsPlugin();
+        plugin.UseHost(new PastHost(cfg, new PastCurrent()));
+
+        var before = await Run(plugin, cfg, "totals", new() { ["at"] = "2026-08-03T11:00:00Z" });
+        Assert.True(before.GetProperty("historical").GetBoolean());
+        Assert.Equal(6, before.GetProperty("circuits")[0].GetProperty("current").GetDouble());
+        var after = await Run(plugin, cfg, "totals", new() { ["at"] = "2026-08-03T13:00:00Z" });
+        Assert.Equal(18, after.GetProperty("circuits")[0].GetProperty("current").GetDouble());
+
+        var series = await Run(plugin, cfg, "load-series", new() { ["from"] = "2026-08-03T10:00:00Z", ["to"] = "2026-08-03T14:00:00Z", ["step"] = "3600" });
+        var kitchen = series.GetProperty("circuits")[0];
+        Assert.Equal("main/B06", kitchen.GetProperty("ref").GetString());
+        Assert.Equal(20, kitchen.GetProperty("amps").GetInt32());
+        Assert.Equal([6, 6, 18, 18, 18], kitchen.GetProperty("values").EnumerateArray().Select(v => v.GetDouble()));
+    }
+
+    [Fact]
+    public async Task APastMoment_WithoutHistory_SaysSo()
+    {
+        var cfg = KitchenCircuit();
+        var plugin = new LocationsPlugin();
+        plugin.UseHost(new PastHost(cfg, null));
+
+        var r = await Run(plugin, cfg, "totals", new() { ["at"] = "2026-08-03T11:00:00Z" });
+        Assert.False(r.GetProperty("ok").GetBoolean());
+        Assert.False((await Run(plugin, cfg, "load-series", new() { ["from"] = "2026-08-03T10:00:00Z", ["to"] = "2026-08-03T14:00:00Z" })).GetProperty("ok").GetBoolean());
+        // Live is unchanged.
+        Assert.False((await Run(plugin, cfg, "totals", new())).GetProperty("historical").GetBoolean());
     }
 
     [Fact]

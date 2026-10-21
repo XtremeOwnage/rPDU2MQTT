@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using rPDU2MQTT.Services.Gui;
 
@@ -77,7 +78,9 @@ public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntity
         new("nodes", "Nodes", "Every node, for a picker.", ActionEffect.Read,
             (ctx, _) => Task.FromResult<object?>(Endpoints().Nodes()), Listed: false),
         new("totals", "Totals", "The location tree with each place's total, every circuit and every placement.", ActionEffect.Read,
-            async (ctx, ct) => await Endpoints().TotalsAsync(Posted(ctx), Metric(ctx), Period(ctx), ct), Listed: false),
+            async (ctx, ct) => await Endpoints().TotalsAsync(Posted(ctx), Metric(ctx), Period(ctx), Instant(ctx, "at"), ct), Listed: false),
+        new("load-series", "Load series", "Each circuit's current through a window, from history.", ActionEffect.Read,
+            async (ctx, ct) => await Endpoints().LoadSeriesAsync(Posted(ctx), Instant(ctx, "from"), Instant(ctx, "to"), ctx.Arg("step"), ct), Listed: false),
         new("series", "Series", "One place's total through a window, from history.", ActionEffect.Read,
             async (ctx, ct) => await Endpoints().SeriesAsync(Posted(ctx), ctx.Arg("location") ?? "", ctx.Int("minutes", 1440), ctx.Arg("step"), ct), Listed: false),
         new("migrate", "Tags to rooms", "Every tag in use, and given mappings, the rooms and areas they would become.", ActionEffect.Read,
@@ -109,6 +112,9 @@ public sealed class LocationsPlugin : IIntegration, IConfigurablePlugin, IEntity
 
     private static string Metric(IntegrationActionContext ctx) =>
         string.IsNullOrWhiteSpace(ctx.Arg("metric")) ? FlowGraphBuilder.DefaultMetric : ctx.Arg("metric")!;
+
+    private static DateTime? Instant(IntegrationActionContext ctx, string name) =>
+        DateTime.TryParse(ctx.Arg(name), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var t) ? t : null;
 
     private static string? Period(IntegrationActionContext ctx) => ctx.Arg("period") is "today" or "week" ? ctx.Arg("period") : null;
 }

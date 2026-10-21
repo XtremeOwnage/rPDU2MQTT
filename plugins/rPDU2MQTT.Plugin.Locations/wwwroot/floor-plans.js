@@ -1528,6 +1528,44 @@ function mount(sec     , host     ) {
   const subBar = el('div', { class: 'fp-sub' });
   sec.appendChild(el('div', { class: 'fp-modes' }, modeBar, subBar));
 
+  // The header's past time: Power now and Circuits show that moment, moved along a timeline of each circuit's load.
+  let range                                                      = null;
+  let at                = null;
+  let loads                                                                                                = null;
+  let loadsFor = '';
+  const instantView = () => period === 'now' || period === 'circuits';
+  const past = () => at != null && instantView();
+  const strip = host.timelineStrip ? host.timelineStrip((span     ) => { if (span) { at = span.from; load(); } }, undefined, { moment: true }) : null;
+  if (strip) { strip.el.classList.add('fp-timeline'); strip.el.hidden = true; sec.appendChild(strip.el); }
+  const syncStrip = () => { if (strip) strip.el.hidden = !(range && loads && mode === 'view' && instantView()); };
+  /// The busiest circuits on this floor, each as its share of its breaker through the range.
+  const drawStrip = () => {
+    const fl = floorNow();
+    loadsFor = fl ? fl.floor.Id : '';
+    syncStrip();
+    if (!strip || !loads) return;
+    const refs = new Set([...itemsNow().map((i     ) => i.Circuit), ...runsNow().map((r     ) => r.Circuit)].filter(Boolean));
+    const peak = (v                   ) => Math.max(0, ...v.filter((x)              => x != null));
+    const lines = loads.circuits.filter(c => refs.has(c.ref) && c.values.some(v => v != null))
+      .map(c => ({ label: refLabel(c.ref), color: planCircuitColor(c.ref), values: c.values.map(v => v == null ? null : Math.round(v / c.amps * 100)) }))
+      .sort((a, b) => peak(b.values) - peak(a.values)).slice(0, 6);
+    strip.draw({ lines, points: loads.at, bounds: { from: loads.at[0], to: loads.at[loads.at.length - 1] }, width: 1200 });
+    if (at != null) strip.set({ from: at, to: at });
+  };
+  const loadStrip = async () => {
+    const asked = range;
+    if (!asked) return;
+    const end = Math.min(Date.now(), new Date(`${asked.day}T23:59:59`).getTime());
+    const step = host.stepToFit ? host.stepToFit(asked.minutes * 60, 300) : 300;
+    let r     ;
+    try { r = await call('load-series', `?from=${encodeURIComponent(new Date(end - asked.minutes * 60_000).toISOString())}&to=${encodeURIComponent(new Date(end).toISOString())}&step=${step}`); }
+    catch { r = { body: { ok: false } }; }
+    if (range !== asked) return;
+    const points = ((r.body?.at || [])            ).map(iso => new Date(iso).getTime());
+    loads = r.body?.ok && points.length >= 2 ? { at: points, circuits: r.body.circuits || [] } : null;
+    drawStrip();
+  };
+
   const palette = el('div', { class: 'fp-palette', role: 'toolbar' });
   palette.setAttribute('aria-label', 'Drawing tools');
   const toolBtns                      = {};
@@ -3315,7 +3353,7 @@ function mount(sec     , host     ) {
       if (v) hidden.delete(k); else hidden.add(k);
       remember('hide', [...hidden].join(',')); drawPlan();
     })));
-    if (mode === 'view' && period === 'circuits') pick.appendChild(check('Live load', showLoad, v => { showLoad = v; remember('load', v ? '1' : '0'); drawPlan(); },
+    if (mode === 'view' && period === 'circuits') pick.appendChild(check(past() ? 'Load' : 'Live load', showLoad, v => { showLoad = v; remember('load', v ? '1' : '0'); drawPlan(); },
       'Colour each circuit and what is on it by the current it draws against its breaker’s rating. A circuit with no current reading is left uncoloured.'));
     show.append(el('summary', { class: 'ld-inst', text: hidden.size ? `Show (${hidden.size} hidden)` : 'Show', title: 'Choose which kinds of item the plan draws, and whether it shows the compass.' }), pick);
     show.addEventListener('toggle', () => { if (!show.open) drawSub(); });
@@ -4843,13 +4881,14 @@ function mount(sec     , host     ) {
   let pending      = null;
   const schedule = () => { clearTimeout(pending); pending = setTimeout(load, 600); };
   const load = async () => {
-    const q = period === 'now' || period === 'circuits' ? '' : `?period=${period}`;
+    const q = past() ? `?at=${encodeURIComponent(new Date(at ).toISOString())}` : instantView() ? '' : `?period=${period}`;
     let r     ;
     try { r = await call('totals', q); }
     catch (e     ) { r = { body: { ok: false, message: e?.message || 'the request failed' } }; }
     if (!r.body?.ok) { status.textContent = r.body?.message || 'Could not read the locations.'; live = null; }
     else {
-      status.textContent = '';
+      status.textContent = r.body.historical ? `Showing ${new Date(r.body.at).toLocaleString()} from ${r.body.source}`
+        : at != null && !instantView() ? 'The time picked above applies to Power now and Circuits; this is live.' : '';
       live = {
         places: Object.fromEntries((r.body.places || []).map((p       ) => [p.id, p])),
         nodes: r.body.nodes || [], circuits: r.body.circuits || [],
@@ -4906,6 +4945,7 @@ function mount(sec     , host     ) {
     drawSide();
     drawEmpty();
     drawBanner();
+    if (loads && loadsFor !== key) drawStrip(); else syncStrip();
   };
 
   window.addEventListener('keydown', (e     ) => {
@@ -4964,7 +5004,15 @@ function mount(sec     , host     ) {
   window.addEventListener('keyup', (e     ) => { if (e.key === ' ' && spaceDown) { spaceDown = false; svg.classList.remove('is-panning'); } });
 
   // The live view keeps up with the house while it is on screen.
-  setInterval(() => { if (sec.classList.contains('active') && !dragging && mode === 'view' && (period === 'now' || period === 'circuits')) load(); }, 10000);
+  setInterval(() => { if (sec.classList.contains('active') && !dragging && mode === 'view' && instantView() && at == null) load(); }, 10000);
+  host.followRange?.(sec, (r     ) => {
+    range = host.rangeMoment(r);
+    at = range ? range.at : null;
+    loads = null;
+    syncStrip();
+    load();
+    loadStrip();
+  });
   return { show: () => { render(); load(); readStorage(); } };
 }
 
