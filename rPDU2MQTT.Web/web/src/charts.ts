@@ -50,6 +50,12 @@ export function hideCard() { if (card) card.classList.remove('show'); }
 
 // A day-by-day bar chart. `stacked` adds the day's series into one bar, otherwise they sit side by side; a
 // day where every series is null is drawn as an empty slot and reported, never as a bar of zero.
+/// The round step, 1, 2, 2.5 or 5 times a power of ten, nearest above `raw`.
+export function niceStep(raw: number) {
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  return ([1, 2, 2.5, 5, 10].find(m => m * mag >= raw - 1e-12) ?? 10) * mag;
+}
+
 export function barChart(opts: {
   days: string[]; lines: Line[]; units: string; stacked: boolean; max?: number; pct?: boolean;
   partial?: string | null;
@@ -87,7 +93,10 @@ export function barChart(opts: {
     stacked ? Math.min(...days.map((_, d) => (has(d) ? negOf(d) : 0)), 0)
       : Math.min(...lines.flatMap(l => l.values.map(v => v ?? 0)), 0),
     ...overlaid, 0);
-  const span = (peak - trough) || 1;
+  // The axis runs between round numbers, so a gridline reads as 25 or 50 rather than 27 or 14, and zero is one of them.
+  const step = niceStep(((peak - trough) || 1) / 5);
+  const top = Math.ceil(peak / step - 1e-9) * step, bottom = Math.floor(trough / step + 1e-9) * step;
+  const span = (top - bottom) || step;
 
   // Fitted charts take the whole pane: at a fixed 26px a bar, thirty days was a 780px chart marooned in a
   // 2,200px page. Bars stretch to fill it, but only so far — a seven-bar week at full width would be slabs.
@@ -98,7 +107,7 @@ export function barChart(opts: {
   const slot = plotW / days.length;
   const x = (d: number) => padL + slot * d;
   const barW = Math.min(Math.max(3, slot * 0.72), 48);
-  const y = (v: number) => padT + plotH - ((v - trough) / span) * plotH;
+  const y = (v: number) => padT + plotH - ((v - bottom) / span) * plotH;
   const zeroY = y(0);
   // A day key is charted without its year; a clock label (an intra-day moment) is already what to show.
   const tickText = (day: string) => /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(5) : day;
@@ -108,12 +117,12 @@ export function barChart(opts: {
 
   const svg = svgTag('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'trend-chart' });
 
-  const ticks = 4;
-  for (let i = 0; i <= ticks; i++) {
-    const v = trough + (span / ticks) * i, yy = y(v);
+  const places = step >= 1 ? 0 : Math.min(3, Math.ceil(-Math.log10(step) - 1e-9));
+  for (let v = bottom; v <= top + step / 2; v += step) {
+    const yy = y(v);
     svg.appendChild(svgTag('line', { x1: padL, y1: yy, x2: W - padR, y2: yy, stroke: 'var(--line)', 'stroke-width': 1 }));
     const t = svgTag('text', { x: padL - 6, y: yy + 4, 'text-anchor': 'end', fill: 'var(--muted)', 'font-size': 11 });
-    t.textContent = formatNum(Number(v.toFixed(peak < 10 ? 2 : 0))) + (opts.pct ? '%' : '');
+    t.textContent = formatNum(Number(v.toFixed(places)) || 0) + (opts.pct ? '%' : '');
     svg.appendChild(t);
   }
 
@@ -230,7 +239,7 @@ export function barChart(opts: {
 
   // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
   svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
-  if (opts.ref != null && opts.ref >= trough && opts.ref <= peak)
+  if (opts.ref != null && opts.ref >= bottom && opts.ref <= top)
     svg.appendChild(svgTag('line', { x1: padL, y1: y(opts.ref), x2: W - padR, y2: y(opts.ref), stroke: 'var(--muted)', 'stroke-width': 1, 'stroke-dasharray': '4 4', class: 'trend-ref' }));
 
   // A full-height hit area per day, over the bars.
@@ -459,8 +468,16 @@ export function rankChart(opts: {
   /// Draw a ring of each item's share of the total beside the bars.
   share?: boolean;
   fitTo?: number;
+  /// Past this many items, the rest are drawn together as one last row, so a long selection stays a short chart.
+  fold?: number;
 }): { svg: any; gaps: number } {
-  const items = opts.items.filter(i => i.value > 0).sort((a, b) => b.value - a.value);
+  const sorted = opts.items.filter(i => i.value > 0).sort((a, b) => b.value - a.value);
+  const items = opts.fold && sorted.length > opts.fold + 1
+    ? [...sorted.slice(0, opts.fold), {
+      label: `${sorted.length - opts.fold} more`, color: 'var(--faint)',
+      value: sorted.slice(opts.fold).reduce((s, i) => s + i.value, 0),
+    } as typeof sorted[number]]
+    : sorted;
   const total = items.reduce((s, i) => s + i.value, 0);
   const W = opts.fitTo && opts.fitTo > 0 ? Math.max(280, opts.fitTo) : 720;
   const rowH = 22, padT = 8;
@@ -512,7 +529,7 @@ export function rankChart(opts: {
     const name = svgTag('text', { x: x0 - 8, y: yy + 15, 'text-anchor': 'end', fill: 'var(--fg)', 'font-size': 12 });
     name.textContent = it.label.length > maxChars ? it.label.slice(0, maxChars - 1) + '…' : it.label;
     svg.appendChild(name);
-    const w = Math.max(1, (it.value / top) * barMax);
+    const w = Math.max(1, Math.min(1, it.value / top) * barMax);
     svg.appendChild(titled(svgTag('rect', { x: x0, y: yy + 4, width: w, height: rowH - 8, fill: it.color, class: 'trend-rank-bar' }), describe(it)));
     const value = svgTag('text', { x: x0 + w + 6, y: yy + 15, fill: 'var(--muted)', 'font-size': 11 });
     value.textContent = valueText(it);
