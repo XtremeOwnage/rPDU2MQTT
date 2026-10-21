@@ -1967,3 +1967,27 @@
   .explorer-table td.ex-name { padding-left:calc(6px + var(--depth, 0) * 12px) !important; white-space:normal !important; overflow-wrap:break-word; }
   .explorer-table td.ex-value { max-width:38vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 }
+
+/* Trends: the window in a few figures, above the charts. */
+.trend-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-2); margin: 12px 0 4px; }
+.trend-sum:empty { display: none; }
+.trend-sum-tile { position: relative; border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); padding: 8px 12px 8px 14px; overflow: hidden; min-width: 0; }
+.trend-sum-tile::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--muted); }
+.trend-sum-tile.solar::before { background: var(--warn); }
+.trend-sum-tile.battery::before { background: var(--good); }
+.trend-sum-tile.grid::before { background: var(--accent); }
+.trend-sum-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.trend-sum-value { font-size: 20px; font-weight: 680; letter-spacing: -.02em; margin: 2px 0 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.trend-sum-sub { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 700px) {
+  .trend-sum { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trend-sum-tile:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+.nt-sub { color: var(--faint); font-size: 11px; white-space: nowrap; }
+/* A phone keeps the picker and Reset on one line: the picker's face gives way first. */
+@media (max-width: 560px) {
+  .nt-bar { flex-wrap: nowrap; }
+  .nt-bar > .desc { display: none; }
+  .nt-anchor { position: static; flex: 0 1 auto; }
+  .nt-btn { max-width: 100%; }
+}

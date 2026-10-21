@@ -1931,6 +1931,12 @@ function hideCard() { if (card) card.classList.remove('show'); }
 
 // A day-by-day bar chart. `stacked` adds the day's series into one bar, otherwise they sit side by side; a
 // day where every series is null is drawn as an empty slot and reported, never as a bar of zero.
+/// The round step, 1, 2, 2.5 or 5 times a power of ten, nearest above `raw`.
+function niceStep(raw        ) {
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  return ([1, 2, 2.5, 5, 10].find(m => m * mag >= raw - 1e-12) ?? 10) * mag;
+}
+
 function barChart(opts
 
                                 
@@ -1957,7 +1963,10 @@ function barChart(opts
     stacked ? Math.min(...days.map((_, d) => (has(d) ? negOf(d) : 0)), 0)
       : Math.min(...lines.flatMap(l => l.values.map(v => v ?? 0)), 0),
     ...overlaid, 0);
-  const span = (peak - trough) || 1;
+  // The axis runs between round numbers, so a gridline reads as 25 or 50 rather than 27 or 14, and zero is one of them.
+  const step = niceStep(((peak - trough) || 1) / 5);
+  const top = Math.ceil(peak / step - 1e-9) * step, bottom = Math.floor(trough / step + 1e-9) * step;
+  const span = (top - bottom) || step;
 
   // Fitted charts take the whole pane: at a fixed 26px a bar, thirty days was a 780px chart marooned in a
   // 2,200px page. Bars stretch to fill it, but only so far — a seven-bar week at full width would be slabs.
@@ -1968,7 +1977,7 @@ function barChart(opts
   const slot = plotW / days.length;
   const x = (d        ) => padL + slot * d;
   const barW = Math.min(Math.max(3, slot * 0.72), 48);
-  const y = (v        ) => padT + plotH - ((v - trough) / span) * plotH;
+  const y = (v        ) => padT + plotH - ((v - bottom) / span) * plotH;
   const zeroY = y(0);
   // A day key is charted without its year; a clock label (an intra-day moment) is already what to show.
   const tickText = (day        ) => /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(5) : day;
@@ -1978,12 +1987,12 @@ function barChart(opts
 
   const svg = svgTag('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: 'trend-chart' });
 
-  const ticks = 4;
-  for (let i = 0; i <= ticks; i++) {
-    const v = trough + (span / ticks) * i, yy = y(v);
+  const places = step >= 1 ? 0 : Math.min(3, Math.ceil(-Math.log10(step) - 1e-9));
+  for (let v = bottom; v <= top + step / 2; v += step) {
+    const yy = y(v);
     svg.appendChild(svgTag('line', { x1: padL, y1: yy, x2: W - padR, y2: yy, stroke: 'var(--line)', 'stroke-width': 1 }));
     const t = svgTag('text', { x: padL - 6, y: yy + 4, 'text-anchor': 'end', fill: 'var(--muted)', 'font-size': 11 });
-    t.textContent = formatNum(Number(v.toFixed(peak < 10 ? 2 : 0))) + (opts.pct ? '%' : '');
+    t.textContent = formatNum(Number(v.toFixed(places)) || 0) + (opts.pct ? '%' : '');
     svg.appendChild(t);
   }
 
@@ -2100,7 +2109,7 @@ function barChart(opts
 
   // The axis sits at zero, not at the bottom, so which side of it a bar is on is the point.
   svg.appendChild(svgTag('line', { x1: padL, y1: zeroY, x2: W - padR, y2: zeroY, stroke: 'var(--muted)', 'stroke-width': 1 }));
-  if (opts.ref != null && opts.ref >= trough && opts.ref <= peak)
+  if (opts.ref != null && opts.ref >= bottom && opts.ref <= top)
     svg.appendChild(svgTag('line', { x1: padL, y1: y(opts.ref), x2: W - padR, y2: y(opts.ref), stroke: 'var(--muted)', 'stroke-width': 1, 'stroke-dasharray': '4 4', class: 'trend-ref' }));
 
   // A full-height hit area per day, over the bars.
@@ -2320,7 +2329,13 @@ function sparkline(opts
 function rankChart(opts
 
  )                             {
-  const items = opts.items.filter(i => i.value > 0).sort((a, b) => b.value - a.value);
+  const sorted = opts.items.filter(i => i.value > 0).sort((a, b) => b.value - a.value);
+  const items = opts.fold && sorted.length > opts.fold + 1
+    ? [...sorted.slice(0, opts.fold), {
+      label: `${sorted.length - opts.fold} more`, color: 'var(--faint)',
+      value: sorted.slice(opts.fold).reduce((s, i) => s + i.value, 0),
+    }                         ]
+    : sorted;
   const total = items.reduce((s, i) => s + i.value, 0);
   const W = opts.fitTo && opts.fitTo > 0 ? Math.max(280, opts.fitTo) : 720;
   const rowH = 22, padT = 8;
@@ -2372,7 +2387,7 @@ function rankChart(opts
     const name = svgTag('text', { x: x0 - 8, y: yy + 15, 'text-anchor': 'end', fill: 'var(--fg)', 'font-size': 12 });
     name.textContent = it.label.length > maxChars ? it.label.slice(0, maxChars - 1) + '…' : it.label;
     svg.appendChild(name);
-    const w = Math.max(1, (it.value / top) * barMax);
+    const w = Math.max(1, Math.min(1, it.value / top) * barMax);
     svg.appendChild(titled(svgTag('rect', { x: x0, y: yy + 4, width: w, height: rowH - 8, fill: it.color, class: 'trend-rank-bar' }), describe(it)));
     const value = svgTag('text', { x: x0 + w + 6, y: yy + 15, fill: 'var(--muted)', 'font-size': 11 });
     value.textContent = valueText(it);
@@ -11956,13 +11971,17 @@ function trendsPage(nav     , sections     , spec            ) {
 function addTrendsSection(nav     , sections     ) {
   // The same figures as a table, under the charts: a number is easier to read off than a bar.
   const tableBox = el('div', { class: 'trend-table-wrap' });
+  // The window in a handful of figures, above the charts: what the table's totals row says, where it is seen first.
+  const summaryBox = el('div', { class: 'trend-sum' });
   const { link, sec } = trendsPage(nav, sections, {
     label: 'Trends',
     icon: '▦',
     stackable: false,
+    above: () => [summaryBox],
     below: () => [tableBox],
     render: (p) => {
       const body = p.body();
+      summaryBox.innerHTML = '';
       if (!body?.ok) return;
 
       const days = p.days();
@@ -11996,39 +12015,27 @@ function addTrendsSection(nav     , sections     ) {
 
       const solar = byKind('solar'), batt = byKind('battery'), load = byKind('home');
 
-      // --- Net solar coverage ---------------------------------------------------------------------------
-      if (p.summable() && solar && (load || gridIn)) {
-        const pct = days.map((_, d) => netSolarPct(homeEnergy({
-          solar: solar[d],
-          ...(batt ? { battery: batt[d] } : {}),
-          ...(gridIn ? { grid: gridIn[d] } : {}),
-          ...(load ? { load: load[d] } : {}),
-        }), solar[d]));
-        if (pct.some(v => v != null)) {
-          const nsLines         = [{ label: 'Net solar', color: KIND_COLOR.solar, values: pct }];
-          const top = Math.max(100, ...pct.map(v => v ?? 0));
-          p.section(p.perDay() ? 'Net solar coverage per day' : 'Net solar coverage',
-            'Solar produced ÷ home energy.',
-            barChart({ days, lines: nsLines, units: '%', stacked: false, kind: p.kind(), max: top, pct: true, ref: 100, partial, fitTo: p.fitTo() }), nsLines);
-          drawn++;
-        }
-      }
-
-      // --- Self-sufficiency ---------------------------------------------------------------------------
-      // A share of energy over a period; instantaneous power is a different quantity.
-      if (p.summable() && gridIn && (load || solar)) {
-        const imported = sumOf(gridSupply);
-        const pct = days.map((_, d) => selfSufficiencyPct(homeEnergy({
+      // --- Solar share ------------------------------------------------------------------------------
+      // Two shares of the same home energy on one axis. A share of energy over a period; instantaneous power is a
+      // different quantity.
+      if (p.summable() && (solar || gridIn) && (load || gridIn) && (load || solar)) {
+        const imported = gridSupply.length ? sumOf(gridSupply) : null;
+        const homeOn = (d        ) => homeEnergy({
           ...(solar ? { solar: solar[d] } : {}),
           ...(batt ? { battery: batt[d] } : {}),
           ...(gridIn ? { grid: gridIn[d] } : {}),
           ...(load ? { load: load[d] } : {}),
-        }), imported[d]));
-        if (pct.some(v => v != null)) {
-          const ssLines         = [{ label: 'Self-sufficiency', color: KIND_COLOR.solar, values: pct }];
-          p.section(p.perDay() ? 'Self-sufficiency per day' : 'Self-sufficiency',
-            'Home energy not from the grid.',
-            barChart({ days, lines: ssLines, units: '%', stacked: false, kind: p.kind(), max: 100, pct: true, partial, fitTo: p.fitTo() }), ssLines);
+        });
+        const ns = days.map((_, d) => solar ? netSolarPct(homeOn(d), solar[d]) : null);
+        const ss = days.map((_, d) => gridIn && imported ? selfSufficiencyPct(homeOn(d), imported[d]) : null);
+        const shareLines         = [];
+        if (ns.some(v => v != null)) shareLines.push({ label: 'Net solar coverage', color: KIND_COLOR.solar, values: ns });
+        if (ss.some(v => v != null)) shareLines.push({ label: 'Self-sufficiency', color: 'var(--good)', values: ss });
+        if (shareLines.length) {
+          const top = Math.max(100, ...ns.map(v => v ?? 0));
+          p.section(p.perDay() ? 'Solar share per day' : 'Solar share',
+            'Net solar coverage is solar produced ÷ home energy, and can pass 100%. Self-sufficiency is the home energy not taken from the grid.',
+            barChart({ days, lines: shareLines, units: '%', stacked: false, kind: 'line', max: top, pct: true, ref: 100, partial, fitTo: p.fitTo() }), shareLines);
           drawn++;
         }
       }
@@ -12096,6 +12103,30 @@ function addTrendsSection(nav     , sections     ) {
       }));
       const shown = columns.filter(([, v]) => v && v.some(x => x != null))                                 ;
       if (p.summable() && shown.length) {
+        const col = (name        ) => shown.find(([label]) => label === name)?.[1] || null;
+        const fig = (v               ) => v == null ? '—' : (Math.round(v * (p.cost() ? 100 : 10)) / (p.cost() ? 100 : 10)).toLocaleString('en-US');
+        // A share over the window counts only the days both of its figures are known for.
+        const share = (of                          , by                          , f                                            ) => {
+          if (!of || !by) return null;
+          const both = days.map((_, d) => d).filter(d => of[d] != null && by[d] != null);
+          return both.length ? f(both.reduce((a, d) => a + of[d] , 0), both.reduce((a, d) => a + by[d] , 0)) : null;
+        };
+        const tile = (label        , value        , sub        , cls        , title        ) =>
+          summaryBox.appendChild(el('div', { class: 'trend-sum-tile ' + cls, title },
+            el('div', { class: 'trend-sum-label', text: label }),
+            el('div', { class: 'trend-sum-value', text: value }),
+            el('div', { class: 'trend-sum-sub', text: sub })));
+        const home = col('Load'), sol = col('Solar'), net = col('Net grid'), inn = col('Grid used'), out = col('Grid exported');
+        const soFar = partial ? 'incl. today so far' : `over ${days.length} ${p.perDay() ? 'days' : 'readings'}`;
+        if (home) tile('Home', `${fig(sumKnown(home))} ${units}`, soFar, 'home', 'Measured load, else the balance of the measured sources.');
+        if (sol) tile('Solar', `${fig(sumKnown(sol))} ${units}`, soFar, 'solar', 'Solar produced in the window.');
+        if (net) tile('Net grid', `${fig(sumKnown(net))} ${units}`,
+          out ? `${fig(sumKnown(inn || []))} in · ${fig(sumKnown(out))} out` : 'all import', 'grid', 'Grid used − grid exported.');
+        const ss = share(home, inn, (h, x) => selfSufficiencyPct(h, x));
+        if (ss != null) tile('Self-sufficiency', `${Math.round(ss)}%`, 'not from the grid', 'battery', 'Over the days with both a load and a grid reading.');
+        const ns = share(home, sol, (h, x) => netSolarPct(h, x));
+        if (ns != null) tile('Net solar', `${Math.round(ns)}%`, 'solar ÷ home energy', 'solar', 'Over the days with both a load and a solar reading.');
+
         // Cost reads to the cent.
         const scale = p.cost() ? 100 : 10;
         const num = (v               ) => (v == null ? '—' : Math.round(v * scale) / scale === 0 ? '0' : (Math.round(v * scale) / scale).toLocaleString('en-US'));
@@ -12156,6 +12187,8 @@ const OWN_COLOURS = 7;
 const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)',
   'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)'];
 const OTHER_COLOUR = 'var(--faint)';
+/// Rows in the ranking before the rest are drawn as one; the table below still lists every node.
+const RANKED = 10;
 
 function addNodeTrendsSection(nav     , sections     ) {
   const off = new Set        ();
@@ -12298,10 +12331,9 @@ function addNodeTrendsSection(nav     , sections     ) {
       const allOn = members.every((s     ) => !off.has(s.node));
       const chip = btn((allOn ? '● ' : '○ ') + tag);
       if (allOn) chip.classList.add('chip-on');
-      chip.title = `${members.length} node(s) tagged "${tag}" — click to chart exactly these`;
+      chip.title = `${allOn ? 'Take' : 'Add'} the ${members.length} node(s) tagged "${tag}" ${allOn ? 'off' : 'to'} the chart. Tags combine, as kinds do.`;
       chip.onclick = () => {
-        off.clear();
-        all().forEach((s     ) => { if (!(s.tags || []).includes(tag)) off.add(s.node); });
+        members.forEach((s     ) => allOn ? off.add(s.node) : off.delete(s.node));
         page.draw();
       };
       tagRow.appendChild(chip);
@@ -12330,9 +12362,10 @@ function addNodeTrendsSection(nav     , sections     ) {
     const allBtn = btn('All');
     allBtn.title = filter ? 'Chart every node matching the filter.' : 'Chart every node. A hierarchy counts the same energy at several tiers, so read a stack of all of them with that in mind.';
     allBtn.onclick = () => { visible.forEach((s     ) => off.delete(s.node)); page.draw(); };
+    // None clears the whole selection, filter or not: every kind, tag and node comes off.
     const none = btn('None');
-    none.title = filter ? 'Take every node matching the filter off the chart.' : 'Take every node off the chart.';
-    none.onclick = () => { visible.forEach((s     ) => off.add(s.node)); page.draw(); };
+    none.title = 'Take every node off the chart, then add kinds, tags or nodes back.';
+    none.onclick = () => { all().forEach((s     ) => off.add(s.node)); page.draw(); };
     const reset = btn('Reset');
     reset.title = 'Back to the default: one kind that splits the total without counting it twice — circuits where there are any.';
     reset.onclick = () => {
@@ -12395,7 +12428,7 @@ function addNodeTrendsSection(nav     , sections     ) {
     });
 
     const perDay = p.perDay();
-    const cols                                                                                                                  = [
+    const cols                                                                                                                                            = [
       { head: 'Node', num: false, text: r => r.label, sort: r => r.label.toLowerCase() },
       { head: p.summable() ? `Total (${units})` : `Peak (${units})`, num: true,
         text: r => r.headline == null ? '—' : formatNum(Number(r.headline.toFixed(2))),
@@ -12414,9 +12447,13 @@ function addNodeTrendsSection(nav     , sections     ) {
         text: r => `${r.covered} of ${days.length}`, sort: r => r.covered,
         // Nothing to say when every row is complete; phones drop it then.
         cls: rows.every((r     ) => r.covered === days.length) ? 'col-full' : '' },
-      { head: perDay ? 'Peak day' : 'Peak at', num: false,
-        text: r => r.peakAt ? `${r.peakAt} · ${formatNum(r.peakValue)}${r.peakAt === partial ? ' · so far' : ''}` : '—',
-        sort: r => r.peakAt },
+      // A window that is not summed already heads with the peak; this column then only says when it was.
+      p.summable() ? { head: `Peak (${units})`, num: true,
+        text: r => r.peakValue == null ? '—' : formatNum(Number(r.peakValue.toFixed(2))),
+        sub: r => r.peakAt ? r.peakAt + (r.peakAt === partial ? ' · so far' : '') : '',
+        sort: r => r.peakValue ?? -Infinity,
+        title: perDay ? 'The highest day in the window, and which day it was.' : 'The highest reading in the window, and when it was.' }
+        : { head: 'Peak at', num: false, text: r => r.peakAt || '—', sort: r => r.peakAt },
     ];
 
     if (sort.col >= cols.length) sort.col = 0;
@@ -12440,7 +12477,11 @@ function addNodeTrendsSection(nav     , sections     ) {
     const tb = el('tbody');
     rows.forEach((r     ) => {
       const tr = el('tr');
-      cols.forEach(c => tr.appendChild(el('td', { class: (c.num ? 'num ' : '') + (c.cls || ''), text: c.text(r) })));
+      cols.forEach(c => {
+        const sub = c.sub?.(r);
+        tr.appendChild(el('td', { class: (c.num ? 'num ' : '') + (c.cls || '') },
+          c.text(r), ...(sub ? [el('div', { class: 'nt-sub', text: sub })] : [])));
+      });
       tb.appendChild(tr);
     });
     t.appendChild(tb);
@@ -12471,20 +12512,7 @@ function addNodeTrendsSection(nav     , sections     ) {
         `Each selected node's total energy over the window${estimated ? ', estimated from its power readings' : ''}, and its share of the selected nodes' total. `
         + 'A node and the nodes beneath it count the same energy twice, so select one tier at a time for a true share.',
         rankChart({ items: ranked.map(x => ({ label: x.s.label || x.s.node, value: x.value          , color: color(x.s) })),
-          units: estimated ? 'kWh' : units, share: true, fitTo: width }), []);
-    }
-
-    const peaks = own.map((s     ) => {
-      const best = readings(s).reduce((a, b) => (b[0] > (a?.[0] ?? -Infinity) ? b : a), null                           );
-      return best && best[0] > 0
-        ? { label: s.label || s.node, value: best[0], color: color(s), note: days[best[1]] + (days[best[1]] === partial ? ' so far' : '') }
-        : null;
-    }).filter(Boolean)                                                                   ;
-    if (peaks.length) {
-      p.section(p.perDay() ? 'Peak daily energy by node' : `Peak ${p.metricName()} by node`,
-        p.perDay() ? 'Each selected node\'s highest daily energy in the window, and the day it occurred.'
-          : `Each selected node's highest ${p.metricName()} reading in the window, and when it occurred.`,
-        rankChart({ items: peaks, units, fitTo: width }), []);
+          units: estimated ? 'kWh' : units, share: true, fitTo: width, fold: RANKED }), []);
     }
 
     // The same hour across every day of the window, which shows when each node does its work.
@@ -12519,7 +12547,7 @@ function addNodeTrendsSection(nav     , sections     ) {
       if (floor.length) {
         p.section('Base load by node',
           'Each selected node\'s base load: the power that 5% of its readings fall below. A base load above zero is power drawn even at the node\'s quietest.',
-          rankChart({ items: floor, units, fitTo: width }), []);
+          rankChart({ items: floor, units, fitTo: width, fold: RANKED }), []);
       }
     }
   };

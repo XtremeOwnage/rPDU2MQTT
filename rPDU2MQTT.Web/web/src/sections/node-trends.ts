@@ -12,6 +12,8 @@ const OWN_COLOURS = 7;
 const SERIES = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)',
   'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)'];
 const OTHER_COLOUR = 'var(--faint)';
+/// Rows in the ranking before the rest are drawn as one; the table below still lists every node.
+const RANKED = 10;
 
 export function addNodeTrendsSection(nav: any, sections: any) {
   const off = new Set<string>();
@@ -154,10 +156,9 @@ export function addNodeTrendsSection(nav: any, sections: any) {
       const allOn = members.every((s: any) => !off.has(s.node));
       const chip = btn((allOn ? '● ' : '○ ') + tag);
       if (allOn) chip.classList.add('chip-on');
-      chip.title = `${members.length} node(s) tagged "${tag}" — click to chart exactly these`;
+      chip.title = `${allOn ? 'Take' : 'Add'} the ${members.length} node(s) tagged "${tag}" ${allOn ? 'off' : 'to'} the chart. Tags combine, as kinds do.`;
       chip.onclick = () => {
-        off.clear();
-        all().forEach((s: any) => { if (!(s.tags || []).includes(tag)) off.add(s.node); });
+        members.forEach((s: any) => allOn ? off.add(s.node) : off.delete(s.node));
         page.draw();
       };
       tagRow.appendChild(chip);
@@ -186,9 +187,10 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     const allBtn = btn('All');
     allBtn.title = filter ? 'Chart every node matching the filter.' : 'Chart every node. A hierarchy counts the same energy at several tiers, so read a stack of all of them with that in mind.';
     allBtn.onclick = () => { visible.forEach((s: any) => off.delete(s.node)); page.draw(); };
+    // None clears the whole selection, filter or not: every kind, tag and node comes off.
     const none = btn('None');
-    none.title = filter ? 'Take every node matching the filter off the chart.' : 'Take every node off the chart.';
-    none.onclick = () => { visible.forEach((s: any) => off.add(s.node)); page.draw(); };
+    none.title = 'Take every node off the chart, then add kinds, tags or nodes back.';
+    none.onclick = () => { all().forEach((s: any) => off.add(s.node)); page.draw(); };
     const reset = btn('Reset');
     reset.title = 'Back to the default: one kind that splits the total without counting it twice — circuits where there are any.';
     reset.onclick = () => {
@@ -251,7 +253,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     });
 
     const perDay = p.perDay();
-    const cols: { head: string; num: boolean; text: (r: any) => string; sort: (r: any) => any; title?: string; cls?: string }[] = [
+    const cols: { head: string; num: boolean; text: (r: any) => string; sub?: (r: any) => string; sort: (r: any) => any; title?: string; cls?: string }[] = [
       { head: 'Node', num: false, text: r => r.label, sort: r => r.label.toLowerCase() },
       { head: p.summable() ? `Total (${units})` : `Peak (${units})`, num: true,
         text: r => r.headline == null ? '—' : formatNum(Number(r.headline.toFixed(2))),
@@ -270,9 +272,13 @@ export function addNodeTrendsSection(nav: any, sections: any) {
         text: r => `${r.covered} of ${days.length}`, sort: r => r.covered,
         // Nothing to say when every row is complete; phones drop it then.
         cls: rows.every((r: any) => r.covered === days.length) ? 'col-full' : '' },
-      { head: perDay ? 'Peak day' : 'Peak at', num: false,
-        text: r => r.peakAt ? `${r.peakAt} · ${formatNum(r.peakValue)}${r.peakAt === partial ? ' · so far' : ''}` : '—',
-        sort: r => r.peakAt },
+      // A window that is not summed already heads with the peak; this column then only says when it was.
+      p.summable() ? { head: `Peak (${units})`, num: true,
+        text: r => r.peakValue == null ? '—' : formatNum(Number(r.peakValue.toFixed(2))),
+        sub: r => r.peakAt ? r.peakAt + (r.peakAt === partial ? ' · so far' : '') : '',
+        sort: r => r.peakValue ?? -Infinity,
+        title: perDay ? 'The highest day in the window, and which day it was.' : 'The highest reading in the window, and when it was.' }
+        : { head: 'Peak at', num: false, text: r => r.peakAt || '—', sort: r => r.peakAt },
     ];
 
     if (sort.col >= cols.length) sort.col = 0;
@@ -296,7 +302,11 @@ export function addNodeTrendsSection(nav: any, sections: any) {
     const tb = el('tbody');
     rows.forEach((r: any) => {
       const tr = el('tr');
-      cols.forEach(c => tr.appendChild(el('td', { class: (c.num ? 'num ' : '') + (c.cls || ''), text: c.text(r) })));
+      cols.forEach(c => {
+        const sub = c.sub?.(r);
+        tr.appendChild(el('td', { class: (c.num ? 'num ' : '') + (c.cls || '') },
+          c.text(r), ...(sub ? [el('div', { class: 'nt-sub', text: sub })] : [])));
+      });
       tb.appendChild(tr);
     });
     t.appendChild(tb);
@@ -327,20 +337,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
         `Each selected node's total energy over the window${estimated ? ', estimated from its power readings' : ''}, and its share of the selected nodes' total. `
         + 'A node and the nodes beneath it count the same energy twice, so select one tier at a time for a true share.',
         rankChart({ items: ranked.map(x => ({ label: x.s.label || x.s.node, value: x.value as number, color: color(x.s) })),
-          units: estimated ? 'kWh' : units, share: true, fitTo: width }), []);
-    }
-
-    const peaks = own.map((s: any) => {
-      const best = readings(s).reduce((a, b) => (b[0] > (a?.[0] ?? -Infinity) ? b : a), null as [number, number] | null);
-      return best && best[0] > 0
-        ? { label: s.label || s.node, value: best[0], color: color(s), note: days[best[1]] + (days[best[1]] === partial ? ' so far' : '') }
-        : null;
-    }).filter(Boolean) as { label: string; value: number; color: string; note: string }[];
-    if (peaks.length) {
-      p.section(p.perDay() ? 'Peak daily energy by node' : `Peak ${p.metricName()} by node`,
-        p.perDay() ? 'Each selected node\'s highest daily energy in the window, and the day it occurred.'
-          : `Each selected node's highest ${p.metricName()} reading in the window, and when it occurred.`,
-        rankChart({ items: peaks, units, fitTo: width }), []);
+          units: estimated ? 'kWh' : units, share: true, fitTo: width, fold: RANKED }), []);
     }
 
     // The same hour across every day of the window, which shows when each node does its work.
@@ -375,7 +372,7 @@ export function addNodeTrendsSection(nav: any, sections: any) {
       if (floor.length) {
         p.section('Base load by node',
           'Each selected node\'s base load: the power that 5% of its readings fall below. A base load above zero is power drawn even at the node\'s quietest.',
-          rankChart({ items: floor, units, fitTo: width }), []);
+          rankChart({ items: floor, units, fitTo: width, fold: RANKED }), []);
       }
     }
   };

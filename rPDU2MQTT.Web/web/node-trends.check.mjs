@@ -136,9 +136,8 @@ const names = rankText.filter(t => ['Solar', 'Battery', 'Grid', 'Battery (chargi
 if (names.join() !== 'Solar,Battery,Grid') fail(`nodes are not ranked by total energy, return lanes excluded: ${names.join(', ')}`);
 if (!rankText.some(t => t.includes('159') && t.includes('72.9%'))) fail(`solar's share is wrong: ${rankText.join(' | ')}`);
 if (query(largest, 'path', true).filter(e => e.attrs.class === 'trend-slice').length !== 3) fail('the share ring does not have a slice per ranked node');
-const busiest = chartNamed('Peak daily energy by node');
-if (!busiest) fail(`no "Peak daily energy by node" chart (got: ${headings.join(', ')})`);
-if (!query(busiest, 'text', true).some(t => t.textContent.includes('35') && t.textContent.includes('2026-08-07 so far'))) fail('solar\'s peak day is not named as unfinished');
+// Each node's peak is a column of the table below, not a second ranking.
+if (headings.includes('Peak daily energy by node')) fail('the peaks are ranked again beside the table');
 for (const absent of ['Average energy by hour of day', 'Base load by node'])
   if (headings.includes(absent)) fail(`"${absent}" is drawn for daily energy totals`);
 
@@ -170,13 +169,19 @@ hits.find(h => h.attrs['data-day'] === '2026-08-03').dispatch('mouseenter', { cl
 if (!/no reading/.test(query(sandbox.document.body, '.trend-card').textContent))
   fail('hovering an empty day does not say it is empty');
 
-// Tags select what to chart: one click charts exactly the nodes carrying that tag.
+// Tags toggle like kinds: from nothing, one click charts exactly the nodes carrying that tag.
+query(sec, 'button', true).find(b => b.textContent === 'None').click();
+await new Promise(r => setTimeout(r, 50));
 const tagChip = query(sec, 'button', true).find(b => b.textContent.includes('roof'));
 if (!tagChip) fail('no tag chips to select by');
 tagChip.click();
 await new Promise(r => setTimeout(r, 50));
 if (totalsRow('Grid')) fail('selecting a tag left untagged nodes on the chart');
 if (!query(sec, 'tr', true).some(r => r.textContent.includes('Solar'))) fail('selecting a tag took its own node off the chart');
+// A second click takes the tag off again.
+query(sec, 'button', true).find(b => b.textContent.includes('roof')).click();
+await new Promise(r => setTimeout(r, 50));
+if (query(sec, 'tbody tr', true).length) fail('clicking a selected tag again did not take its nodes off');
 query(sec, 'button', true).find(b => b.textContent === 'All').click();
 await new Promise(r => setTimeout(r, 50));
 
@@ -300,7 +305,7 @@ if (!/Aug 19/.test(dayStatus) || !/→/.test(dayStatus)) fail(`the status line d
 // A day of power samples: when each node works, and what it draws at its quietest. Grid holds 400 W all day;
 // solar falls to zero at night and so never counts as always on.
 const dayHeads = query(sec, 'h3', true).map(h => h.textContent);
-for (const want of ['Peak power by node', 'Average power by hour of day', 'Base load by node'])
+for (const want of ['Average power by hour of day', 'Base load by node'])
   if (!dayHeads.includes(want)) fail(`no "${want}" chart for a day of power samples (got: ${dayHeads.join(', ')})`);
 const hourChart = query(chartsOf(sec), 'svg', true)[dayHeads.indexOf('Average power by hour of day')];
 if (query(hourChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit').length !== 24) fail('the hour-of-day chart does not have an hour per slot');

@@ -7,13 +7,17 @@ import { trendsPage, isReturn, signed } from './trends-shared.js';
 export function addTrendsSection(nav: any, sections: any) {
   // The same figures as a table, under the charts: a number is easier to read off than a bar.
   const tableBox = el('div', { class: 'trend-table-wrap' });
+  // The window in a handful of figures, above the charts: what the table's totals row says, where it is seen first.
+  const summaryBox = el('div', { class: 'trend-sum' });
   const { link, sec } = trendsPage(nav, sections, {
     label: 'Trends',
     icon: '▦',
     stackable: false,
+    above: () => [summaryBox],
     below: () => [tableBox],
     render: (p) => {
       const body = p.body();
+      summaryBox.innerHTML = '';
       if (!body?.ok) return;
 
       const days = p.days();
@@ -47,39 +51,27 @@ export function addTrendsSection(nav: any, sections: any) {
 
       const solar = byKind('solar'), batt = byKind('battery'), load = byKind('home');
 
-      // --- Net solar coverage ---------------------------------------------------------------------------
-      if (p.summable() && solar && (load || gridIn)) {
-        const pct = days.map((_, d) => netSolarPct(homeEnergy({
-          solar: solar[d],
-          ...(batt ? { battery: batt[d] } : {}),
-          ...(gridIn ? { grid: gridIn[d] } : {}),
-          ...(load ? { load: load[d] } : {}),
-        }), solar[d]));
-        if (pct.some(v => v != null)) {
-          const nsLines: Line[] = [{ label: 'Net solar', color: KIND_COLOR.solar, values: pct }];
-          const top = Math.max(100, ...pct.map(v => v ?? 0));
-          p.section(p.perDay() ? 'Net solar coverage per day' : 'Net solar coverage',
-            'Solar produced ÷ home energy.',
-            barChart({ days, lines: nsLines, units: '%', stacked: false, kind: p.kind(), max: top, pct: true, ref: 100, partial, fitTo: p.fitTo() }), nsLines);
-          drawn++;
-        }
-      }
-
-      // --- Self-sufficiency ---------------------------------------------------------------------------
-      // A share of energy over a period; instantaneous power is a different quantity.
-      if (p.summable() && gridIn && (load || solar)) {
-        const imported = sumOf(gridSupply);
-        const pct = days.map((_, d) => selfSufficiencyPct(homeEnergy({
+      // --- Solar share ------------------------------------------------------------------------------
+      // Two shares of the same home energy on one axis. A share of energy over a period; instantaneous power is a
+      // different quantity.
+      if (p.summable() && (solar || gridIn) && (load || gridIn) && (load || solar)) {
+        const imported = gridSupply.length ? sumOf(gridSupply) : null;
+        const homeOn = (d: number) => homeEnergy({
           ...(solar ? { solar: solar[d] } : {}),
           ...(batt ? { battery: batt[d] } : {}),
           ...(gridIn ? { grid: gridIn[d] } : {}),
           ...(load ? { load: load[d] } : {}),
-        }), imported[d]));
-        if (pct.some(v => v != null)) {
-          const ssLines: Line[] = [{ label: 'Self-sufficiency', color: KIND_COLOR.solar, values: pct }];
-          p.section(p.perDay() ? 'Self-sufficiency per day' : 'Self-sufficiency',
-            'Home energy not from the grid.',
-            barChart({ days, lines: ssLines, units: '%', stacked: false, kind: p.kind(), max: 100, pct: true, partial, fitTo: p.fitTo() }), ssLines);
+        });
+        const ns = days.map((_, d) => solar ? netSolarPct(homeOn(d), solar[d]) : null);
+        const ss = days.map((_, d) => gridIn && imported ? selfSufficiencyPct(homeOn(d), imported[d]) : null);
+        const shareLines: Line[] = [];
+        if (ns.some(v => v != null)) shareLines.push({ label: 'Net solar coverage', color: KIND_COLOR.solar, values: ns });
+        if (ss.some(v => v != null)) shareLines.push({ label: 'Self-sufficiency', color: 'var(--good)', values: ss });
+        if (shareLines.length) {
+          const top = Math.max(100, ...ns.map(v => v ?? 0));
+          p.section(p.perDay() ? 'Solar share per day' : 'Solar share',
+            'Net solar coverage is solar produced ÷ home energy, and can pass 100%. Self-sufficiency is the home energy not taken from the grid.',
+            barChart({ days, lines: shareLines, units: '%', stacked: false, kind: 'line', max: top, pct: true, ref: 100, partial, fitTo: p.fitTo() }), shareLines);
           drawn++;
         }
       }
@@ -147,6 +139,30 @@ export function addTrendsSection(nav: any, sections: any) {
       }));
       const shown = columns.filter(([, v]) => v && v.some(x => x != null)) as [string, (number | null)[]][];
       if (p.summable() && shown.length) {
+        const col = (name: string) => shown.find(([label]) => label === name)?.[1] || null;
+        const fig = (v: number | null) => v == null ? '—' : (Math.round(v * (p.cost() ? 100 : 10)) / (p.cost() ? 100 : 10)).toLocaleString('en-US');
+        // A share over the window counts only the days both of its figures are known for.
+        const share = (of: (number | null)[] | null, by: (number | null)[] | null, f: (home: number, x: number) => number | null) => {
+          if (!of || !by) return null;
+          const both = days.map((_, d) => d).filter(d => of[d] != null && by[d] != null);
+          return both.length ? f(both.reduce((a, d) => a + of[d]!, 0), both.reduce((a, d) => a + by[d]!, 0)) : null;
+        };
+        const tile = (label: string, value: string, sub: string, cls: string, title: string) =>
+          summaryBox.appendChild(el('div', { class: 'trend-sum-tile ' + cls, title },
+            el('div', { class: 'trend-sum-label', text: label }),
+            el('div', { class: 'trend-sum-value', text: value }),
+            el('div', { class: 'trend-sum-sub', text: sub })));
+        const home = col('Load'), sol = col('Solar'), net = col('Net grid'), inn = col('Grid used'), out = col('Grid exported');
+        const soFar = partial ? 'incl. today so far' : `over ${days.length} ${p.perDay() ? 'days' : 'readings'}`;
+        if (home) tile('Home', `${fig(sumKnown(home))} ${units}`, soFar, 'home', 'Measured load, else the balance of the measured sources.');
+        if (sol) tile('Solar', `${fig(sumKnown(sol))} ${units}`, soFar, 'solar', 'Solar produced in the window.');
+        if (net) tile('Net grid', `${fig(sumKnown(net))} ${units}`,
+          out ? `${fig(sumKnown(inn || []))} in · ${fig(sumKnown(out))} out` : 'all import', 'grid', 'Grid used − grid exported.');
+        const ss = share(home, inn, (h, x) => selfSufficiencyPct(h, x));
+        if (ss != null) tile('Self-sufficiency', `${Math.round(ss)}%`, 'not from the grid', 'battery', 'Over the days with both a load and a grid reading.');
+        const ns = share(home, sol, (h, x) => netSolarPct(h, x));
+        if (ns != null) tile('Net solar', `${Math.round(ns)}%`, 'solar ÷ home energy', 'solar', 'Over the days with both a load and a solar reading.');
+
         // Cost reads to the cent.
         const scale = p.cost() ? 100 : 10;
         const num = (v: number | null) => (v == null ? '—' : Math.round(v * scale) / scale === 0 ? '0' : (Math.round(v * scale) / scale).toLocaleString('en-US'));

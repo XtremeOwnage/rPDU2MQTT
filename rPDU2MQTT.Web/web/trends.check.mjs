@@ -71,7 +71,7 @@ if (!asked.length || !/days=31/.test(asked[0]) || !/metric=energy(&|$)/.test(ask
 
 const charts = query(sec, 'svg', true);
 const headings = query(sec, 'h3', true).map(h => h.textContent);
-for (const want of ['Grid per day', 'Self-sufficiency per day', 'Net solar coverage per day', 'Where the day’s energy came from'])
+for (const want of ['Grid per day', 'Solar share per day', 'Where the day’s energy came from'])
   if (!headings.includes(want)) fail(`no "${want}" chart (got: ${headings.join(', ')})`);
 
 // The page opens as stacked areas.
@@ -134,8 +134,14 @@ const totals = query(query(table, 'tfoot'), 'td', true);
 if (!totals.length || totals[1].textContent !== '159') fail(`the solar total over the window is wrong: ${totals.map(t => t.textContent).join('|')}`);
 if (!/readings are missing/.test(totals[1].title || totals[1].attrs?.title || '')) fail('a total summed over missing days does not say so');
 
+// The window in figures above the charts: the same solar total as the table's footer.
+const sum = query(sec, '.trend-sum');
+if (!sum || !/Solar\s*159 kWh/.test(sum.textContent)) fail(`the window summary does not give the solar total: ${sum?.textContent}`);
+if (!/Self-sufficiency/.test(sum.textContent) || !/Net solar/.test(sum.textContent)) fail(`the window summary has no shares: ${sum.textContent}`);
+
+// Net solar coverage and self-sufficiency share one chart, as two lines on one percent axis.
 // Self-sufficiency on 2026-08-05: home 28 + (7 - 9) + (9 - 4) = 31, of which 9 was imported: 70.97%.
-const ssChart = charts[headings.indexOf('Self-sufficiency per day')];
+const ssChart = charts[headings.indexOf('Solar share per day')];
 const ssHits = query(ssChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit');
 ssHits.find(h => h.attrs['data-day'] === '2026-08-05').dispatch('mouseenter', { clientX: 10, clientY: 10 });
 if (!query(sandbox.document.body, '.trend-card').textContent.includes('70.97')) fail('self-sufficiency for the day is wrong');
@@ -144,7 +150,7 @@ ssHits.find(h => h.attrs['data-day'] === '2026-08-03').dispatch('mouseenter', { 
 if (!/no reading|—/.test(query(sandbox.document.body, '.trend-card').textContent)) fail('a day missing an input was given a percentage anyway');
 
 // Net solar on 2026-08-05: 28 of the home's 31: 90.32%, with a reference line at 100%.
-const nsChart = charts[headings.indexOf('Net solar coverage per day')];
+const nsChart = ssChart;
 query(nsChart, 'rect', true).filter(r => (r.attrs.class || '') === 'trend-hit')
   .find(h => h.attrs['data-day'] === '2026-08-05').dispatch('mouseenter', { clientX: 10, clientY: 10 });
 if (!query(sandbox.document.body, '.trend-card').textContent.includes('90.32')) fail('net solar coverage for the day is wrong');
@@ -185,7 +191,7 @@ rangeSel.onchange({});
 await new Promise(r => setTimeout(r, 300));
 const intraHeads = query(sec, 'h3', true).map(h => h.textContent);
 if (!intraHeads.includes('Grid')) fail(`the grid is not charted within a day: ${intraHeads.join(', ')}`);
-if (intraHeads.some(h => /Self-sufficiency|Net solar/.test(h))) fail('a share of energy was drawn from instantaneous power');
+if (intraHeads.some(h => /Solar share/.test(h)) || query(sec, '.trend-sum')?.children?.length) fail('a share of energy was drawn from instantaneous power');
 
 // The chart type applies here too. Stacking is not a choice on this page: import and export, supply and
 // return have to net against each other.
