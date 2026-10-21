@@ -306,6 +306,13 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-chip.is-static { cursor: default; color: var(--muted); }
 .fp-chip-n { color: var(--faint); font-variant-numeric: tabular-nums; }
 .fp-swatch-dot.is-unknown { background: transparent; border: 1.5px dashed var(--warn); }
+.fp-swatch-dot.is-noload { background: var(--muted); opacity: .5; }
+.fp-chip-load { font-weight: 700; font-variant-numeric: tabular-nums; }
+/* Live load: each item on a circuit tinted by how hard that circuit works against its breaker; unmetered left grey. */
+.fp-item.is-load-easy:not(.is-selected) .fp-item-disc { fill: color-mix(in srgb, var(--good) 18%, var(--panel)); }
+.fp-item.is-load-busy:not(.is-selected) .fp-item-disc { fill: color-mix(in srgb, var(--warn) 24%, var(--panel)); }
+.fp-item.is-load-over:not(.is-selected) .fp-item-disc { fill: color-mix(in srgb, var(--bad) 28%, var(--panel)); }
+.fp-item.is-load-none .fp-item-disc { stroke: var(--muted); }
 @media print {
   body:has(.section.fp.active) nav, body:has(.section.fp.active) .appbar, body:has(.section.fp.active) #savebar,
   .section.fp.active .fp-bar, .section.fp.active .fp-modes, .section.fp.active .fp-palette, .section.fp.active .fp-opts,
