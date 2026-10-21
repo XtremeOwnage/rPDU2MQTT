@@ -42,7 +42,7 @@ internal sealed class LocationEndpoints(IPluginHost host, IPluginStore? store = 
     }
 
     /// <summary>The location tree with each place's total, every circuit, and every placement — what the floor plan page draws.</summary>
-    public async Task<object> TotalsAsync(Config cfg, string metric, string? period, CancellationToken ct)
+    public async Task<object> TotalsAsync(Config cfg, string metric, string? period, DateTime? at, CancellationToken ct)
     {
         var flow = cfg.EnergyFlow;
         var settings = LocationSettings.Of(cfg);
@@ -50,6 +50,21 @@ internal sealed class LocationEndpoints(IPluginHost host, IPluginStore? store = 
         var data = Merged();
         var index = LocationIndex.For(settings, flow);
         var topology = FlowTopology.For(data, flow);
+
+        // A past moment: power and current as history held them then, and nothing from the present.
+        string? source = null;
+        if (at is { } past && period is null)
+        {
+            if (host.History is not { } history)
+                return new { ok = false, message = "History is not enabled. Turn it on under Features to see a past moment." };
+            var ids = topology.Nodes.Concat(topology.Nodes.Select(n => n + FlowMetricKey.InSuffix)).ToList();
+            var power = await history.ValuesAtAsync(ids, metric, past, ct);
+            var amps = await history.ValuesAtAsync(CurrentNodes(flow), CurrentMetric, past, ct);
+            if (power.Count == 0 && amps.Count == 0)
+                return new { ok = false, message = $"No history for {past.ToLocalTime():g} from {history.Id}. The backend may not reach that far back." };
+            live = new CompositeFlowValueSource(new HistoricalFlowValueSource(power, metric), new HistoricalFlowValueSource(amps, CurrentMetric));
+            source = history.Id;
+        }
         var graph = FlowGraphBuilder.Build(data, flow, metric, live);
         var powerOf = LocationExport.ValuesOf(graph);
 
@@ -88,6 +103,9 @@ internal sealed class LocationEndpoints(IPluginHost host, IPluginStore? store = 
             ok = true,
             metric,
             period,
+            at = source is null ? null : at,
+            historical = source is not null,
+            source,
             units,
             message = periodNote,
             problems = index.Problems,
@@ -141,9 +159,7 @@ internal sealed class LocationEndpoints(IPluginHost host, IPluginStore? store = 
                 node = c.Node,
                 channels = c.Chain.Legs.Select(l => l.Channel).Where(ch => ch is not null).ToArray(),
                 power = c.Power,
-                // Measured amps, never inferred from watts: the breaker's channels, else the node that is the circuit.
-                current = PanelMap.Power(c.Chain, live, "current")
-                    ?? (c.Node is { } cn && live is not null && live.TryGetValue(cn, "current", out var measured) ? measured : (double?)null),
+                current = CurrentOf(c.Chain, c.Node, live),
                 gap = c.Gap.ToString().ToLowerInvariant(),
                 devices = c.Devices.Select(d => new { node = d.Node, label = Label(d.Node), value = d.Value }).ToArray(),
                 remainder = c.Remainder,
@@ -157,6 +173,48 @@ internal sealed class LocationEndpoints(IPluginHost host, IPluginStore? store = 
                 id = p.Id,
                 value = string.IsNullOrWhiteSpace(p.Node) ? null : powerOf(p.Node),
                 circuitKnown = Circuits.Find(map, p.Circuit) is not null,
+            }).ToArray(),
+        };
+    }
+
+    private const string CurrentMetric = "current";
+
+    /// <summary>Measured amps, never inferred from watts: the breaker's channels, else the node that is the circuit.</summary>
+    private static double? CurrentOf(BreakerChain chain, string? node, IFlowValueSource? values) =>
+        PanelMap.Power(chain, values, CurrentMetric)
+        ?? (node is not null && values is not null && values.TryGetValue(node, CurrentMetric, out var measured) ? measured : null);
+
+    /// <summary>Every node a circuit's current is read from: its breaker's channels, and the node that is the circuit.</summary>
+    private static List<string> CurrentNodes(EnergyFlowConfig flow)
+    {
+        var known = PanelNodes.NodeIds(flow);
+        return PanelMap.For(flow).Chains
+            .SelectMany(ch => ch.Legs.Select(l => l.Channel).Append(Circuits.NodeOf(ch, known)))
+            .OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>Each circuit's current through a window, from history, by the same rule as the live load.</summary>
+    public async Task<object> LoadSeriesAsync(Config cfg, DateTime? from, DateTime? to, string? step, CancellationToken ct)
+    {
+        if (host.History is not { } history)
+            return new { ok = false, message = "History is not enabled. Turn it on under Features to see a past moment." };
+        if (SeriesWindow.Between(from, to) is not { } window)
+            return new { ok = false, message = "Give a window of at least a minute, from and to." };
+        var flow = cfg.EnergyFlow;
+        var known = PanelNodes.NodeIds(flow);
+        var chains = PanelMap.For(flow).Chains.Where(ch => ch.Breaker.Amps is > 0).ToList();
+        var when = SeriesWindow.Instants(window.From, window.To, SeriesWindow.ClampStep(int.TryParse(step, out var st) ? st : null, 300));
+        var rows = await history.SeriesAsync(CurrentNodes(flow), CurrentMetric, when, ct);
+        var sources = rows.Select(r => new HistoricalFlowValueSource(r, CurrentMetric)).ToList();
+        return new
+        {
+            ok = true,
+            source = history.Id,
+            at = when.Select(w => DateTime.SpecifyKind(w, DateTimeKind.Utc)).ToList(),
+            circuits = chains.Select(ch =>
+            {
+                var node = Circuits.NodeOf(ch, known);
+                return new { @ref = Circuits.RefOf(ch), amps = ch.Breaker.Amps, values = sources.Select(s => CurrentOf(ch, node, s)).ToList() };
             }).ToArray(),
         };
     }

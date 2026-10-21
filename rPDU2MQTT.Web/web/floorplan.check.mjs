@@ -4,7 +4,7 @@
 // with a preview (#461); and rooms published to Home Assistant as areas (#467).
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-import { makeDom, query } from './domstub.mjs';
+import { makeDom, query, pickRange } from './domstub.mjs';
 
 const code = await readFile(new URL('../wwwroot/app.js', import.meta.url), 'utf8');
 const page = (f) => readFile(new URL('../../plugins/rPDU2MQTT.Plugin.Locations/wwwroot/floor-plans.' + f, import.meta.url), 'utf8');
@@ -76,6 +76,7 @@ const migratePlan = {
   skipped: [{ what: "room 'office'", why: 'Already exists as a room.' }],
 };
 const posted = {};
+const asked = [];
 const haPlan = {
   rooms: [{ room: 'kitchen', name: 'Kitchen', action: 'create', areaId: null, areaName: null, why: 'No area of this name exists, so one is created.' }],
   devices: [{ deviceId: 'd1', deviceName: 'Fridge plug', roomId: 'kitchen', room: 'Kitchen', action: 'set', currentArea: null, why: "Put in 'Kitchen'." }],
@@ -86,7 +87,16 @@ const { sandbox, getEl } = makeDom({
   bodies: (url, opts) => {
     // The plugin's actions answer as { ok, result }.
     const action = (result) => ({ ok: true, result });
-    if (url.includes('/api/integrations/locations/totals')) return action(locations(JSON.parse(opts.body).Plugins?.locations));
+    if (url.includes('/api/integrations/locations/totals')) {
+      asked.push(url);
+      const body = locations(JSON.parse(opts.body).Plugins?.locations);
+      // A past moment: the kitchen circuit as history held it then.
+      return action(url.includes('at=') ? { ...body, historical: true, at: '2026-08-03T19:30:00Z', source: 'prometheus', circuits: circuits.map(c => ({ ...c, current: 17 })) } : body);
+    }
+    if (url.includes('/api/integrations/locations/load-series')) {
+      asked.push(url);
+      return action({ ok: true, source: 'prometheus', at: ['2026-08-03T00:00:00Z', '2026-08-03T12:00:00Z', '2026-08-03T23:59:00Z'], circuits: [{ ref: 'main/B06', amps: 20, values: [4, 17, null] }] });
+    }
     if (url.includes('/api/integrations/locations/migrate')) { const b = JSON.parse(opts.body); posted.migrate = b; return action({ ok: true, tags: migrateTags, plan: b.mappings ? migratePlan : { creates: [], nodes: [], rules: [], removeTags: [], skipped: [] } }); }
     if (url.includes('/api/integrations/locations/areas-preview')) return action({ ok: true, plan: haPlan });
     if (url.includes('/api/integrations/locations/areas-apply')) return action({ ok: true, plan: haPlan, linked: { kitchen: 'area_kitchen' }, failed: [], message: 'Published 1 room(s) as areas.' });
@@ -345,6 +355,33 @@ const loadOff = query(loadBox(), 'input', false);
 loadOff.checked = false; loadOff.onchange();
 button('Power now', sec).onclick(); await wait(20);
 if (query(sec, '.fp-show-menu') && loadBox()) fail('the live load is offered outside the Circuits view');
+
+// A past moment picked in the header: the load as it stood then, moved along a timeline of each circuit's load.
+button('Circuits', sec).onclick(); await wait(20);
+const loadAgain = query(loadBox(), 'input', false);
+loadAgain.checked = true; loadAgain.onchange();
+asked.length = 0;
+await pickRange(getEl, { day: '2026-08-03', time: '14:30' });
+await wait(50);
+if (!asked.some(u => u.includes('/totals') && /at=2026-08-03T\d\d%3A30/.test(u))) fail(`the plan did not ask for the moment picked: ${asked.join(' | ')}`);
+if (!asked.some(u => u.includes('/load-series') && u.includes('from=') && u.includes('to='))) fail(`the timeline's loads were not asked for: ${asked.join(' | ')}`);
+if (!itemEl('fridge').classList.contains('is-load-over')) fail(`the past moment's 17 A was not shown: ${itemEl('fridge').className}`);
+if (!/Showing .* from prometheus/.test(textOf(query(sec, '.fp-status')))) fail(`nothing says a past moment is shown: ${textOf(query(sec, '.fp-status'))}`);
+const timeline = () => query(sec, '.fp-timeline');
+if (!timeline() || timeline().hidden) fail('no timeline to move through the past');
+if (!/Load/.test(textOf(query(sec, '.fp-show-menu'))) || /Live load/.test(textOf(query(sec, '.fp-show-menu')))) fail('the load is still called live while showing the past');
+// Today and This week are totals, not a moment: they say the picked time is not theirs.
+button('Today', sec).onclick(); await wait(20);
+if (!asked.at(-1).includes('period=today') || asked.at(-1).includes('at=')) fail(`Today asked for the past moment: ${asked.at(-1)}`);
+if (!timeline().hidden) fail('the timeline shows on Today');
+button('Circuits', sec).onclick(); await wait(20);
+await pickRange(getEl, { live: true });
+await wait(50);
+if (asked.at(-1).includes('at=')) fail(`back to live still asked for the past: ${asked.at(-1)}`);
+if (!itemEl('fridge').classList.contains('is-load-easy')) fail(`back to live did not show the live load: ${itemEl('fridge').className}`);
+if (!timeline().hidden) fail('the timeline stays up while live');
+query(loadBox(), 'input', false).checked = false; query(loadBox(), 'input', false).onchange();
+button('Power now', sec).onclick(); await wait(20);
 
 // Tapping an outlet while viewing brings its whole circuit forward: its items, and the rooms it serves.
 tap(itemEl('fridge'), 100, 100);

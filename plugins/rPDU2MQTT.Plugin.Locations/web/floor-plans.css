@@ -315,7 +315,7 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-item.is-load-none .fp-item-disc { stroke: var(--muted); }
 @media print {
   body:has(.section.fp.active) nav, body:has(.section.fp.active) .appbar, body:has(.section.fp.active) #savebar,
-  .section.fp.active .fp-bar, .section.fp.active .fp-modes, .section.fp.active .fp-palette, .section.fp.active .fp-opts,
+  .section.fp.active .fp-bar, .section.fp.active .fp-modes, .section.fp.active .fp-timeline, .section.fp.active .fp-palette, .section.fp.active .fp-opts,
   .section.fp.active .fp-zoom, .section.fp.active .fp-hint, .section.fp.active .fp-side, .section.fp.active .desc { display: none !important; }
   .section.fp.active .fp-body { display: block; }
   .section.fp.active .fp-stage { max-height: none; border: 0; box-shadow: none; break-inside: avoid; }
