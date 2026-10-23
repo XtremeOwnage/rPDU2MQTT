@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>rPDU2MQTT.Plugin.IotaWatt</AssemblyName>
+    <RootNamespace>rPDU2MQTT.Plugin.IotaWatt</RootNamespace>
+    <AssemblyTitle>IoTaWatt</AssemblyTitle>
+    <Description>Reads IoTaWatt inputs and outputs directly over its local query API, as node values.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Ship only the plugin DLL; the host provides Core. -->
+    <ProjectReference Include="..\..\rPDU2MQTT.Core\rPDU2MQTT.Core.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="rPDU2MQTT.Tests" />
+  </ItemGroup>
+
+</Project>

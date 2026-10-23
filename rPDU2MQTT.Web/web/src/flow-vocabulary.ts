@@ -67,8 +67,9 @@ export function sourceTypes(schema: any[]): [string, string][] {
   };
   const flow = (schema || []).find((n: any) => n.key === 'EnergyFlow');
   const typeNode = flow ? find(flow.properties || []) : null;
+  const labels = typeNode?.enumLabels || {};
   (typeNode?.enumValues || []).forEach((v: string) => {
-    if (v && !known.has(v)) known.set(v, v);
+    if (v && !known.has(v)) known.set(v, labels[v] || v);
   });
   return [...known.entries()] as [string, string][];
 }

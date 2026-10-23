@@ -29,4 +29,4 @@ DisabledPlugins:
   - vertiv
 ```
 
-Each entry is a plugin folder name (`vertiv`, `tigo`, `emoncms`, `locations`) or, for a loose DLL in `/app/plugins`, its file name without `.dll`. Case-insensitive.
+Each entry is a plugin folder name (`vertiv`, `tigo`, `emoncms`, `iotawatt`, `locations`) or, for a loose DLL in `/app/plugins`, its file name without `.dll`. Case-insensitive.

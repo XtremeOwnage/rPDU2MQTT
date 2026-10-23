@@ -47,6 +47,7 @@ A `load` cannot feed anything.
 | Modbus register (`modbus`) | A register on a [Modbus TCP](../integrations/modbus.md) connection | `Connection`, `Register`, `RegisterType`, `DataType`, `WordOrder` |
 | EmonCMS feed (`emoncms`) | A feed's current value | `Feed` (name, `tag/name` or id) |
 | Home Assistant entity (`homeassistant`) | An entity's state over the REST API | `Settings.Entity` |
+| IoTaWatt series (`iotawatt`) | An [IoTaWatt](../integrations/iotawatt.md) input or output | `Settings.Series`, `Settings.Device` |
 | Derived (`derived`) | Worked out from the node's other readings | none |
 
 Fields on every binding:

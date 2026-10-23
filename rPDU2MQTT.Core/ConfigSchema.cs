@@ -73,6 +73,10 @@ public sealed class SchemaNode
     /// <summary>One description per <see cref="EnumValues"/> entry, for a tooltip on each choice.</summary>
     public string[]? EnumDescriptions { get; set; }
 
+    /// <summary>A display name per <see cref="EnumValues"/> entry, where one differs from the value.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, string>? EnumLabels { get; set; }
+
     /// <summary>Show the choices as radios rather than a dropdown.</summary>
     public bool Radio { get; set; }
 
@@ -351,6 +355,11 @@ public static class ConfigSchema
                 .Concat(PluginSourceTypes.Select(p => p.Type))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+            // A plugin's own name for its type ("IoTaWatt series"), so the dropdown does not show the raw id.
+            if (PluginSourceTypes.Count > 0)
+                node.EnumLabels = PluginSourceTypes
+                    .GroupBy(p => p.Type, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First().Label, StringComparer.OrdinalIgnoreCase);
             node.DynamicChoices = true;
             node.Type = "enum";
             return node;
@@ -372,6 +381,11 @@ public static class ConfigSchema
         {
             var metrics = Core.Flow.FlowUnits.Bindable.AsEnumerable();
             node.EnumValues = (node.Required ? metrics : metrics.Prepend(string.Empty)).ToArray();
+            // A plugin's own name for its type ("IoTaWatt series"), so the dropdown does not show the raw id.
+            if (PluginSourceTypes.Count > 0)
+                node.EnumLabels = PluginSourceTypes
+                    .GroupBy(p => p.Type, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First().Label, StringComparer.OrdinalIgnoreCase);
             node.DynamicChoices = true;
             node.Type = "enum";
             return node;
@@ -383,6 +397,11 @@ public static class ConfigSchema
         if (type == typeof(string) && prop.GetCustomAttribute<TimeZoneChoicesAttribute>() is not null)
         {
             node.EnumValues = Core.Flow.EnergyPeriod.AvailableZones().Prepend(string.Empty).ToArray();
+            // A plugin's own name for its type ("IoTaWatt series"), so the dropdown does not show the raw id.
+            if (PluginSourceTypes.Count > 0)
+                node.EnumLabels = PluginSourceTypes
+                    .GroupBy(p => p.Type, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.First().Label, StringComparer.OrdinalIgnoreCase);
             node.DynamicChoices = true;
             node.Type = "enum";
             return node;
