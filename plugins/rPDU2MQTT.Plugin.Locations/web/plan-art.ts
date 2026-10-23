@@ -17,6 +17,7 @@ export const PLAN_KINDS: [string, string, string][] = [
   ['ev-charger', 'EV charger', 'Power'], ['panel', 'Panel', 'Power'], ['meter', 'Utility meter', 'Power'], ['pole', 'Utility pole', 'Power'],
   ['transformer', 'Transformer', 'Power'], ['solar', 'Solar', 'Power'], ['battery', 'Battery', 'Power'], ['inverter', 'Inverter', 'Power'],
   ['generator', 'Generator', 'Power'],
+  ['jack', 'Network jack', 'Network'], ['patch-panel', 'Patch panel', 'Network'], ['network-switch', 'Network switch', 'Network'],
 ];
 
 /// Things with a real footprint, in inches: [key, name, kind, width, depth, round]. Placed at their size, backs to the wall.
@@ -29,6 +30,12 @@ export const PLAN_FOOTPRINTS: [string, string, string, number, number, boolean][
 
 /// Kinds that supply or carry power rather than use it; they get a ring of their own.
 export const PLAN_SUPPLY_KINDS = ['panel', 'meter', 'pole', 'transformer', 'solar', 'battery', 'inverter', 'generator'];
+
+/// The network layer: wall jacks, and the patch panels and switches their cables land on. None is on a circuit.
+export const PLAN_NETWORK_KINDS = ['jack', 'patch-panel', 'network-switch'];
+/// Network gear with numbered ports, and how many a new one has.
+export const PLAN_PORTED_KINDS = ['patch-panel', 'network-switch'];
+export const PLAN_DEFAULT_PORTS = 24;
 
 export const PLAN_OPENINGS: [string, string][] = [['door', 'Door'], ['double-door', 'Double door'], ['sliding-door', 'Sliding door'], ['garage-door', 'Garage door'], ['window', 'Window'], ['opening', 'Opening']];
 
@@ -118,6 +125,11 @@ export function planGlyph(kind: string, r: number): any {
     // The drawing symbol: a box cut corner to corner, DC (=) in one half and AC (~) in the other.
     case 'inverter': rect(-0.85, -0.85, 1.7, 1.7, 0.15); line(-0.85, 0.85, 0.85, -0.85); line(-0.62, -0.5, -0.12, -0.5); line(-0.62, -0.26, -0.12, -0.26); path('M0.08 0.42 Q0.22 0.14 0.36 0.42 T0.64 0.42'); break;
     case 'generator': circle(0, 0, 0.85); text('G'); break;
+    // An RJ45 socket face-on: the opening, its latch notch, and the contacts along the top.
+    case 'jack': path('M-0.8 -0.6 H0.8 V0.35 H0.35 V0.75 H-0.35 V0.35 H-0.8 Z'); [-0.45, -0.15, 0.15, 0.45].forEach(x => line(x, -0.6, x, -0.25)); break;
+    // A row of ports along a strip, as a patch panel or switch reads from the front.
+    case 'patch-panel': rect(-1.05, -0.55, 2.1, 1.1, 0.1); [-0.7, -0.23, 0.23, 0.7].forEach(x => rect(x - 0.17, -0.2, 0.34, 0.4, 0.04)); break;
+    case 'network-switch': rect(-1.05, -0.55, 2.1, 1.1, 0.1); path('M-0.6 -0.18 H0.55 M0.35 -0.36 L0.6 -0.18 L0.35 0 M0.6 0.2 H-0.55 M-0.35 0.02 L-0.6 0.2 L-0.35 0.38'); break;
     default: rect(-0.9, -0.65, 1.8, 1.3, 0.2); line(-0.4, 0.9, 0.4, 0.9); break;
   }
   return g;
