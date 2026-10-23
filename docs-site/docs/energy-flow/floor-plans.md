@@ -17,6 +17,7 @@ title: Floor plans
 | Power now / Today / This week | Room shading |
 | Wiring | Show cable runs |
 | Sizes | Wall lengths and floor areas |
+| Show | Which kinds of item are drawn, the compass, and the **Network** layer (jacks, patch panels, switches and their cables) |
 | Circuits (below the plan) | One chip per breaker with its item count. Click to highlight the circuit. |
 
 === "Today"
@@ -68,10 +69,10 @@ On a phone, every tool shows in two rows, the plan fills the screen and fits wha
 
 ### Items
 
-`outlet`, `switch`, `fixture`, `fan`, `appliance`, `device`, `hvac`, `ev-charger`, `junction`, `panel`, `meter`, `pole`, `transformer`, `solar`, `battery`, `inverter`, `generator`.
+`outlet`, `switch`, `fixture`, `fan`, `appliance`, `device`, `hvac`, `ev-charger`, `junction`, `panel`, `meter`, `pole`, `transformer`, `solar`, `battery`, `inverter`, `generator`, `jack`, `patch-panel`, `network-switch`.
 
 - **At real size**: washer, dryer, fridge, freezer, range, dishwasher, water heater, furnace, condenser, rack, hot tub.
-- Wall items (outlets, switches) snap to the nearest wall and face the room.
+- Wall items (outlets, switches, network jacks) snap to the nearest wall and face the room.
 - **GFCI outlet**: everything wired from its load side is protected.
 - **Circuit** or **Metered by**: the breaker feeding it, or, when its circuit is not known, the node measuring it. A meter it already had is placed beneath its circuit in the energy flow.
 - **Trace its circuit**: switch a load on the item on and off; the matching channel is offered.
@@ -83,8 +84,20 @@ On a phone, every tool shows in two rows, the plan fills the screen and fits wha
 | `circuit` | Breaker to what it feeds |
 | `feeder` | Panel to subpanel |
 | `service` | Pole or transformer to meter and main panel |
+| `network` | Patch panel or switch to a wall jack |
 
-Wiring an item with no circuit to one on a known circuit puts it on that circuit.
+Wiring an item with no circuit to one on a known circuit puts it on that circuit. A wire between network items is always a `network` cable.
+
+### Network
+
+Place **Network jack**, **Patch panel** and **Network switch** from the Item tool's Network group.
+
+- A jack's **Patch panel port** is where its cable is punched down, or a switch port when it runs straight to the switch. One jack to a port.
+- A jack on a patch panel picks its **Switch port**: the patch cord, kept on the patch panel (`Patches`).
+- Cabling a jack on no port to a patch panel or switch puts it on the first free port.
+- Every jack is labelled on the plan: its own `Label`, else its port, `PP1-07`. A jack on no port is marked `?`.
+- A patch panel or switch lists its ports with the jack on each. Selecting one brings its jacks and cables forward.
+- **Port schedule…** (or **Export… › Network port schedule**): a PDF of every patch panel and switch, port by port, with the jack, room, floor and switch port. Free ports are printed blank; jacks on no port are listed last.
 
 ### Rooms and walls
 
@@ -105,7 +118,7 @@ Wiring an item with no circuit to one on a known circuit puts it on that circuit
 | Background | Upload a plan image (PNG, JPEG, WebP, SVG) |
 | Tools… › Rooms from tags | Turn room-like tags into rooms and areas, with a preview |
 | Tools… › Publish rooms to Home Assistant | See [Locations](locations.md#home-assistant) |
-| Export… | SVG, PNG, or all floors as JSON. **Import floor plans…** reads it back. |
+| Export… | SVG, PNG, all floors as JSON, or the network port schedule as PDF. **Import floor plans…** reads it back. |
 | Print | Print the floor |
 
 ## Where a node is
@@ -158,8 +171,12 @@ Plugins:
       - { Id: p_panel, Kind: panel, Label: Main Panel, Room: garage, Floor: ground, X: 48, Y: 200, Facing: 0, Panel: main }
       - { Id: p_fridge, Kind: appliance, Label: Fridge, Room: kitchen, Floor: ground, X: 430, Y: 82, Width: 85, Depth: 75, Footprint: fridge, Circuit: main/12, Node: fridge }
       - { Id: p_ko1, Kind: outlet, Label: Counter left, Room: kitchen, Floor: ground, X: 388, Y: 180, Facing: 0, Gfci: true, Circuit: main/2 }
+      - { Id: patch_panel_1, Kind: patch-panel, Room: garage, Floor: ground, X: 60, Y: 300, Ports: 24, Patches: [ { Port: 7, Switch: network_switch_1/7 } ] }
+      - { Id: network_switch_1, Kind: network-switch, Label: Core, Room: garage, Floor: ground, X: 60, Y: 330, Ports: 24 }
+      - { Id: jack_1, Kind: jack, Room: kitchen, Floor: ground, X: 388, Y: 240, Facing: 0, Port: patch_panel_1/7 }
     Runs:
       - { Id: r_fridge, Kind: circuit, Floor: ground, Circuit: main/12, From: p_panel, To: p_fridge, Points: [ {X: 76, Y: 180}, {X: 430, Y: 180} ] }
+      - { Id: r_jack1, Kind: network, Floor: ground, From: patch_panel_1, To: jack_1, Points: [ {X: 388, Y: 300} ] }
     AutoLocations:
       - { Match: "outlet:rack_pdu_1:*", Location: garage }
 PlanStorage:
@@ -167,7 +184,7 @@ PlanStorage:
   MaxMegabytes: 10
 ```
 
-`Circuit` is `<panel id>/<breaker number>`. Ids are unique across sites, floors, rooms and areas.
+`Circuit` is `<panel id>/<breaker number>`. A jack's `Port` and a patch cord's `Switch` are `<patch panel or switch id>/<port>`. Ids are unique across sites, floors, rooms and areas.
 
 Node, panel and breaker places (`Ext.locations`, under **Plugin settings**):
 

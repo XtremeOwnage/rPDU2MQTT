@@ -336,8 +336,12 @@ public static class PlacementKind
     public const string Battery = "battery";
     public const string Inverter = "inverter";
     public const string Generator = "generator";
+    /// <summary>A network wall jack.</summary>
+    public const string Jack = "jack";
+    public const string PatchPanel = "patch-panel";
+    public const string NetworkSwitch = "network-switch";
 
-    public static readonly string[] All = [Outlet, Switch, Fixture, Appliance, Device, Fan, Hvac, EvCharger, Junction, Panel, Meter, Pole, Transformer, Solar, Battery, Inverter, Generator];
+    public static readonly string[] All = [Outlet, Switch, Fixture, Appliance, Device, Fan, Hvac, EvCharger, Junction, Panel, Meter, Pole, Transformer, Solar, Battery, Inverter, Generator, Jack, PatchPanel, NetworkSwitch];
 }
 
 /// <summary>An outlet, switch, fixture, appliance or device placed on a floor plan (#464).</summary>
@@ -346,9 +350,10 @@ public class PlacementConfig
     [Description("Stable unique id for this item.")]
     public string Id { get; set; } = "";
 
-    [AllowedValues(PlacementKind.Outlet, PlacementKind.Switch, PlacementKind.Fixture, PlacementKind.Appliance, PlacementKind.Device, PlacementKind.Fan, PlacementKind.Hvac, PlacementKind.EvCharger, PlacementKind.Junction, PlacementKind.Panel, PlacementKind.Meter, PlacementKind.Pole, PlacementKind.Transformer, PlacementKind.Solar, PlacementKind.Battery, PlacementKind.Inverter, PlacementKind.Generator)]
+    [AllowedValues(PlacementKind.Outlet, PlacementKind.Switch, PlacementKind.Fixture, PlacementKind.Appliance, PlacementKind.Device, PlacementKind.Fan, PlacementKind.Hvac, PlacementKind.EvCharger, PlacementKind.Junction, PlacementKind.Panel, PlacementKind.Meter, PlacementKind.Pole, PlacementKind.Transformer, PlacementKind.Solar, PlacementKind.Battery, PlacementKind.Inverter, PlacementKind.Generator,
+        PlacementKind.Jack, PlacementKind.PatchPanel, PlacementKind.NetworkSwitch)]
     [DefaultValue(PlacementKind.Outlet)]
-    [Description("What this is: an outlet, switch, light fixture, fan, appliance, device, HVAC unit, EV charger, junction box, electrical panel, utility meter, utility pole, transformer, solar array, battery, inverter or generator.")]
+    [Description("What this is: an outlet, switch, light fixture, fan, appliance, device, HVAC unit, EV charger, junction box, electrical panel, utility meter, utility pole, transformer, solar array, battery, inverter, generator, network jack, patch panel or network switch.")]
     public string Kind { get; set; } = PlacementKind.Outlet;
 
     [Description("What it is called, for example 'Fridge' or 'Desk outlet'.")]
@@ -397,6 +402,27 @@ public class PlacementConfig
 
     [Description("The energy-flow node metering it, when it is individually metered — a smart plug, an ESPHome sensor, a PDU outlet.")]
     public string Node { get; set; } = "";
+
+    [Range(0, 512, ErrorMessage = "Ports must be between 0 and 512.")]
+    [Description("For a patch panel or network switch, how many ports it has.")]
+    public int? Ports { get; set; }
+
+    [Description("For a network jack, the port its cable is punched down on: a patch panel's or switch's id and the port number, 'patch_panel_1/12'. Blank when it is not known.")]
+    public string Port { get; set; } = "";
+
+    [Description("For a patch panel, the patch cords from its ports to switch ports.")]
+    public List<PatchConfig> Patches { get; set; } = new();
+}
+
+/// <summary>A patch cord from a patch panel port to a switch port.</summary>
+public class PatchConfig
+{
+    [Range(1, 512, ErrorMessage = "Port must be between 1 and 512.")]
+    [Description("The patch panel's port, from 1.")]
+    public int Port { get; set; }
+
+    [Description("The switch port it is patched to: the switch's id and the port number, 'network_switch_1/24'.")]
+    public string Switch { get; set; } = "";
 }
 
 /// <summary>A location for every derived node whose id matches a pattern (#461).</summary>
@@ -418,6 +444,8 @@ public static class RunKind
     public const string Feeder = "feeder";
     /// <summary>The utility service: pole or transformer to the meter and main panel.</summary>
     public const string Service = "service";
+    /// <summary>A network cable, from a patch panel or switch to a wall jack.</summary>
+    public const string Network = "network";
 }
 
 /// <summary>A cable run drawn on a floor plan, from one placed item to another through the points between (#464).</summary>
@@ -426,9 +454,9 @@ public class RunConfig
     [Description("Stable unique id for this run.")]
     public string Id { get; set; } = "";
 
-    [AllowedValues(RunKind.Circuit, RunKind.Feeder, RunKind.Service)]
+    [AllowedValues(RunKind.Circuit, RunKind.Feeder, RunKind.Service, RunKind.Network)]
     [DefaultValue(RunKind.Circuit)]
-    [Description("A branch circuit, a feeder between panels, or the utility service.")]
+    [Description("A branch circuit, a feeder between panels, the utility service, or a network cable.")]
     public string Kind { get; set; } = RunKind.Circuit;
 
     [Description("The id of the floor it is drawn on.")]

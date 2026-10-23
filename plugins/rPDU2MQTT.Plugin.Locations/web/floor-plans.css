@@ -436,3 +436,17 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-standalone-line { fill: none; stroke: var(--fg); stroke-linecap: square; stroke-linejoin: miter; pointer-events: none; }
 .fp-standalone.is-selected .fp-standalone-line { stroke: var(--accent); }
 .fp-draft.is-wall { stroke-opacity: .6; }
+
+/* Floor Plans: the network layer — jacks labelled with their port, and a patch panel's or switch's ports. */
+.fp-net-label { font-weight: 700; font-variant-numeric: tabular-nums; }
+.fp-net-label.is-unknown { fill: var(--warn); font-weight: 600; }
+.fp-ports { gap: 2px; max-height: 420px; overflow-y: auto; }
+.fp-port { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 2px 6px; border-radius: var(--r-xs); background: var(--panel2); font-size: 13px; }
+.fp-port.is-free { color: var(--faint); }
+.fp-port.is-over { box-shadow: inset 3px 0 0 var(--warn); }
+.fp-port-n { width: 2.4em; flex: none; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.fp-port-who { flex: 1; min-width: 0; overflow-wrap: anywhere; border: 0; background: none; color: inherit; font: inherit; text-align: left; padding: 4px 0; }
+button.fp-port-who { cursor: pointer; color: var(--fg); }
+button.fp-port-who:hover { text-decoration: underline; }
+.fp-port-sw { flex: none; max-width: 42%; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+select.fp-port-sw { min-height: 28px; }
