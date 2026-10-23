@@ -23,7 +23,7 @@ IoTaWatt inputs and outputs read directly over the device's local [query API](ht
 
 - **Test** reads each device's series list.
 - **List series** shows every input and output with its current value.
-- Bind a series on a node: [Bindings](../energy-flow/nodes.md#bindings), type `iotawatt`, settings `Series` and, with more than one device, `Device`.
+- Bind a series on a node: [Bindings](../energy-flow/nodes.md#bindings), type **IoTaWatt series**, then pick the series (and the device, with more than one). Stored as `Settings.Series` and `Settings.Device`.
 
 ## Metrics
 
