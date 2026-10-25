@@ -1306,8 +1306,9 @@ function sourceTypes(schema       )                     {
   };
   const flow = (schema || []).find((n     ) => n.key === 'EnergyFlow');
   const typeNode = flow ? find(flow.properties || []) : null;
+  const labels = typeNode?.enumLabels || {};
   (typeNode?.enumValues || []).forEach((v        ) => {
-    if (v && !known.has(v)) known.set(v, v);
+    if (v && !known.has(v)) known.set(v, labels[v] || v);
   });
   return [...known.entries()]                      ;
 }
@@ -1405,6 +1406,77 @@ function genericSourceEditor(src     , onChange            )             {
     el('td', {}, rows),
   ];
 }
+
+// --- IoTaWatt: pick a series off the device -----------------------------------------------------------
+
+let iotaWattSeriesCache                        = null;
+
+/// Every configured IoTaWatt's series with its current value, fetched once per page load.
+function iotaWattSeries(force = false)                 {
+  if (force || !iotaWattSeriesCache) {
+    iotaWattSeriesCache = api('/api/integrations/iotawatt/series', { method: 'POST' })
+      .then(r => (r.body?.result?.devices || [])         )
+      .catch(() => []         );
+  }
+  return iotaWattSeriesCache;
+}
+
+/// Device (only when more than one is configured) and series, as dropdowns filled from the device.
+function iotaWattSourceEditor(src     , onChange            )             {
+  if (!src.Settings) src.Settings = {};
+  const devices        = ((state.data?.Plugins?.iotawatt?.Devices) || []).filter((d     ) => d && d.Id && d.Enabled !== false);
+
+  const deviceSel = el('select', { style: { width: 'auto' } })                     ;
+  devices.forEach(d => deviceSel.appendChild(el('option', { value: d.Id, text: d.Name || d.Id })));
+  if (src.Settings.Device) deviceSel.value = src.Settings.Device;
+  deviceSel.style.display = devices.length > 1 ? '' : 'none';
+
+  const seriesSel = el('select', { style: { width: 'auto', minWidth: '160px' } })                     ;
+  const detail = el('div', { class: 'desc', style: { margin: '0' }, text: '' });
+  const refresh = btn('↻');
+  refresh.title = 'Read the series list from the IoTaWatt again.';
+
+  const device = () => devices.length > 1 ? deviceSel.value : (devices[0]?.Id || '');
+
+  const draw = (force = false) => {
+    seriesSel.innerHTML = '';
+    seriesSel.appendChild(el('option', { value: '', text: 'loading…' }));
+    iotaWattSeries(force).then(all => {
+      const d = all.find(x => x.device === device()) || (devices.length <= 1 ? all[0] : null);
+      const list        = d?.series || [];
+      const current = src.Settings.Series || '';
+      seriesSel.innerHTML = '';
+      seriesSel.appendChild(el('option', { value: '', text: list.length ? '— pick a series —' : 'none found' }));
+      list.forEach(x => seriesSel.appendChild(el('option', {
+        value: x.name, text: `${x.name}${x.value != null ? ` · ${formatNum(x.value)} ${x.unit || ''}` : ''}`,
+      })));
+      if (current && !list.some(x => x.name === current))
+        seriesSel.appendChild(el('option', { value: current, text: `${current} (not on device)` }));
+      seriesSel.value = current;
+
+      const picked = list.find(x => x.name === current);
+      detail.style.color = d && !d.ok ? 'var(--bad)' : 'var(--muted)';
+      detail.textContent = d && !d.ok ? (d.message || 'Could not read the IoTaWatt.')
+        : !devices.length ? 'No IoTaWatt is configured.'
+        : !current ? 'No series chosen — this binding will supply nothing.'
+        : picked ? `${picked.unit || ''} input${picked.value != null ? ` · now ${formatNum(picked.value)}` : ''}`
+        : `“${current}” is not on this IoTaWatt.`;
+    });
+  };
+
+  deviceSel.onchange = () => { src.Settings.Device = deviceSel.value || undefined; onChange(); draw(); };
+  seriesSel.onchange = () => {
+    if (seriesSel.value) src.Settings.Series = seriesSel.value; else delete src.Settings.Series;
+    if (devices.length > 1) src.Settings.Device = deviceSel.value;
+    onChange(); draw();
+  };
+  refresh.onclick = () => draw(true);
+  draw();
+
+  return [el('td', {}, deviceSel, ' ', seriesSel, ' ', refresh), el('td', {}, detail)];
+}
+
+registerSourceEditor('iotawatt', iotaWattSourceEditor);
 
 // ── energy.ts ───────────────────────────────────────────────────
 

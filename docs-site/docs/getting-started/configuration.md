@@ -41,6 +41,7 @@ No file found: the searched paths are logged, and the process exits after 15 sec
 | `Pdus` | [Vertiv rPDU](../vertiv/index.md) | [settings](../reference/settings/pdus.md) |
 | `Overrides` | [Overrides](../vertiv/overrides.md) | [settings](../reference/settings/overrides.md) |
 | `Modbus` | [Modbus TCP](../integrations/modbus.md) | [settings](../reference/settings/modbus.md) |
+| `Plugins.iotawatt` | [IoTaWatt](../integrations/iotawatt.md) | |
 | `EnergyFlow` | [Energy flow](../energy-flow/index.md) | [settings](../reference/settings/energyflow.md) |
 | `HomeAssistant` | [Home Assistant](../destinations/home-assistant.md) | [settings](../reference/settings/homeassistant.md) |
 | `Prometheus` | [Prometheus](../destinations/prometheus.md) | [settings](../reference/settings/prometheus.md) |
