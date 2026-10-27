@@ -302,19 +302,23 @@ export function trendsPage(nav: any, sections: any, spec: TrendsSpec) {
   // A counter that fell has been reset — some of them re-base weekly, some when the device restarts — and the
   // reading is then what has accumulated since. That is counted as the bar, and marked: whatever ran before
   // the reset is gone, so the figure is what is known to have been used, and may be short of the whole bar.
-  // A single low reading followed by a normal one is noise, not a reset.
+  // A fall that recovers later, or is under 10%, is noise, not a reset.
   const toDeltas = (b: any) => {
     let resets = 0;
     (b.series || []).forEach((s: any) => {
       const raw = s.values as (number | null)[];
       s.reset = raw.map(() => false);
+      // Highest later reading before the next gap.
+      const ahead: number[] = raw.map(() => -Infinity);
+      for (let i = raw.length - 2; i >= 0; i--)
+        ahead[i] = raw[i + 1] == null ? -Infinity : Math.max(raw[i + 1]!, ahead[i + 1]);
       let mark: number | null = null;
       s.values = raw.map((v, i) => {
         if (v == null) return null;
         if (i === 0 || raw[i - 1] == null || mark == null) { mark = v; return null; }
         if (v >= mark) { const d = v - mark; mark = v; return d; }
-        const next = raw[i + 1];
-        if (next != null && next >= mark) return 0;
+        if (ahead[i] >= mark) return 0;
+        if (v >= mark * 0.9) { mark = v; return 0; }
         s.reset[i] = true;
         resets++;
         mark = v;

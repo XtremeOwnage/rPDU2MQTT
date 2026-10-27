@@ -102,6 +102,13 @@ public class UntrackedSeriesTests
     }
 
     [Fact]
+    public void RisesIgnoreSmallOrRecoveredFalls()
+    {
+        Assert.Equal(new double?[] { null, 1, 0, 0, 0, 1 }, UntrackedSeries.Rises(new double?[] { 110, 111, 109, 109.5, 110, 112 }));
+        Assert.Equal(new double?[] { null, 1, 0 }, UntrackedSeries.Rises(new double?[] { 140, 141, 140.5 }));
+    }
+
+    [Fact]
     public void ABreakerCounterResetIsNotUntrackedEnergy()
     {
         // The panel rises 10 a day and its breakers 6 and 4 between them, so nothing is untracked. On the third day
