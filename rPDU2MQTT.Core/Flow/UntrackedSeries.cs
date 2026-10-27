@@ -57,19 +57,25 @@ public static class UntrackedSeries
 
     /// <summary>
     /// The rise of a counter at each step, read the way the Trends pages read one: a fall is a reset and the
-    /// reading is what has accumulated since, unless the next reading is back up, which makes it noise. The first
-    /// reading, and the first after a gap, has nothing to rise from.
+    /// reading is what has accumulated since, unless the counter is back up later in the run, or fell by less
+    /// than a tenth, which makes it noise. The first reading, and the first after a gap, has nothing to rise from.
     /// </summary>
     public static double?[] Rises(IReadOnlyList<double?> raw)
     {
         var rises = new double?[raw.Count];
+        // The highest reading still to come before the next gap.
+        var ahead = new double[raw.Count];
+        Array.Fill(ahead, double.NegativeInfinity);
+        for (var i = raw.Count - 2; i >= 0; i--)
+            ahead[i] = raw[i + 1] is { } next ? Math.Max(next, ahead[i + 1]) : double.NegativeInfinity;
         double? mark = null;
         for (var i = 0; i < raw.Count; i++)
         {
             if (raw[i] is not { } v) { mark = null; continue; }
             if (mark is not { } m) { mark = v; continue; }
             if (v >= m) { rises[i] = v - m; mark = v; continue; }
-            if (i + 1 < raw.Count && raw[i + 1] is { } next && next >= m) { rises[i] = 0; continue; }
+            if (ahead[i] >= m) { rises[i] = 0; continue; }
+            if (v >= m * 0.9) { rises[i] = 0; mark = v; continue; }
             rises[i] = v;
             mark = v;
         }

@@ -62,6 +62,10 @@ const counter = {
     // This one's counter re-based partway through the window.
     { node: 'grid', label: 'Grid', kind: 'grid', values: [8, 9, 1, 3] },
     { node: 'battery', label: 'Battery', kind: 'battery', values: [40, 0, 41, 42] },
+    // Steps back for two readings and is back up after: no reset, and only the climb past 111 is counted.
+    { node: 'panel', label: 'Main panel', kind: 'panel', values: [111, 109, 109.5, 113] },
+    // A slight step back on the last reading, with nothing after it.
+    { node: 'charger', label: 'Car charger', kind: 'outlet', values: [140, 141, 142, 141.5] },
   ],
 };
 
@@ -342,6 +346,11 @@ if (gridCells.some(c => /-/.test(c))) fail(`a counter re-base was charted as neg
 if (!gridCells.includes('4') || !gridCells.some(c => /3 of 4/.test(c))) fail(`the intervals either side of the re-base are wrong: ${gridCells.join(' | ')}`);
 const battCells = query(query(sec, 'tr', true).find(r => r.textContent.includes('Battery')), 'td', true).map(t => t.textContent);
 if (!battCells.includes('2') || battCells.some(c => /^4[12]$/.test(c))) fail(`a stray low reading booked the whole counter: ${battCells.join(' | ')}`);
+const cellsOf = (label) => query(query(sec, 'tr', true).find(r => r.textContent.includes(label)), 'td', true).map(t => t.textContent);
+if (!cellsOf('Main panel').includes('2') || cellsOf('Main panel').some(c => /^1(09|13)/.test(c)))
+  fail(`a counter that stepped back booked its whole total: ${cellsOf('Main panel').join(' | ')}`);
+if (!cellsOf('Car charger').includes('2') || cellsOf('Car charger').some(c => /^141/.test(c)))
+  fail(`a slight fall at the end booked its whole total: ${cellsOf('Car charger').join(' | ')}`);
 // …and the page says how much of what it drew came from a counter that had been re-based.
 const statusText = query(sec, '.ld-count')?.textContent || '';
 if (!/1 counted from a counter reset/.test(statusText)) fail(`the page does not say a reading came from a reset counter: "${statusText}"`);
