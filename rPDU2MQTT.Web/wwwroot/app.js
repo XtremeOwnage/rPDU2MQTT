@@ -11809,15 +11809,13 @@ function trendsPage(nav     , sections     , spec            ) {
   // A counter that fell has been reset — some of them re-base weekly, some when the device restarts — and the
   // reading is then what has accumulated since. That is counted as the bar, and marked: whatever ran before
   // the reset is gone, so the figure is what is known to have been used, and may be short of the whole bar.
-  // A fall is not a reset when the counter is back up later in the run, or when it fell by less than a tenth:
-  // a counter worked out from others, or read from different tiers, steps back a little, and booking one of
-  // those as a reset added the whole counter to a single bar.
+  // A fall that recovers later, or is under 10%, is noise, not a reset.
   const toDeltas = (b     ) => {
     let resets = 0;
     (b.series || []).forEach((s     ) => {
       const raw = s.values                     ;
       s.reset = raw.map(() => false);
-      // The highest reading still to come before the next gap.
+      // Highest later reading before the next gap.
       const ahead           = raw.map(() => -Infinity);
       for (let i = raw.length - 2; i >= 0; i--)
         ahead[i] = raw[i + 1] == null ? -Infinity : Math.max(raw[i + 1] , ahead[i + 1]);

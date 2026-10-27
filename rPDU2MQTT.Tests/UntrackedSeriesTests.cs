@@ -102,11 +102,9 @@ public class UntrackedSeriesTests
     }
 
     [Fact]
-    public void AStepBackIsNotAReset()
+    public void RisesIgnoreSmallOrRecoveredFalls()
     {
-        // Low for several readings and back up later: what ran is the climb past where it stood.
         Assert.Equal(new double?[] { null, 1, 0, 0, 0, 1 }, UntrackedSeries.Rises(new double?[] { 110, 111, 109, 109.5, 110, 112 }));
-        // A small fall with nothing after it to recover in, at the end of the window.
         Assert.Equal(new double?[] { null, 1, 0 }, UntrackedSeries.Rises(new double?[] { 140, 141, 140.5 }));
     }
 
