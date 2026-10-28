@@ -284,6 +284,7 @@ svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1060, height: 760 }
 const at = (x, y) => ({ clientX: x + 30, clientY: y + 30 });
 const buttons = (root = sec) => query(root, 'button', true);
 const button = (text, root = sec) => buttons(root).find(b => (b.textContent || '').trim() === text);
+const modeTab = (name) => query(sec, '.fp-layer', true).find(b => textOf(b) === name);
 const toolBtn = (name) => query(sec, '.fp-tool', true).find(b => b.getAttribute('aria-label') === name);
 const polygonFor = (room) => query(sec, 'polygon', true).find(p => p.dataset?.room === room);
 const itemEl = (id) => query(sec, 'g', true).find(g => g.dataset?.item === id);
@@ -498,13 +499,14 @@ toolBtn('Window').onclick();
 tap(svg, 200, 4);
 if (floor().Openings.length !== 2 || floor().Openings[1].Kind !== 'window') fail('a window could not be put in the wall');
 
-// Several at once: a box dragged across empty plot selects everything wholly inside it.
+// Several at once: a box dragged across empty plot selects everything of the mode's wholly inside it: under Floor plan,
+// the kitchen, its door and its window, and not the items in it.
 toolBtn('Select').onclick();
 key('Escape');
 drag(svg, [-20, -20], [405, 305]);
 if (!/\d+ selected/.test(textOf(side()))) fail(`a box drag did not select several things: ${textOf(side())}`);
 const boxed = Number(textOf(query(side(), 'h3')).match(/(\d+) selected/)[1]);
-if (boxed < 4) fail(`the box caught only ${boxed} things`);
+if (boxed !== 3) fail(`the box caught ${boxed} things, not the kitchen, its door and its window`);
 // Shift-click adds one more, and dragging any of them moves them all together.
 tap(polygonFor('office'), 600, 150);
 svg.dispatch('pointerdown', { ...at(600, 150), pointerId: 900, button: 0, target: polygonFor('office'), shiftKey: true });
@@ -641,7 +643,9 @@ if (svg.getAttribute('viewBox') === vbStill) fail('a middle-button drag did not 
 if (JSON.stringify(roomById('kitchen').Shape) !== kitchenBefore) fail('a middle-button drag moved the room under it');
 key('0');
 
-// A corner or a wire bend goes with a double-tap, or with Delete once it is picked.
+// A corner or a wire bend goes with a double-tap, or with Delete once it is picked. Rooms are shaped under Floor plan;
+// tapping a wire there takes Edit to Wiring with it selected.
+modeTab('Floor plan').onclick();
 toolBtn('Select').onclick();
 const denId = floor().Rooms.find(r => r.Name === 'Den').Id;
 tap(polygonFor(denId), 500, 350);
@@ -739,6 +743,7 @@ await wait(20);
 if (roomById('kitchen').HaArea !== 'area_kitchen') fail('the kitchen did not remember the area it was published as');
 
 // A door's panel sizes it in feet; dragging it along to the office's far wall turns it to lie along that wall.
+modeTab('Floor plan').onclick();
 toolBtn('Select').onclick();
 const doorId = floor().Openings[0].Id;
 tap(query(sec, 'rect', true).find(r => r.dataset?.opening === doorId), 400, 150);
@@ -755,6 +760,7 @@ tap(query(sec, 'polyline', true).find(p => p.dataset?.run), 300, 100);
 if (!/Length on the plan/.test(textOf(side())) || !/Supply side\s*Fridge/.test(textOf(side()))) fail(`the wire's panel does not describe it: ${textOf(side())}`);
 
 // Rooms sharing a wall share its corners: dragging the kitchen's corner moves the office's with it.
+modeTab('Floor plan').onclick();
 toolBtn('Select').onclick();
 key('Escape');
 tap(polygonFor('kitchen'), 200, 150);
@@ -962,7 +968,9 @@ if (!button('This floor as SVG', sheet())) fail('More › Export did not open th
 shut();
 button('Edit', sec).onclick();
 
-// Appliances at their real size: a washer dropped by the kitchen's left wall stands with its back to it, facing in.
+// Appliances at their real size, placed under Interior: a washer dropped by the kitchen's left wall stands with its back
+// to it, facing in.
+modeTab('Interior').onclick();
 toolBtn('Item').onclick();
 query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Washer').onclick();
 key('0');
@@ -1063,6 +1071,44 @@ if (!upstairs || Math.abs(upstairs.Width - 60 * ft * 100) > 1) fail(`adding a fl
 if (!query(sec, '.fp-empty').hidden) fail('the empty-floor card covers the plan while drawing');
 button('View', sec).onclick();
 if (query(sec, '.fp-empty').hidden) fail('an empty floor does not say how to start');
+
+// Edit fills the screen, in modes: each shows its own tools, and what belongs to another is seen but not moved.
+button('Edit', sec).onclick();
+if (!sec.classList.contains('is-full')) fail('Edit does not fill the screen');
+const edFloor = query(query(sec, '.fp-edbar'), 'select', false);
+edFloor.value = 'ground'; edFloor.onchange();
+if (!polygonFor('kitchen')) fail('the editor\'s own floor picker did not change floors');
+modeTab('Wiring').onclick();
+if (!toolBtn('Room').hidden || toolBtn('Wire').hidden || toolBtn('Item').hidden) fail('Wiring shows the room tools, or hides its own');
+toolBtn('Select').onclick();
+key('Escape');
+const kitchenShape = JSON.stringify(roomById('kitchen').Shape);
+drag(polygonFor('kitchen'), [200, 150], [260, 180]);
+if (JSON.stringify(roomById('kitchen').Shape) !== kitchenShape) fail('a room moved under Wiring');
+tap(polygonFor('kitchen'), 200, 150);
+if (query(side(), '.fp-name')?.value === 'Kitchen') fail('a room was selected under Wiring');
+modeTab('Floor plan').onclick();
+const fridgeAt = JSON.stringify(loc().Placements.find(p => p.Id === 'fridge'));
+if (!itemEl('fridge').classList.contains('is-aside')) fail('an item is not faded under Floor plan');
+drag(itemEl('fridge'), [100, 100], [160, 130]);
+if (JSON.stringify(loc().Placements.find(p => p.Id === 'fridge')) !== fridgeAt) fail('an item moved under Floor plan');
+tap(itemEl('fridge'), 100, 100);
+if (!modeTab('Interior').classList.contains('is-on') || query(side(), 'input', true).every(i => i.value !== 'Fridge')) fail('tapping the fridge under Floor plan did not select it in its own mode');
+key('r');
+if (!modeTab('Floor plan').classList.contains('is-on') || !toolBtn('Room').classList.contains('is-on')) fail('the Room tool\'s key did not take Edit to Floor plan');
+// Interior lays floors: the Floor tool tiles the kitchen, and a room there is selected but not moved.
+modeTab('Interior').onclick();
+toolBtn('Floor').onclick();
+query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Tile').onclick();
+tap(polygonFor('kitchen'), 200, 150);
+if (roomById('kitchen').Surface !== 'tile' || roomById('kitchen').SurfaceColor) fail(`the Floor tool did not tile the kitchen: ${roomById('kitchen').Surface}`);
+key('z', { ctrlKey: true });
+if (roomById('kitchen').Surface !== 'carpet') fail('undo did not put the carpet back');
+toolBtn('Select').onclick();
+drag(polygonFor('kitchen'), [200, 150], [260, 180]);
+if (JSON.stringify(roomById('kitchen').Shape) !== kitchenShape) fail('a room moved under Interior');
+button('Done', sec).onclick();
+if (sec.classList.contains('is-full') || !button('View', sec).classList.contains('is-on')) fail('Done did not go back to viewing');
 
 // Usable on a tablet and a phone: the side panel drops below the plan, the tools run across, pinch is ours.
 if (!/\.fp-svg\s*\{[^}]*touch-action:\s*none/.test(css)) fail('the plan does not take over touch, so a pinch would zoom the page');
