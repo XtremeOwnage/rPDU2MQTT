@@ -1,7 +1,8 @@
 // Floor Plans (#470): each floor drawn at real size with its rooms, outdoor zones and areas, doors and windows
 // (#463), the outlets, fixtures, devices and utility gear placed on it and the cable runs between them (#464,
 // #465), shaded live by what each room draws (#466), with a trace that finds an outlet's breaker from the
-// outlet (#468). One Edit mode with a tool palette, undo and redo, and sizes in feet or metres. A network layer
+// outlet (#468). Edit fills the screen, in modes (Floor plan, Interior, Wiring,
+// Network) that each have their own tools, with undo and redo and sizes in feet or metres. A network layer
 // maps each wall jack to its patch panel port and switch port, with a printable port schedule.
 
 type Place = {
@@ -21,7 +22,8 @@ type Live = {
 };
 type SelType = 'room' | 'area' | 'item' | 'opening' | 'run' | 'wall';
 type Selection = { type: SelType; id: string } | null;
-type Tool = 'select' | 'pan' | 'room' | 'outline' | 'wall' | 'zone' | 'area' | 'door' | 'window' | 'item' | 'wire' | 'constrain' | 'measure';
+type Tool = 'select' | 'pan' | 'room' | 'outline' | 'wall' | 'zone' | 'area' | 'door' | 'window' | 'item' | 'paint' | 'wire' | 'constrain' | 'measure';
+type Layer = 'plan' | 'interior' | 'wiring' | 'network';
 
 /// Why a place has no total, in the words the page uses. Never a zero.
 const FP_STATE_TEXT: Record<string, string> = {
@@ -41,10 +43,32 @@ const FP_TOOLS: [Tool, string, string, string][] = [
   ['door', 'Door', 'D', 'Tap a wall to put a door in it.'],
   ['window', 'Window', 'W', 'Tap a wall to put a window in it.'],
   ['item', 'Item', 'I', 'Tap to place an outlet, light, appliance, panel, meter, pole or anything else.'],
+  ['paint', 'Floor', 'F', 'Tap a room to lay this floor in it: wood, tile, carpet or another, in its own colour or one you pick.'],
   ['wire', 'Wire', 'L', 'Draw a cable run from the supply side: tap the panel or outlet feeding it, each bend, then the item it goes to. Network cables run from the patch panel to the jack.'],
   ['constrain', 'Constrain', 'K', 'Tap corners or walls, then hold them: joined, on a wall, colinear, parallel, perpendicular, level, plumb, an angle or a length.'],
   ['measure', 'Measure', 'M', 'Tap two points to measure between them, and set the plan’s scale from a distance you know.'],
 ];
+
+/// Edit's modes: what each one draws, in its tool groups. What belongs to another mode is shown but not moved.
+const FP_LAYERS: [Layer, string, Tool[][]][] = [
+  ['plan', 'Floor plan', [['select', 'pan'], ['room', 'outline', 'wall', 'zone', 'area'], ['door', 'window'], ['constrain', 'measure']]],
+  ['interior', 'Interior', [['select', 'pan'], ['paint', 'item'], ['measure']]],
+  ['wiring', 'Wiring', [['select', 'pan'], ['item', 'wire'], ['measure']]],
+  ['network', 'Network', [['select', 'pan'], ['item', 'wire'], ['measure']]],
+];
+/// What a tool shared by modes does in each.
+const FP_TOOL_IN: Record<string, string> = {
+  'item:interior': 'Tap to place an appliance or device. One at its real size stands with its back to the nearest wall.',
+  'item:wiring': 'Tap to place an outlet, switch, light, panel, meter, pole or anything else on a circuit.',
+  'item:network': 'Tap to place a wall jack, patch panel or network switch.',
+  'wire:network': 'Draw a network cable: tap the patch panel or switch, each bend, then the jack it goes to.',
+};
+/// The kinds of item each mode places and selects. Appliances are both furnishings and loads.
+const FP_LAYER_KINDS: Record<string, string[]> = {
+  interior: ['appliance', 'device', 'hvac'],
+  wiring: PLAN_KINDS.filter(k => k[2] !== 'Network').map(k => k[0]),
+  network: PLAN_NETWORK_KINDS,
+};
 
 /// A small line icon for each tool, drawn in the button's own colour.
 function fpToolIcon(tool: string): any {
@@ -60,10 +84,16 @@ function fpToolIcon(tool: string): any {
     case 'area': p('M4 5 H7 M10 5 H14 M17 5 H20 V8 M20 11 V14 M20 17 V19 H17 M14 19 H10 M7 19 H4 V16 M4 13 V10 M4 7 V5'); break;
     case 'door': p('M4 20 H20 M6 20 V6 M6 6 A14 14 0 0 1 20 20'); break;
     case 'window': p('M3 9 H21 M3 12 H21 M3 15 H21 M3 9 V15 M21 9 V15'); break;
+    case 'paint': p('M5 4 H17 V9 H5 Z M17 6.5 H20 V12 H11 V15 M10 15 H12 V21 H10 Z'); break;
     case 'item': p('M12 3 A9 9 0 1 0 12.01 3 Z M9.5 8 V12 M14.5 8 V12 M12 15.5 V16'); break;
     case 'wire': p('M4 18 C8 18 8 6 12 6 S16 18 20 18 M4 18 A1.5 1.5 0 1 0 4.01 18 M20 18 A1.5 1.5 0 1 0 20.01 18'); break;
     case 'measure': p('M3 16 L16 3 L21 8 L8 21 Z M7 12 L9 14 M10 9 L12 11 M13 6 L15 8'); break;
     case 'constrain': p('M4 20 L20 4 M4 20 H13 M8 20 A6 6 0 0 0 7 15 M17 7 L20 4 L17 1'); break;
+    case 'close': p('M6 6 L18 18 M18 6 L6 18'); break;
+    case 'view': p('M2 12 C5 6 19 6 22 12 C19 18 5 18 2 12 Z M12 9 A3 3 0 1 0 12.01 9 Z'); break;
+    case 'snap': p('M4 4 H8 V8 H4 Z M16 16 H20 V20 H16 Z M8 6 H18 V16'); break;
+    case 'panel': p('M4 4 H20 V20 H4 Z M14 4 V20'); break;
+    case 'more': p('M5 12 H5.01 M12 12 H12.01 M19 12 H19.01'); break;
     case 'lock': p('M7 11 V8 A5 5 0 0 1 17 8 V11 M5 11 H19 V21 H5 Z'); break;
     case 'undo': p('M9 7 L4 12 L9 17 M4 12 H14 A6 6 0 0 1 14 24'); break;
     case 'redo': p('M15 7 L20 12 L15 17 M20 12 H10 A6 6 0 0 0 10 24'); break;
@@ -140,6 +170,12 @@ export default function mount(sec: any, host: any) {
   let floorId = remembered('floor', '');
   let mode: 'view' | 'edit' = 'view';
   let tool: Tool = 'select';
+  let layer = (FP_LAYERS.find(l => l[0] === remembered('layer', 'plan'))?.[0] || 'plan') as Layer;
+  /// The selection panel folded away while editing, for the whole width of the plan.
+  let sideHidden = remembered('side-hidden', '0') === '1';
+  /// What the Floor tool lays: a surface, and a colour of its own or none.
+  let paintSurface = remembered('paint', 'wood');
+  let paintColor = '';
   /// The room a rectangle drawn with the Room tool is added to, taking the space from the rooms under it.
   let claimFor = '';
   let itemKind = remembered('kind', 'outlet');
@@ -332,6 +368,49 @@ export default function mount(sec: any, host: any) {
   /// Everything selected, the primary first.
   const selected = (): NonNullable<Selection>[] => [...(selection ? [selection] : []), ...extra];
   const isSel = (type: SelType, id: string) => selected().some(x => x.type === type && x.id === id);
+
+  // --- Edit's modes ---------------------------------------------------------------------------------
+  const layerTools = (l: Layer) => (FP_LAYERS.find(x => x[0] === l)?.[2] || []).flat();
+  const itemLayers = (it: any): Layer[] => {
+    const ls = (Object.keys(FP_LAYER_KINDS) as Layer[]).filter(l => FP_LAYER_KINDS[l].includes(it?.Kind));
+    return ls.length ? ls : ['wiring'];
+  };
+  /// Whether a mode works on a thing: rooms are laid out under Floor plan and floored under Interior; items and wires by kind.
+  const inLayer = (x: NonNullable<Selection>, l: Layer = layer): boolean =>
+    x.type === 'room' ? l === 'plan' || l === 'interior'
+    : x.type === 'item' ? itemLayers(itemOf(x.id)).includes(l)
+    : x.type === 'run' ? (runOf(x.id)?.Kind === 'network' ? 'network' : 'wiring') === l
+    : l === 'plan';
+  /// Rooms and walls move only under Floor plan.
+  const movesIn = (x: NonNullable<Selection>) => inLayer(x) && (layer === 'plan' || (x.type !== 'room' && x.type !== 'area'));
+  const homeLayer = (x: NonNullable<Selection>) => FP_LAYERS.map(l => l[0]).find(l => inLayer(x, l)) || 'plan';
+  /// The item kind and wire kind kept in step with the mode, so a tool never places what its mode does not hold.
+  const fitKinds = () => {
+    const kinds = FP_LAYER_KINDS[layer];
+    if (kinds && !kinds.includes(itemKind)) { itemKind = kinds[0]; itemPreset = ''; }
+    if (layer !== 'interior') itemPreset = '';
+    if (layer === 'network') wireKind = 'network';
+    else if (wireKind === 'network') wireKind = 'circuit';
+  };
+  const setLayer = (l: Layer) => {
+    if (l !== layer) {
+      layer = l; remember('layer', l);
+      draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; cPicks = []; claimFor = '';
+      if (selection && !inLayer(selection)) { selection = null; selectedCorner = -1; selectedBend = -1; }
+      extra = extra.filter(x => inLayer(x));
+      if (!selection && extra.length) selection = extra.shift()!;
+    }
+    if (!layerTools(layer).includes(tool)) tool = 'select';
+    fitKinds();
+  };
+  /// Something chosen from another mode, by a list, a menu or a tap, takes Edit to that mode.
+  const followSelection = () => {
+    if (mode !== 'edit' || !selection || inLayer(selection)) return;
+    layer = homeLayer(selection); remember('layer', layer);
+    if (!layerTools(layer).includes(tool)) tool = 'select';
+    extra = extra.filter(x => inLayer(x));
+    fitKinds();
+  };
   const cleanSelection = () => {
     extra = extra.filter(exists);
     if (!selection) return;
@@ -387,16 +466,62 @@ export default function mount(sec: any, host: any) {
     const b = el('button', { class: 'fp-seg-btn', text: label, type: 'button' });
     b.setAttribute('role', 'tab');
     b.onclick = () => {
-      const entering = m === 'edit' && mode !== 'edit';
-      mode = m; tool = 'select'; draft = []; rectStart = null; wireDraft = null; measure = null; selectedCorner = -1; render();
-      // On a phone, Edit brings the tools and the plan up to fill the screen.
-      if (entering && narrow()) palette.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+      if (m !== mode) viewFor = '';
+      mode = m; tool = 'select'; draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; selectedCorner = -1;
+      if (m === 'edit') setLayer(layer);
+      render();
     };
     modeBtns[m] = b;
     modeBar.appendChild(b);
   });
   const subBar = el('div', { class: 'fp-sub' });
   sec.appendChild(el('div', { class: 'fp-modes' }, modeBar, subBar));
+
+  // Edit fills the screen: a bar of its own with the floor, undo and redo, the modes, what the plan shows, and Done.
+  const iconBtn = (icon: string, label: string, title = label) => {
+    const b = el('button', { class: 'small fp-icon-btn', type: 'button', title }, fpToolIcon(icon));
+    b.setAttribute('aria-label', label);
+    return b;
+  };
+  const leave = () => { mode = 'view'; tool = 'select'; draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; selectedCorner = -1; viewFor = ''; render(); };
+  const edClose = iconBtn('close', 'Done editing');
+  edClose.onclick = leave;
+  const edFloor = el('select', { class: 'fp-floor', title: 'Which floor to edit.' }) as HTMLSelectElement;
+  edFloor.onchange = () => { floorSel.value = edFloor.value; floorSel.onchange(); };
+  const edUndo = iconBtn('undo', 'Undo', 'Undo (Ctrl+Z)');
+  edUndo.onclick = () => undo();
+  const edRedo = iconBtn('redo', 'Redo', 'Redo (Ctrl+Y)');
+  edRedo.onclick = () => redo();
+  const layerBar = el('div', { class: 'fp-layers' });
+  layerBar.setAttribute('role', 'tablist');
+  layerBar.setAttribute('aria-label', 'Editing mode');
+  const layerBtns: Record<string, any> = {};
+  FP_LAYERS.forEach(([l, label]) => {
+    const b = el('button', { class: 'fp-layer', type: 'button', text: label });
+    b.setAttribute('role', 'tab');
+    b.onclick = () => { setLayer(l); render(); };
+    layerBtns[l] = b;
+    layerBar.appendChild(b);
+  });
+  const viewMenu = el('details', { class: 'fp-show fp-view' }) as HTMLDetailsElement;
+  const viewBody = el('div', { class: 'fp-show-menu' });
+  viewMenu.append(el('summary', { class: 'fp-ed-btn', title: 'What the plan shows while editing.' }, fpToolIcon('view'), el('span', { class: 'fp-ed-label', text: 'View' })), viewBody);
+  viewMenu.addEventListener('toggle', () => { if (!viewMenu.open) drawSub(); });
+  const edSnap = el('button', { class: 'fp-ed-btn', type: 'button', title: 'Corners snap to other rooms’ corners and edges, and everything to a fine grid.' }, fpToolIcon('snap'), el('span', { class: 'fp-ed-label', text: 'Snap' }));
+  edSnap.classList.add('fp-wide-only');
+  edSnap.onclick = () => { snapOn = !snapOn; remember('snap', snapOn ? '1' : '0'); drawSub(); };
+  const edFloorMenu = el('button', { class: 'fp-ed-btn', type: 'button', title: 'Floor settings, background, adding a floor, and tools.' }, fpToolIcon('more'), el('span', { class: 'fp-ed-label', text: 'Floor' }));
+  edFloorMenu.setAttribute('aria-label', 'Floor settings, background and tools');
+  edFloorMenu.onclick = () => moreBtn.onclick();
+  const edSide = el('button', { class: 'fp-ed-btn fp-ed-side', type: 'button', title: 'Show or hide the panel beside the plan.' }, fpToolIcon('panel'));
+  edSide.setAttribute('aria-label', 'Panel');
+  edSide.onclick = () => { sideHidden = !sideHidden; remember('side-hidden', sideHidden ? '1' : '0'); drawSub(); drawPlan(); };
+  const edDone = btn('Done', 'primary');
+  edDone.classList.add('fp-ed-done');
+  edDone.onclick = leave;
+  const edBar = el('div', { class: 'fp-edbar' }, edClose, edFloor, el('span', { class: 'fp-undo' }, edUndo, edRedo), el('span', { class: 'fp-ed-gap' }), layerBar,
+    el('span', { class: 'fp-ed-gap' }), viewMenu, edSnap, edFloorMenu, edSide, edDone);
+  sec.appendChild(edBar);
 
   // The header's past time: Power now and Circuits show that moment, moved along a timeline of each circuit's load.
   let range: { at: number; day: string; minutes: number } | null = null;
@@ -480,7 +605,9 @@ export default function mount(sec: any, host: any) {
   sec.appendChild(body);
 
   const pickTool = (t: Tool) => {
-    if (mode !== 'edit') mode = 'edit';
+    if (mode !== 'edit') { mode = 'edit'; viewFor = ''; }
+    // A tool from another mode, by its key, takes Edit to that mode.
+    if (!layerTools(layer).includes(t)) setLayer((['wiring', 'plan', 'interior', 'network'] as Layer[]).find(l => layerTools(l).includes(t)) || 'plan');
     tool = t; claimFor = ''; draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; selectedCorner = -1;
     render();
   };
@@ -998,7 +1125,7 @@ export default function mount(sec: any, host: any) {
       const onRef = lit && focus ? focus : r.Circuit || [r.From, r.To].map(id => id && itemOf(id)?.Circuit).find(Boolean) || '';
       const colour = net ? netColor(runDev(r)) : r.Kind === 'circuit' ? (loadOn ? loadColor(onRef) || 'var(--muted)' : planCircuitColor(lit && focus ? focus : r.Circuit))
         : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
-      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit || net ? '' : ' is-unknown'}` });
+      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${mode === 'edit' && !inLayer({ type: 'run', id: r.Id }) ? ' is-aside' : ''}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit || net ? '' : ' is-unknown'}` });
       const sw = (r.Kind === 'circuit' ? 2.5 : net ? 2 : 4) * u * (sel ? 1.5 : lit ? 2.2 : trace ? 1.8 : 1);
       // On the circuit being looked at, a wire is cased in the page's colour so it parts from a wall it runs along.
       if (lit || (trace && !dim)) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-case', 'stroke-width': sw + 6 * u }));
@@ -1066,13 +1193,14 @@ export default function mount(sec: any, host: any) {
       const fx = facing == null ? 0 : Math.cos(facing) * face, fy = facing == null ? 0 : Math.sin(facing) * face;
       const off = facing == null ? { X: 0, Y: 0 } : { X: fx + Math.cos(facing) * (r + 3 * u), Y: fy + Math.sin(facing) * (r + 3 * u) };
       if (facing != null) svg.appendChild(svgEl('line', { x1: item.X + fx, y1: item.Y + fy, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
-      const g = svgEl('g', { class: 'fp-item' + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
+      const aside = mode === 'edit' && !inLayer({ type: 'item', id: item.Id });
+      const g = svgEl('g', { class: 'fp-item' + (aside ? ' is-aside' : '') + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
       g.dataset.item = item.Id;
       if (loadOn && item.Circuit && !supply) { const l = loadOf(item.Circuit); g.classList.add(l == null ? 'is-load-none' : l >= 0.8 ? 'is-load-over' : l >= 0.6 ? 'is-load-busy' : 'is-load-easy'); }
       let rr = r;
       let hasArt = false;
       if (sized) {
-        const body = svgEl('g', { class: 'fp-body' + (sel ? ' is-selected' : '') + (dim ? ' is-dim' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : '') + (known ? '' : ' is-unknown'), transform: `translate(${item.X},${item.Y}) rotate(${Number(item.Rotation) || 0})` });
+        const body = svgEl('g', { class: 'fp-body' + (aside ? ' is-aside' : '') + (sel ? ' is-selected' : '') + (dim ? ' is-dim' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : '') + (known ? '' : ' is-unknown'), transform: `translate(${item.X},${item.Y}) rotate(${Number(item.Rotation) || 0})` });
         body.dataset.item = item.Id;
         const shape = item.Round
           ? svgEl('ellipse', { rx: W / 2, ry: D / 2, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u })
@@ -1204,7 +1332,7 @@ export default function mount(sec: any, host: any) {
     }
 
     // Editing handles: each corner, and a midpoint on each edge that adds a corner when dragged.
-    const target = mode === 'edit' && !extra.length ? shapeOf(selection) : null;
+    const target = mode === 'edit' && layer === 'plan' && !extra.length ? shapeOf(selection) : null;
     if (target && (target.Shape || []).length >= 3) {
       const poly: Pt[] = target.Shape;
       poly.forEach((a, i) => {
@@ -1298,7 +1426,7 @@ export default function mount(sec: any, host: any) {
     });
 
     // The plot's edges, to drag it bigger or smaller: every side, and the corners.
-    if (mode === 'edit' && tool === 'select') {
+    if (mode === 'edit' && layer === 'plan' && tool === 'select') {
       const hr = 8 * u * hs();
       ([['l', 0, h / 2], ['r', w, h / 2], ['t', w / 2, 0], ['b', w / 2, h], ['rb', w, h], ['lt', 0, 0]] as [string, number, number][]).forEach(([side, x, y]) => {
         const hd = svgEl('rect', { x: x - hr, y: y - hr, width: hr * 2, height: hr * 2, rx: 2 * u, class: 'fp-plot-handle is-' + side });
@@ -1431,6 +1559,11 @@ export default function mount(sec: any, host: any) {
     }
     return {} as any;
   };
+  /// While editing, the rooms and walls under another mode are the ground it draws on: pressed there, it is empty floor.
+  const layerHit = (hit: any) => {
+    const under = mode === 'edit' ? hitSel(hit) : null;
+    return under && !inLayer(under) && homeLayer(under) === 'plan' ? {} : hit;
+  };
   /// Select what was hit. With Shift, Ctrl or ⌘ it is added to the selection, or taken out if already in it.
   const selectHit = (hit: any, additive = false) => {
     const next: Selection = hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening } : hit.run ? { type: 'run', id: hit.run } : hit.wall ? { type: 'wall', id: hit.wall }
@@ -1452,7 +1585,7 @@ export default function mount(sec: any, host: any) {
   /// The corner or wall a drag here would take hold of, on any room or area, selected or not: a corner when one is
   /// close, else a wall. The selected shape wins where they meet, then rooms over areas.
   const grabAt = (p: Pt): { sh: any; corner?: number; edge?: number; locked: boolean } | null => {
-    if (mode !== 'edit' || !GRAB_TOOLS.has(tool) || extra.length) return null;
+    if (mode !== 'edit' || layer !== 'plan' || !GRAB_TOOLS.has(tool) || extra.length) return null;
     const sel = shapeOf(selection);
     const order = [...(sel ? [sel] : []), ...roomsNow().filter(r => r !== sel && (r.Shape || []).length >= 3), ...areasNow().filter(a => a !== sel && (a.Shape || []).length >= 3)];
     const cReach = 10 * upp() * hs(), wReach = 7 * upp() * hs();
@@ -1545,19 +1678,19 @@ export default function mount(sec: any, host: any) {
       return;
     }
     const p = toPlan(e);
-    const hit = hitOf(e);
+    const hit = layerHit(hitOf(e));
     const additive = !!(e.shiftKey || e.ctrlKey || e.metaKey);
     gesture = { start: p, sx: e.clientX, sy: e.clientY, hit, moved: false, pushed: false, vb: { ...vb }, kind: 'pan', additive };
     if (e.button === 1 || spaceDown) { e.preventDefault?.(); gesture.kind = 'pan'; dragging = true; return; }
 
     const plotSide = (() => { for (let n = e.target; n && n !== svg; n = n.parentNode || n.parent) if (n.dataset?.plot) return n.dataset.plot as string; return ''; })();
-    if (mode === 'edit' && tool === 'select' && plotSide) {
+    if (mode === 'edit' && tool === 'select' && layer === 'plan' && plotSide) {
       const f = floorNow()!.floor;
       gesture.kind = 'plot'; gesture.side = plotSide;
       gesture.orig = { w: Number(f.Width) || 1000, h: Number(f.Height) || 700 };
       gesture.all = movable(everything());
       gesture.box = boundsOf(gesture.all);
-    } else if (mode === 'edit' && tool === 'select' && labelOf(e) && !additive) {
+    } else if (mode === 'edit' && tool === 'select' && layer === 'plan' && labelOf(e) && !additive) {
       // A room's name drags on its own, to wherever in the room reads best.
       const room = roomsNow().find(r => r.Id === labelOf(e));
       if (room?.Locked) { gesture.kind = 'none'; saidLocked(); }
@@ -1579,6 +1712,8 @@ export default function mount(sec: any, host: any) {
       else if (hit.rotate) { gesture.kind = 'rotate'; }
       else if (grab && !additive) holdGrab(grab, !!e.altKey);
       else if (under && additive) { gesture.kind = 'none'; }
+      // Another mode's item or wire, or a room under Interior, is selected by a tap but not moved: a drag pans.
+      else if (under && !movesIn(under)) { gesture.kind = 'none'; }
       else if (under) {
         // Dragging anything already selected moves the whole selection; anything else is selected first.
         if (!isSel(under.type, under.id)) selectHit(hit);
@@ -1781,7 +1916,7 @@ export default function mount(sec: any, host: any) {
     if (g.kind === 'marquee') {
       const b = planBounds([g.start, p]);
       marquee = null;
-      const caught = everything().filter(x => insideBox(x, b));
+      const caught = everything().filter(x => inLayer(x) && insideBox(x, b));
       const all = g.additive ? [...selected(), ...caught.filter(x => !isSel(x.type, x.id))] : caught;
       selection = all[0] || null; extra = all.slice(1); selectedCorner = -1;
       render();
@@ -2029,6 +2164,16 @@ export default function mount(sec: any, host: any) {
       if (!room && !PLAN_SUPPLY_KINDS.includes(itemKind) && !PLAN_PORTED_KINDS.includes(itemKind)) toast('Placed outdoors — outside every room. That is fine for an exterior light or a yard outlet.', true);
       return;
     }
+    if (tool === 'paint') {
+      const room = planShapeAt(roomsNow(), p);
+      if (!room) return;
+      act(() => {
+        room.Surface = paintSurface;
+        if (paintColor) room.SurfaceColor = paintColor; else delete room.SurfaceColor;
+        selection = { type: 'room', id: room.Id }; extra = [];
+      });
+      return;
+    }
     if (tool === 'door' || tool === 'window') {
       const kind = tool === 'window' ? 'window' : doorKind;
       const wall = wallAt(p);
@@ -2262,27 +2407,55 @@ export default function mount(sec: any, host: any) {
 
   const drawSub = () => {
     subBar.innerHTML = '';
+    viewBody.innerHTML = '';
+    const editing = mode === 'edit';
+    // Viewing, what the plan shows sits in a row over it; editing, it folds into the bar's View menu.
+    const into = editing ? viewBody : subBar;
     Object.entries(modeBtns).forEach(([m, b]) => { b.classList.toggle('is-on', m === mode); b.setAttribute('aria-selected', String(m === mode)); });
-    if (mode === 'view') {
+    if (!editing) {
       subBar.appendChild(seg([['now', 'Power now'], ['today', 'Today'], ['week', 'This week'], ['circuits', 'Circuits']], period, v => { period = v; remember('period', v); load(); },
         'Shade by what each room is drawing now, or by the energy it has used over a period; or show every circuit in its own colour, to trace where each goes.'));
     }
-    subBar.appendChild(check('Wiring', showWiring, v => { showWiring = v; remember('wiring', v ? '1' : '0'); drawPlan(); }, 'Show cable runs, and ring each item in its circuit’s colour.'));
-    if (constraintsNow().length && !(mode === 'view' && window.matchMedia?.('(max-width: 560px)').matches)) subBar.appendChild(check('Constraints', showCons, v => { showCons = v; remember('cons', v ? '1' : '0'); drawPlan(); }, 'Show the constraints held on this floor: fixed lengths, angles, parallel and square walls.'));
-    const show = el('details', { class: 'fp-show' }) as HTMLDetailsElement;
-    const pick = el('div', { class: 'fp-show-menu' });
-    [...SHOW_GROUPS.map(g => [g[0], g[1]]), ['compass', 'Compass']].forEach(([k, label]) => pick.appendChild(check(label, !hidden.has(k), v => {
+    into.appendChild(check('Wiring', showWiring, v => { showWiring = v; remember('wiring', v ? '1' : '0'); drawPlan(); }, 'Show cable runs, and ring each item in its circuit’s colour.'));
+    if (constraintsNow().length && !(mode === 'view' && window.matchMedia?.('(max-width: 560px)').matches)) into.appendChild(check('Constraints', showCons, v => { showCons = v; remember('cons', v ? '1' : '0'); drawPlan(); }, 'Show the constraints held on this floor: fixed lengths, angles, parallel and square walls.'));
+    const shows = [...SHOW_GROUPS.map(g => [g[0], g[1]]), ['compass', 'Compass']].map(([k, label]) => check(label, !hidden.has(k), v => {
       if (v) hidden.delete(k); else hidden.add(k);
       remember('hide', [...hidden].join(',')); drawPlan();
-    })));
-    if (mode === 'view' && period === 'circuits') pick.appendChild(check(past() ? 'Load' : 'Live load', showLoad, v => { showLoad = v; remember('load', v ? '1' : '0'); drawPlan(); },
-      'Colour each circuit and what is on it by the current it draws against its breaker’s rating. A circuit with no current reading is left uncoloured.'));
-    show.append(el('summary', { class: 'ld-inst', text: hidden.size ? `Show (${hidden.size} hidden)` : 'Show', title: 'Choose which kinds of item the plan draws, and whether it shows the compass.' }), pick);
-    show.addEventListener('toggle', () => { if (!show.open) drawSub(); });
-    subBar.appendChild(show);
-    subBar.appendChild(check('Sizes', showSizes, v => { showSizes = v; remember('sizes', v ? '1' : '0'); drawPlan(); }, 'Show every wall’s length and each room’s floor area.'));
-    if (mode === 'edit' && floorBelow()) subBar.appendChild(check('Floor below', showBelow, v => { showBelow = v; remember('below', v ? '1' : '0'); drawPlan(); }, 'Show the floor beneath this one faintly, to line this one up with it.'));
-    if (mode === 'edit') subBar.appendChild(check('Snap', snapOn, v => { snapOn = v; remember('snap', v ? '1' : '0'); }, 'Corners snap to other rooms’ corners and edges, and everything to a fine grid.'));
+    }));
+    if (editing) {
+      into.appendChild(check('Sizes', showSizes, v => { showSizes = v; remember('sizes', v ? '1' : '0'); drawPlan(); }, 'Show every wall’s length and each room’s floor area.'));
+      if (floorBelow()) into.appendChild(check('Floor below', showBelow, v => { showBelow = v; remember('below', v ? '1' : '0'); drawPlan(); }, 'Show the floor beneath this one faintly, to line this one up with it.'));
+      // A phone's bar has no room for Snap, so it is here instead.
+      const snap = check('Snap', snapOn, v => { snapOn = v; remember('snap', v ? '1' : '0'); }, 'Corners snap to other rooms’ corners and edges, and everything to a fine grid.');
+      snap.classList.add('fp-narrow-only');
+      into.append(snap, el('span', { class: 'fp-kinds-group', text: 'Show' }), ...shows);
+    } else {
+      const show = el('details', { class: 'fp-show' }) as HTMLDetailsElement;
+      const pick = el('div', { class: 'fp-show-menu' }, ...shows);
+      if (period === 'circuits') pick.appendChild(check(past() ? 'Load' : 'Live load', showLoad, v => { showLoad = v; remember('load', v ? '1' : '0'); drawPlan(); },
+        'Colour each circuit and what is on it by the current it draws against its breaker’s rating. A circuit with no current reading is left uncoloured.'));
+      show.append(el('summary', { class: 'ld-inst', text: hidden.size ? `Show (${hidden.size} hidden)` : 'Show', title: 'Choose which kinds of item the plan draws, and whether it shows the compass.' }), pick);
+      show.addEventListener('toggle', () => { if (!show.open) drawSub(); });
+      subBar.appendChild(show);
+      subBar.appendChild(check('Sizes', showSizes, v => { showSizes = v; remember('sizes', v ? '1' : '0'); drawPlan(); }, 'Show every wall’s length and each room’s floor area.'));
+    }
+
+    // Edit's own bar: the mode, Snap, the panel, and undo and redo.
+    sec.classList.toggle('is-full', editing);
+    sec.classList.toggle('is-side-hidden', editing && sideHidden);
+    FP_LAYERS.forEach(([l]) => { layerBtns[l].classList.toggle('is-on', l === layer); layerBtns[l].setAttribute('aria-selected', String(l === layer)); });
+    sec.dataset.layer = editing ? layer : '';
+    edSnap.classList.toggle('is-on', snapOn);
+    edSnap.setAttribute('aria-pressed', String(snapOn));
+    edSide.classList.toggle('is-on', !sideHidden);
+    edSide.setAttribute('aria-pressed', String(!sideHidden));
+    edUndo.disabled = !history.canUndo();
+    edRedo.disabled = !history.canRedo();
+    // The rail holds this mode's tools in their groups; the others wait, hidden, for their mode.
+    const groups = FP_LAYERS.find(l => l[0] === layer)![2];
+    const onRail = new Set<string>(groups.flat());
+    groups.forEach((g, gi) => g.forEach((t, ti) => { const b = toolBtns[t]; b.hidden = false; b.classList.toggle('is-gap', gi > 0 && ti === 0); palette.appendChild(b); }));
+    FP_TOOLS.forEach(([t]) => { if (!onRail.has(t)) { toolBtns[t].hidden = true; toolBtns[t].classList.remove('is-gap'); palette.appendChild(toolBtns[t]); } });
 
     palette.hidden = mode !== 'edit';
     // What changes the floor shows only while editing; what takes it away only while viewing.
@@ -2298,7 +2471,7 @@ export default function mount(sec: any, host: any) {
     opts.hidden = mode !== 'edit';
     if (mode === 'edit') drawOpts();
     // In Edit the options bar says what the tool does, so nothing sits over the plan being drawn on.
-    const what = FP_TOOLS.find(t => t[0] === tool)?.[3] || '';
+    const what = FP_TOOL_IN[`${tool}:${layer}`] || FP_TOOLS.find(t => t[0] === tool)?.[3] || '';
     if (mode === 'edit' && what && !opts.querySelector('.fp-opts-note')) opts.appendChild(el('span', { class: 'fp-opts-note', text: what }));
     const how = mode === 'view' ? 'Tap a room or item for its detail. Drag to pan, pinch or Ctrl+wheel to zoom.' : '';
     hint.textContent = how;
@@ -2342,9 +2515,12 @@ export default function mount(sec: any, host: any) {
       add(seg(PLAN_OPENINGS.filter(o => o[0] !== 'window'), doorKind, v => { doorKind = v; render(); }));
     } else if (tool === 'item') {
       const grid = el('div', { class: 'fp-kinds' });
+      const kinds = FP_LAYER_KINDS[layer] || [];
       ['Inside', 'Power', 'Network'].forEach(group => {
-        grid.appendChild(el('span', { class: 'fp-kinds-group', text: group === 'Inside' ? 'Loads' : group === 'Power' ? 'Supply & utility' : 'Network' }));
-        PLAN_KINDS.filter(k => k[2] === group).forEach(([k, label]) => {
+        const here = PLAN_KINDS.filter(k => k[2] === group && kinds.includes(k[0]));
+        if (!here.length) return;
+        grid.appendChild(el('span', { class: 'fp-kinds-group', text: group === 'Inside' ? (layer === 'interior' ? 'Appliances and devices' : 'Loads') : group === 'Power' ? 'Supply & utility' : 'Network' }));
+        here.forEach(([k, label]) => {
           const b = el('button', { class: 'fp-kind' + (itemKind === k && !itemPreset ? ' is-on' : ''), type: 'button', title: label });
           const icon = svgEl('svg', { viewBox: '-13 -13 26 26', class: 'fp-kind-icon' });
           icon.appendChild(svgEl('circle', { r: 12, class: 'fp-item-disc' }));
@@ -2357,8 +2533,8 @@ export default function mount(sec: any, host: any) {
         });
       });
       // Appliances and equipment at their real size: dropped by a wall, they stand with their back to it.
-      grid.appendChild(el('span', { class: 'fp-kinds-group', text: 'At real size' }));
-      PLAN_FOOTPRINTS.forEach(([key, label, kind, w, d, round]) => {
+      if (layer === 'interior') grid.appendChild(el('span', { class: 'fp-kinds-group', text: 'At real size' }));
+      if (layer === 'interior') PLAN_FOOTPRINTS.forEach(([key, label, kind, w, d, round]) => {
         const size = sys() === 'imperial' ? `${w}″ × ${d}″` : `${Math.round(w * 2.54)} × ${Math.round(d * 2.54)} cm`;
         const b = el('button', { class: 'fp-kind is-size' + (itemPreset === key ? ' is-on' : ''), type: 'button', title: `${label}, ${round ? `${size.split(' ×')[0]} across` : size}` });
         const icon = svgEl('svg', { viewBox: '-13 -13 26 26', class: 'fp-kind-icon' });
@@ -2374,9 +2550,28 @@ export default function mount(sec: any, host: any) {
       });
       add(grid);
       if (itemKind === 'outlet') add(check('GFCI', gfciNext, v => { gfciNext = v; remember('gfci', v ? '1' : '0'); }, 'Place GFCI outlets: whatever is wired from their load side is protected by them.'));
+    } else if (tool === 'paint') {
+      const grid = el('div', { class: 'fp-kinds' });
+      PLAN_SURFACES.forEach(([v, label]) => {
+        const b = el('button', { class: 'fp-kind fp-surface-pick' + (paintSurface === v ? ' is-on' : ''), type: 'button', title: label });
+        const sw = el('span', { class: 'fp-surface-swatch' + (v ? '' : ' is-plain') });
+        const c = paintColor || PLAN_SURFACE_COLOURS[v]?.[0] || '';
+        if (c) sw.style.background = c;
+        b.append(sw, el('span', { text: label }));
+        b.setAttribute('aria-label', label);
+        b.setAttribute('aria-pressed', String(paintSurface === v));
+        b.onclick = () => { paintSurface = v; remember('paint', v); render(); };
+        grid.appendChild(b);
+      });
+      const colour = el('input', { type: 'color', class: 'fp-colour', value: paintColor || PLAN_SURFACE_COLOURS[paintSurface]?.[0] || '#c8c8c8', title: 'A colour of its own: the pattern stays, recoloured.' }) as HTMLInputElement;
+      colour.onchange = () => { paintColor = colour.value; render(); };
+      const own = btn('Its own colour');
+      own.disabled = !paintColor;
+      own.onclick = () => { paintColor = ''; render(); };
+      add(grid, el('span', { class: 'fp-colour-row' }, colour, own));
     } else if (tool === 'wire') {
-      add(seg([['circuit', 'Circuit'], ['feeder', 'Feeder'], ['service', 'Service'], ['network', 'Network']], wireKind, v => { wireKind = v; render(); },
-        'A branch circuit, a feeder between panels, the utility service from the pole, or a network cable from a patch panel or switch to a jack.'));
+      if (layer !== 'network') add(seg([['circuit', 'Circuit'], ['feeder', 'Feeder'], ['service', 'Service']], wireKind, v => { wireKind = v; render(); },
+        'A branch circuit, a feeder between panels, or the utility service from the pole.'));
       if (wireDraft) {
         const done = btn('Finish here', 'primary');
         done.disabled = (wireDraft.from ? 1 : 0) + wireDraft.pts.length < 2;
@@ -4082,14 +4277,17 @@ export default function mount(sec: any, host: any) {
   };
 
   const render = () => {
+    followSelection();
     const floors = floorsAll();
-    floorSel.innerHTML = '';
-    floors.forEach(x => floorSel.appendChild(el('option', { value: x.floor.Id, text: `${x.site.Name || x.site.Id} › ${x.floor.Name || x.floor.Id}` })));
-    if (!floors.length) floorSel.appendChild(el('option', { value: '', text: 'no floors yet' }));
     const fl = floorNow();
     if (fl && fl.floor.Id !== floorId) floorId = fl.floor.Id;
-    floorSel.value = floorId;
-    floorSel.disabled = !floors.length;
+    [floorSel, edFloor].forEach(sel => {
+      sel.innerHTML = '';
+      floors.forEach(x => sel.appendChild(el('option', { value: x.floor.Id, text: `${x.site.Name || x.site.Id} › ${x.floor.Name || x.floor.Id}` })));
+      if (!floors.length) sel.appendChild(el('option', { value: '', text: 'no floors yet' }));
+      sel.value = floorId;
+      sel.disabled = !floors.length;
+    });
     floorBtn.disabled = !fl;
     bgBtn.disabled = !fl;
     // Refit when the floor changes, or when something asks for it by clearing viewFor; never mid-edit.
@@ -4117,7 +4315,7 @@ export default function mount(sec: any, host: any) {
     if (ctrl && (k === 'd' || k === 'D') && mode === 'edit' && selection) { e.preventDefault(); duplicate(); return; }
     if (ctrl && (k === 'a' || k === 'A') && mode === 'edit') {
       e.preventDefault();
-      const all = everything();
+      const all = everything().filter(x => inLayer(x));
       selection = all[0] || null; extra = all.slice(1); selectedCorner = -1;
       if (tool !== 'select') tool = 'select';
       render();
@@ -4128,6 +4326,7 @@ export default function mount(sec: any, host: any) {
       if (!menu.hidden) { closeMenu(); return; }
       if (draft.length || rectStart || wireDraft || measure) { draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; hover = null; render(); }
       else if (selection) { selection = null; extra = []; render(); }
+      else if (mode === 'edit' && tool !== 'select') pickTool('select');
       return;
     }
     if (k === 'Enter' && wireDraft) { finishWire(''); return; }

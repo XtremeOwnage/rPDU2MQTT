@@ -450,3 +450,102 @@ button.fp-port-who { cursor: pointer; color: var(--fg); }
 button.fp-port-who:hover { text-decoration: underline; }
 .fp-port-sw { flex: none; max-width: 42%; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 select.fp-port-sw { min-height: 28px; }
+
+/* Edit fills the screen: its own bar, the tools in a rail, the plan, and the panel beside it. */
+.fp-edbar { display: none; }
+.section.fp.active.is-full {
+  position: fixed; inset: 0 0 var(--savebar-h, 0px) 0; z-index: 46; display: flex; flex-direction: column;
+  max-width: none; margin: 0; padding: 0; background: var(--bg); animation: none;
+}
+body:has(.section.fp.active.is-full) { overflow: hidden; }
+body:has(.section.fp.active.is-full) .savebar { z-index: 47; }
+.section.fp.is-full > h2, .section.fp.is-full > .fp-intro, .section.fp.is-full > .fp-bar, .section.fp.is-full > .fp-modes,
+.section.fp.is-full > .fp-timeline { display: none !important; }
+.section.fp.is-full > .fp-banner { order: 1; margin: 0; border-radius: 0; }
+.section.fp.is-full .fp-edbar {
+  order: 0; display: flex; align-items: center; gap: 6px; min-height: 56px; padding: 6px 12px;
+  border-bottom: 1px solid var(--line); background: var(--panel);
+}
+.fp-edbar .fp-floor { min-width: 0; max-width: 260px; font-weight: 600; }
+.fp-ed-gap { flex: 1; }
+.fp-ed-btn {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 6px 10px; border: 1px solid var(--line);
+  border-radius: var(--r-sm); background: var(--panel2); color: var(--fg); font: inherit; font-size: 13px; font-weight: 550; cursor: pointer; list-style: none;
+}
+.fp-ed-btn::-webkit-details-marker { display: none; }
+.fp-ed-btn .fp-tool-icon { width: 18px; height: 18px; }
+.fp-ed-btn.is-on { border-color: var(--accent); background: var(--accent-bg); color: var(--accent-hi); }
+.fp-edbar .fp-view > summary::after { content: none; }
+.fp-edbar .fp-show-menu { left: auto; right: 0; z-index: 30; }
+.fp-show-menu .fp-kinds-group { margin-top: 8px; }
+.fp-layers { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--r-sm); background: var(--panel3); }
+.fp-layer {
+  min-height: 32px; padding: 4px 14px; border: 0; border-radius: calc(var(--r-sm) - 2px); background: none;
+  color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.fp-layer:hover { color: var(--fg); background: none; }
+.fp-layer.is-on { background: var(--panel); color: var(--fg); box-shadow: var(--shadow-sm); }
+.section.fp.is-full > .fp-body {
+  order: 2; flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: 60px minmax(0, 1fr) 340px; gap: 0; align-items: stretch;
+}
+.section.fp.is-full.is-side-hidden > .fp-body { grid-template-columns: 60px minmax(0, 1fr); }
+.section.fp.is-full.is-side-hidden .fp-side:not(.is-sheet) { display: none; }
+.section.fp.is-full .fp-palette {
+  position: static; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; overflow-y: auto;
+  border: 0; border-right: 1px solid var(--line); border-radius: 0; box-shadow: none;
+}
+.section.fp.is-full .fp-tool { width: 42px; height: 42px; padding: 0; justify-content: center; }
+.section.fp.is-full .fp-tool[hidden] { display: none; }
+.section.fp.is-full .fp-tool-name { display: none; }
+.section.fp.is-full .fp-tool.is-gap { margin-top: 9px; position: relative; }
+.section.fp.is-full .fp-tool.is-gap::before { content: ''; position: absolute; top: -7px; left: 6px; right: 6px; height: 1px; background: var(--line); }
+.section.fp.is-full .fp-main { display: flex; flex-direction: column; min-height: 0; }
+.section.fp.is-full .fp-opts { flex: none; margin: 0; min-height: 44px; border: 0; border-bottom: 1px solid var(--line-soft); border-radius: 0; }
+.section.fp.is-full .fp-stage {
+  flex: 1 1 0; min-height: 0; height: auto !important; max-height: none; aspect-ratio: auto !important; border: 0; border-radius: 0; box-shadow: none;
+}
+.section.fp.is-full .fp-legend { flex: none; max-height: 30%; overflow: auto; padding: 6px 10px; border-top: 1px solid var(--line-soft); }
+.section.fp.is-full[data-layer="plan"] .fp-legend, .section.fp.is-full[data-layer="interior"] .fp-legend,
+.section.fp.is-full[data-layer="wiring"] .fp-net-legend, .section.fp.is-full[data-layer="network"] .fp-circuits:not(.fp-net-legend) { display: none; }
+.section.fp.is-full[data-layer="network"] .fp-legend:not(:has(.fp-net-legend)),
+.section.fp.is-full[data-layer="wiring"] .fp-legend:not(:has(.fp-circuits:not(.fp-net-legend))) { display: none; }
+.section.fp.is-full.has-sheet .fp-legend { padding-bottom: 6px; }
+.section.fp.is-full .fp-side:not(.is-sheet) {
+  position: static; max-height: none; height: 100%; box-sizing: border-box; border: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none;
+}
+/* What belongs to another mode stays in sight, faded, and is not moved from here. */
+.fp-item.is-aside, .fp-body.is-aside, .fp-run.is-aside { opacity: .38; }
+.section.fp[data-layer="wiring"] .fp-room, .section.fp[data-layer="network"] .fp-room,
+.section.fp[data-layer="wiring"] .fp-surface, .section.fp[data-layer="network"] .fp-surface,
+.section.fp[data-layer="interior"] .fp-standalone, .section.fp[data-layer="wiring"] .fp-standalone, .section.fp[data-layer="network"] .fp-standalone { opacity: .45; }
+.fp-surface-swatch { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel3); }
+.fp-surface-swatch.is-plain { background: repeating-linear-gradient(45deg, var(--line) 0 2px, transparent 2px 6px); }
+
+@media (max-width: 1100px) {
+  .section.fp.is-full > .fp-body { grid-template-columns: 60px minmax(0, 1fr) 300px; }
+  .fp-ed-label { display: none; }
+}
+@media (max-width: 560px) {
+  /* A phone: the modes on a row of their own, the tools along the foot, and what is selected in a sheet over the plan. */
+  .section.fp.is-full .fp-edbar { flex-wrap: wrap; gap: 4px; padding: 4px 6px 6px; }
+  .section.fp.is-full .fp-edbar .fp-floor { flex: 1 1 0; max-width: none; }
+  .fp-edbar .fp-ed-gap, .fp-edbar .fp-ed-side, .fp-edbar .fp-undo .fp-icon-btn[aria-label="Redo"] { display: none; }
+  .fp-layers { order: 10; flex: 1 1 100%; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .fp-layer { justify-content: center; padding: 4px 2px; }
+  .section.fp.is-full .fp-legend { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+  .section.fp.is-full .fp-legend .fp-circuits { flex: none; flex-wrap: nowrap; white-space: nowrap; }
+  .section.fp.is-full > .fp-body, .section.fp.is-full.is-side-hidden > .fp-body { display: flex; flex-direction: column; }
+  .section.fp.is-full .fp-main { flex: 1 1 0; }
+  .section.fp.is-full .fp-palette {
+    order: 3; flex-direction: row; justify-content: space-around; gap: 2px; padding: 4px 4px calc(4px + env(safe-area-inset-bottom, 0px));
+    border-right: 0; border-top: 1px solid var(--line); overflow-x: auto;
+  }
+  .section.fp.is-full .fp-tool { flex: 1 0 52px; width: auto; height: 52px; }
+  .section.fp.is-full .fp-tool-name { display: block; }
+  .section.fp.is-full .fp-tool.is-gap { margin-top: 0; }
+  .section.fp.is-full .fp-tool.is-gap::before { content: none; }
+  .section.fp.is-full .fp-side:not(.is-sheet) { display: none; }
+  .section.fp.is-full .fp-side.is-sheet { bottom: calc(var(--savebar-h, 0px) + env(safe-area-inset-bottom, 0px)); z-index: 5; }
+  .section.fp.is-full .fp-opts { max-height: 30vh; overflow-y: auto; padding: 4px 8px; }
+  .section.fp.is-full .fp-opts-note { font-size: 12px; }
+}

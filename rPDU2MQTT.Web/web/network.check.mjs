@@ -91,11 +91,13 @@ if (!labels().includes('Patch panel 1') || !labels().includes('Core')) fail(`the
 if (!/Network/.test(textOf(query(sec, '.fp-legend'))) || !/Patch panel 1\s*1\/24/.test(textOf(query(sec, '.fp-legend')))) fail(`the legend does not list the patch panel and how full it is: ${textOf(query(sec, '.fp-legend'))}`);
 if (itemEl('jack_1').classList.contains('is-unknown')) fail('a jack on a port is marked unknown');
 
-// Edit: a jack placed by the office's bottom wall sits on it, and is on no port yet.
+// Edit's Network mode: a jack placed by the office's bottom wall sits on it, and is on no port yet.
 button('Edit').onclick();
+query(sec, '.fp-layer', true).find(b => textOf(b) === 'Network').onclick();
 toolBtn('Item').onclick();
 const jackKind = query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Network jack');
 if (!jackKind || !/Network/.test(textOf(query(sec, '.fp-kinds')))) fail('the item picker has no Network group with a jack');
+if (query(sec, '.fp-kind', true).some(b => b.getAttribute('aria-label') === 'Outlet')) fail('the Network mode offers outlets to place');
 jackKind.onclick();
 tap(svg, 100, 290);
 const jack2 = loc().Placements.at(-1);
