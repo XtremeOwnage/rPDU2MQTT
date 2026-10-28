@@ -14509,7 +14509,8 @@ async function loadPluginPages() {
 }
 
 const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection, timelineStrip, stepToFit,
-  openSheet, closeSheet, svgEl, formatMeasure, sparkline, analyse, circuitSession, searchSelect, makeMenu,
+  openSheet, closeSheet, svgEl, formatMeasure, sparkline, analyse, circuitSession, searchSelect, makeMenu, saveFile,
+  pdf: { document: pdfDocument, page: pdfPage, textWidth: pdfTextWidth, wrap: pdfWrap },
   followRange, rangeMoment, goLive: () => setRange(LIVE),
   temp: { unit: tempUnit, to: toTemp, from: fromTemp, fmt: fmtTemp } });
 

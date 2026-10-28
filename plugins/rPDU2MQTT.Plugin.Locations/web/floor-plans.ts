@@ -1,7 +1,8 @@
 // Floor Plans (#470): each floor drawn at real size with its rooms, outdoor zones and areas, doors and windows
 // (#463), the outlets, fixtures, devices and utility gear placed on it and the cable runs between them (#464,
 // #465), shaded live by what each room draws (#466), with a trace that finds an outlet's breaker from the
-// outlet (#468). One Edit mode with a tool palette, undo and redo, and sizes in feet or metres.
+// outlet (#468). One Edit mode with a tool palette, undo and redo, and sizes in feet or metres. A network layer
+// maps each wall jack to its patch panel port and switch port, with a printable port schedule.
 
 type Place = {
   id: string; name: string; kind: string; site: string; floor: string | null; value: number | null; state: string;
@@ -40,7 +41,7 @@ const FP_TOOLS: [Tool, string, string, string][] = [
   ['door', 'Door', 'D', 'Tap a wall to put a door in it.'],
   ['window', 'Window', 'W', 'Tap a wall to put a window in it.'],
   ['item', 'Item', 'I', 'Tap to place an outlet, light, appliance, panel, meter, pole or anything else.'],
-  ['wire', 'Wire', 'L', 'Draw a cable run from the supply side: tap the panel or outlet feeding it, each bend, then the item it goes to.'],
+  ['wire', 'Wire', 'L', 'Draw a cable run from the supply side: tap the panel or outlet feeding it, each bend, then the item it goes to. Network cables run from the patch panel to the jack.'],
   ['constrain', 'Constrain', 'K', 'Tap corners or walls, then hold them: joined, on a wall, colinear, parallel, perpendicular, level, plumb, an angle or a length.'],
   ['measure', 'Measure', 'M', 'Tap two points to measure between them, and set the plan’s scale from a distance you know.'],
 ];
@@ -153,6 +154,7 @@ export default function mount(sec: any, host: any) {
   const SHOW_GROUPS: [string, string, string[]][] = [
     ['outlets', 'Outlets and switches', ['outlet', 'switch', 'junction']], ['lights', 'Lights and fans', ['fixture', 'fan']],
     ['appliances', 'Appliances and devices', ['appliance', 'device', 'hvac', 'ev-charger']], ['power', 'Panels and power', PLAN_SUPPLY_KINDS],
+    ['network', 'Network', PLAN_NETWORK_KINDS],
   ];
   const hidden = new Set(remembered('hide', '').split(',').filter(Boolean));
   const shown = (item: any) => !hidden.has((SHOW_GROUPS.find(g => g[2].includes(item.Kind)) || SHOW_GROUPS[2])[0]);
@@ -230,6 +232,71 @@ export default function mount(sec: any, host: any) {
   const itemName = (it: any) => it.Label || kindName(it.Kind || 'outlet');
   const units = () => live?.units || 'W';
   const fmt = (v: number | null | undefined) => v == null ? 'no data' : formatMeasure(units() === 'W' ? Math.round(v) : Math.round(v * 100) / 100, units());
+
+  // --- Network -------------------------------------------------------------------------------------
+  // A jack's port is 'patch_panel_1/12'; a patch panel's cords say which switch port each of its ports goes to.
+  // The mapping is the record; cables drawn on the plan are only where the wire goes.
+  const isNet = (it: any) => !!it && PLAN_NETWORK_KINDS.includes(it.Kind);
+  const isPorted = (it: any) => !!it && PLAN_PORTED_KINDS.includes(it.Kind);
+  /// Every patch panel and switch, on every floor: a jack's patch panel is often a floor away.
+  const portedAll = () => itemsIn().filter(isPorted);
+  const portCount = (dev: any) => Math.max(0, Math.round(Number(dev?.Ports) || 0)) || PLAN_DEFAULT_PORTS;
+  const parsePort = (ref: string) => {
+    const at = (ref || '').lastIndexOf('/'), n = Number((ref || '').slice(at + 1));
+    return at > 0 && Number.isInteger(n) && n >= 1 ? { id: ref.slice(0, at), dev: itemOf(ref.slice(0, at)), n } : null;
+  };
+  const numberOf = (dev: any) => /_(\d+)$/.exec(dev?.Id || '')?.[1] || '';
+  /// A device's name, numbered from its id when it has no label of its own: "Patch panel 2".
+  const devName = (dev: any) => dev?.Label || `${kindName(dev?.Kind)} ${numberOf(dev)}`.trim();
+  /// A port as it is written on a jack's faceplate: the device's label, or PP1 or SW1, and the port, "PP1-07".
+  const portName = (dev: any, n: number) => `${dev?.Label || (dev?.Kind === 'network-switch' ? 'SW' : 'PP') + numberOf(dev)}-${String(n).padStart(String(portCount(dev)).length, '0')}`;
+  const portText = (ref: string) => { const p = parsePort(ref); return !ref ? '' : p?.dev ? `${devName(p.dev)}, port ${p.n}` : `${ref} (no such patch panel or switch)`; };
+  /// What a jack is called on the plan and on paper: its own label, else its port.
+  const jackLabel = (j: any) => { if (j?.Label) return j.Label; const p = parsePort(j?.Port); return p?.dev ? portName(p.dev, p.n) : ''; };
+  const jacksOn = (ref: string) => itemsIn().filter((j: any) => j.Kind === 'jack' && j.Port === ref);
+  const jacksOnDev = (dev: any) => itemsIn().filter((j: any) => j.Kind === 'jack' && parsePort(j.Port)?.id === dev.Id);
+  const patchOf = (pp: any, n: number): string => (pp?.Patches || []).find((x: any) => Number(x.Port) === n)?.Switch || '';
+  /// The patch panel ports corded to a switch port.
+  const cordsTo = (ref: string) => portedAll().flatMap((pp: any) => (pp.Patches || []).filter((x: any) => x.Switch === ref).map((x: any) => ({ pp, n: Number(x.Port) })));
+  /// The switch port a jack reaches: through its patch panel's cord, or straight to the switch.
+  const switchPortOf = (j: any) => { const p = parsePort(j?.Port); return !p?.dev ? '' : p.dev.Kind === 'network-switch' ? j.Port : patchOf(p.dev, p.n); };
+  /// The patch panel or switch a network item belongs to, for its colour: itself, or a jack's.
+  const netDevOf = (it: any): string => !it ? '' : isPorted(it) ? it.Id : it.Kind === 'jack' ? parsePort(it.Port)?.id || '' : '';
+  /// A cable's device: the patch panel or switch at one end, else the one the jack at its end is on.
+  const runDev = (r: any) => { const ends = [r.From, r.To].map((id: string) => id && itemOf(id)).filter(Boolean); return netDevOf(ends.find(isPorted)) || ends.map(netDevOf).find(Boolean) || ''; };
+  const netColor = (devId: string) => devId ? planCircuitColor('net:' + devId) : 'var(--muted)';
+  const portUsed = (dev: any, n: number) => jacksOn(`${dev.Id}/${n}`).length > 0 || (dev.Kind === 'network-switch' && cordsTo(`${dev.Id}/${n}`).length > 0);
+  const usedPorts = (dev: any) => Array.from({ length: portCount(dev) }, (_, i) => i + 1).filter(n => portUsed(dev, n)).length;
+  const freePort = (dev: any) => { for (let n = 1; n <= portCount(dev); n++) if (!portUsed(dev, n)) return n; return 0; };
+  /// One jack to a port: putting a jack on it takes it off any other. Says which, so the change is not silent.
+  const setJackPort = (j: any, ref: string) => {
+    const moved = ref ? jacksOn(ref).filter((o: any) => o !== j) : [];
+    moved.forEach((o: any) => { o.Port = ''; });
+    j.Port = ref;
+    return moved.map((o: any) => jackLabel(o) || itemName(o));
+  };
+  /// One cord to a switch port: patching it here unpatches it anywhere else.
+  const setPatch = (pp: any, n: number, sw: string) => {
+    if (sw) portedAll().forEach((o: any) => { if (o.Patches) o.Patches = o.Patches.filter((x: any) => x.Switch !== sw || (o === pp && Number(x.Port) === n)); });
+    const list = (pp.Patches || []).filter((x: any) => Number(x.Port) !== n);
+    if (sw) list.push({ Port: n, Switch: sw });
+    if (list.length) pp.Patches = list.sort((a: any, b: any) => a.Port - b.Port); else delete pp.Patches;
+  };
+  /// Ports to pick from, grouped by device: every patch panel's and switch's, or only switches'.
+  const portChoices = (switchesOnly: boolean, current: string, none: string): Choice[] => {
+    const out: Choice[] = [{ value: '', label: none }];
+    portedAll().filter((d: any) => !switchesOnly || d.Kind === 'network-switch').forEach((d: any) => {
+      const fl = floorById(d.Floor)?.floor;
+      for (let n = 1; n <= portCount(d); n++) {
+        const ref = `${d.Id}/${n}`;
+        const on = switchesOnly ? cordsTo(ref).map(c => portName(c.pp, c.n)) : jacksOn(ref).map((j: any) => jackLabel(j) || itemName(j));
+        if (!switchesOnly && d.Kind === 'network-switch') on.push(...cordsTo(ref).map(c => portName(c.pp, c.n)));
+        out.push({ value: ref, label: `${devName(d)} · port ${n}`, group: devName(d) + (fl ? ` (${fl.Name || fl.Id})` : ''), hint: on.length ? `in use: ${on.join(', ')}` : portName(d, n) });
+      }
+    });
+    if (current && !out.some(c => c.value === current)) out.splice(1, 0, { value: current, label: portText(current) });
+    return out;
+  };
 
   // Real sizes: drawing units per metre on this floor, and the unit system the GUI settings ask for.
   const sys = () => planUnitSystem(state.data?.Gui?.DistanceUnits, (globalThis as any).navigator?.language);
@@ -540,8 +607,8 @@ export default function mount(sec: any, host: any) {
     const lower = ensure(fl.site, 'Floors', []).filter((f: any) => (Number(f.Level) || 0) < (Number(fl.floor.Level) || 0));
     return lower.sort((a: any, b: any) => (Number(b.Level) || 0) - (Number(a.Level) || 0))[0] || null;
   };
-  /// Outlets and switches live on walls: near enough to one, they sit on it.
-  const WALL_KINDS = ['outlet', 'switch'];
+  /// Outlets, switches and network jacks live on walls: near enough to one, they sit on it.
+  const WALL_KINDS = ['outlet', 'switch', 'jack'];
   /// Where a wall-mounted item goes: on the wall, facing the side the pointer is on. Away from walls it stands free.
   const onWall = (kind: string, q: Pt, side: Pt = q): Pt & { facing: number | null } => {
     if (!snapOn || !WALL_KINDS.includes(kind)) return { ...q, facing: null };
@@ -782,6 +849,11 @@ export default function mount(sec: any, host: any) {
     const gfci = selection?.type === 'item' && !extra.length ? itemOf(selection.id) : null;
     const downstream = gfci?.Gfci ? planDownstream(runsIn(), gfci.Id) : null;
     const isGfci = (id: string) => !!itemOf(id)?.Gfci;
+    // The network layer, under Show. A selected patch panel or switch, or a jack or cable on one, brings that device's
+    // jacks and cables forward.
+    const netOn = !hidden.has('network');
+    const one = extra.length ? null : selection;
+    const netFocus = one?.type === 'item' ? netDevOf(itemOf(one.id)) : one?.type === 'run' && runOf(one.id)?.Kind === 'network' ? runDev(runOf(one.id)) : '';
     // Labels stay the same size on screen, so at a phone's fitted zoom a small room's label spills over its
     // neighbours'. Fit it to its room: break a long name over two lines, drop the trailing lines, then shrink a
     // little, and leave a room too small even for that unlabelled until zoomed in (tapping it still gives its detail).
@@ -913,23 +985,24 @@ export default function mount(sec: any, host: any) {
     // Cable runs, in their circuit's colour. A selected circuit comes forward and the rest fade.
     // A wire is on the circuit of the outlets at its ends too, even when its own circuit was never set or is stale.
     const onFocus = (r: any) => !!focus && (r.Circuit === focus || [r.From, r.To].some(id => id && itemOf(id)?.Circuit === focus));
-    // While viewing with the wiring hidden, the selected circuit's wires still show.
-    if (showWiring || trace || mode === 'edit' || focus || downstream) runsNow().forEach(r => {
+    // While viewing with the wiring hidden, the selected circuit's wires still show. Network cables follow Show instead.
+    runsNow().forEach(r => {
       const path = runPath(r);
       if (path.length < 2) return;
+      const net = r.Kind === 'network';
       const sel = isSel('run', r.Id);
-      const prot = !!downstream?.runs.has(r.Id);
-      const lit = prot || onFocus(r);
-      if (!showWiring && !trace && mode !== 'edit' && !lit && !sel) return;
-      const dim = !!(focus || downstream) && !lit;
+      const prot = !net && !!downstream?.runs.has(r.Id);
+      const lit = net ? !!netFocus && runDev(r) === netFocus : prot || onFocus(r);
+      if (net ? !netOn && !sel : !showWiring && !trace && mode !== 'edit' && !lit && !sel) return;
+      const dim = !!(focus || downstream || netFocus) && !lit;
       const onRef = lit && focus ? focus : r.Circuit || [r.From, r.To].map(id => id && itemOf(id)?.Circuit).find(Boolean) || '';
-      const colour = r.Kind === 'circuit' ? (loadOn ? loadColor(onRef) || 'var(--muted)' : planCircuitColor(lit && focus ? focus : r.Circuit))
+      const colour = net ? netColor(runDev(r)) : r.Kind === 'circuit' ? (loadOn ? loadColor(onRef) || 'var(--muted)' : planCircuitColor(lit && focus ? focus : r.Circuit))
         : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
-      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit ? '' : ' is-unknown'}` });
-      const sw = (r.Kind === 'circuit' ? 2.5 : 4) * u * (sel ? 1.5 : lit ? 2.2 : trace ? 1.8 : 1);
+      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit || net ? '' : ' is-unknown'}` });
+      const sw = (r.Kind === 'circuit' ? 2.5 : net ? 2 : 4) * u * (sel ? 1.5 : lit ? 2.2 : trace ? 1.8 : 1);
       // On the circuit being looked at, a wire is cased in the page's colour so it parts from a wall it runs along.
       if (lit || (trace && !dim)) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-case', 'stroke-width': sw + 6 * u }));
-      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': sw, 'stroke-dasharray': r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
+      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': sw, 'stroke-dasharray': net ? `${8 * u} ${2.5 * u} ${1.5 * u} ${2.5 * u}` : r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
       // And current is shown flowing along it, supply to load.
       if (lit) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-flow', 'stroke-width': sw * 0.45, 'stroke-dasharray': `${3 * u} ${9 * u}`, style: `--fp-flow:${-12 * u}px` }));
       // While viewing, a branch circuit's run carries the circuit's reading at its middle.
@@ -971,10 +1044,13 @@ export default function mount(sec: any, host: any) {
       const sel = isSel('item', item.Id);
       if (!sel && !shown(item)) return;
       const supply = PLAN_SUPPLY_KINDS.includes(item.Kind);
-      const known = supply || (!!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true));
+      const net = isNet(item);
+      // A network item is on no circuit; a jack is unknown until it is on a port.
+      const known = supply || (net ? item.Kind !== 'jack' || !!parsePort(item.Port)?.dev : !!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true));
       const prot = !!downstream?.items.has(item.Id);
-      const lit = prot || (!!focus && item.Circuit === focus);
-      const dim = !!(focus || downstream) && !lit && item.Id !== gfci?.Id;
+      const lit = net ? !!netFocus && netDevOf(item) === netFocus : prot || (!!focus && item.Circuit === focus);
+      const dim = !!(focus || downstream || netFocus) && !lit && item.Id !== gfci?.Id;
+      const ring = net ? netColor(netDevOf(item)) : planCircuitColor(item.Circuit);
       // Drawn at its real size when it has one: a washer is as big as a washer, turned as it stands.
       const W = Number(item.Width) || 0, D = Number(item.Depth) || 0, sized = W > 0 && D > 0;
       // A wall-mounted item sits beside its wall on the room's side, joined to it by a short stub, at any zoom.
@@ -1001,14 +1077,15 @@ export default function mount(sec: any, host: any) {
         const shape = item.Round
           ? svgEl('ellipse', { rx: W / 2, ry: D / 2, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u })
           : svgEl('rect', { x: -W / 2, y: -D / 2, width: W, height: D, rx: Math.min(W, D) * 0.07, class: 'fp-body-shape', 'stroke-width': (sel ? 3 : 2) * u });
-        if (item.Circuit && loadOn) { const lc = loadColor(item.Circuit); if (lc) shape.style.stroke = lc; }
+        if (net) { if (netDevOf(item)) shape.style.stroke = ring; }
+        else if (item.Circuit && loadOn) { const lc = loadColor(item.Circuit); if (lc) shape.style.stroke = lc; }
         else if (item.Circuit && (showWiring || focus)) shape.style.stroke = planCircuitColor(item.Circuit);
         // On the circuit being looked at: ringed in its colour, well clear of the outline.
         if (lit && !sel) {
           const m = 6 * u;
           const halo = item.Round ? svgEl('ellipse', { rx: W / 2 + m, ry: D / 2 + m, class: 'fp-halo', 'stroke-width': 3 * u })
             : svgEl('rect', { x: -W / 2 - m, y: -D / 2 - m, width: W + 2 * m, height: D + 2 * m, rx: m, class: 'fp-halo', 'stroke-width': 3 * u });
-          halo.style.stroke = prot ? '' : planCircuitColor(item.Circuit);
+          halo.style.stroke = prot ? '' : ring;
           body.appendChild(halo);
         }
         body.appendChild(shape);
@@ -1021,16 +1098,18 @@ export default function mount(sec: any, host: any) {
         hasArt = !!art;
         rr = Math.max(6 * u, Math.min(r, Math.min(W, D) * 0.32));
       } else {
-        // A panel, inverter or battery is a box on the wall, not a dot.
-        const boxy = ['panel', 'inverter', 'battery', 'generator', 'transformer'].includes(item.Kind);
-        const bw = item.Kind === 'panel' ? r * 1.55 : r * 1.9, bh = item.Kind === 'panel' ? r * 2.2 : r * 1.9;
+        // A panel, inverter or battery is a box on the wall, not a dot; a patch panel or switch a strip of ports.
+        const ported = isPorted(item);
+        const boxy = ported || ['panel', 'inverter', 'battery', 'generator', 'transformer'].includes(item.Kind);
+        const bw = item.Kind === 'panel' ? r * 1.55 : ported ? r * 2.6 : r * 1.9, bh = item.Kind === 'panel' ? r * 2.2 : ported ? r * 1.5 : r * 1.9;
         const disc = boxy ? svgEl('rect', { x: -bw / 2, y: -bh / 2, width: bw, height: bh, rx: r * 0.18, class: 'fp-item-disc is-box', 'stroke-width': (sel ? 3 : trace ? 4 : 2) * u })
           : svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : trace ? 4 : 2) * u });
-        if (item.Circuit && loadOn) { const lc = loadColor(item.Circuit); if (lc) disc.style.stroke = lc; }
+        if (net) { if (netDevOf(item)) disc.style.stroke = ring; }
+        else if (item.Circuit && loadOn) { const lc = loadColor(item.Circuit); if (lc) disc.style.stroke = lc; }
         else if (item.Circuit && (showWiring || focus || trace)) disc.style.stroke = planCircuitColor(item.Circuit);
         if (lit && !sel) {
-          const halo = svgEl('circle', { r: r + 7 * u, class: 'fp-halo', 'stroke-width': 3 * u });
-          halo.style.stroke = prot ? '' : planCircuitColor(item.Circuit);
+          const halo = svgEl('circle', { r: (ported ? r * 1.4 : r) + 7 * u, class: 'fp-halo', 'stroke-width': 3 * u });
+          halo.style.stroke = prot ? '' : ring;
           g.appendChild(halo);
         }
         g.appendChild(disc);
@@ -1065,13 +1144,20 @@ export default function mount(sec: any, host: any) {
         const t = svgEl('text', { x: 0, y: r + font * 0.95, class: 'fp-item-read' + (reading == null ? ' is-nodata' : ''), 'font-size': font * 0.8 });
         t.textContent = reading == null ? 'no data' : fmt(reading);
         g.appendChild(t);
+      } else if (net && !sized) {
+        // Every jack is labelled with its port, so the plan reads like the faceplates; gear with its name.
+        const name = item.Kind === 'jack' ? jackLabel(item) : devName(item);
+        const t = svgEl('text', { x: 0, y: (isPorted(item) ? r * 0.75 : r) + font, class: 'fp-item-label fp-net-label' + (name ? '' : ' is-unknown'), 'font-size': font * 0.85 });
+        t.textContent = name || 'no port';
+        g.appendChild(t);
       } else if (item.Label && (sel || showSizes || (sized && Math.min(W, D) / u > 44))) {
         const t = svgEl('text', { x: 0, y: r + font, class: 'fp-item-label', 'font-size': font * 0.85 });
         t.textContent = item.Label;
         g.appendChild(t);
       }
       const title = svgEl('title');
-      title.textContent = `${itemName(item)}${item.Circuit ? ' — ' + refLabel(item.Circuit) + (loadOn ? ', ' + loadText(item.Circuit) : '') : supply ? '' : ' — circuit unknown'}`;
+      title.textContent = net ? (item.Kind === 'jack' ? `${jackLabel(item) || 'Network jack'} — ${portText(item.Port) || 'port not known'}${switchPortOf(item) ? ', ' + portText(switchPortOf(item)) : ''}` : `${devName(item)} — ${usedPorts(item)} of ${portCount(item)} ports in use`)
+        : `${itemName(item)}${item.Circuit ? ' — ' + refLabel(item.Circuit) + (loadOn ? ', ' + loadText(item.Circuit) : '') : supply ? '' : ' — circuit unknown'}`;
       g.appendChild(title);
       svg.appendChild(g);
     });
@@ -1285,8 +1371,23 @@ export default function mount(sec: any, host: any) {
         b.onclick = () => { focused = focused === ref ? '' : ref; drawPlan(); };
         box.appendChild(b);
       });
-      const unknown = itemsNow().filter((i: any) => !i.Circuit && !PLAN_SUPPLY_KINDS.includes(i.Kind)).length;
+      const unknown = itemsNow().filter((i: any) => !i.Circuit && !PLAN_SUPPLY_KINDS.includes(i.Kind) && !isNet(i)).length;
       if (unknown) box.appendChild(el('span', { class: 'fp-chip is-static' }, el('span', { class: 'fp-swatch-dot is-unknown' }), `${unknown} on an unknown circuit`));
+      legend.appendChild(box);
+    }
+    // The patch panels and switches this floor's jacks are on, each in its colour with how full it is.
+    const jacks = itemsNow().filter((i: any) => i.Kind === 'jack');
+    const devs = [...new Set([...itemsNow().filter(isPorted).map((d: any) => d.Id), ...jacks.map(netDevOf).filter(Boolean)])].map(itemOf).filter(Boolean);
+    if (netOn && (devs.length || jacks.length)) {
+      const box = el('div', { class: 'fp-circuits fp-net-legend' }, el('span', { class: 'fp-circuits-k', text: 'Network' }));
+      devs.forEach((d: any) => {
+        const b = el('button', { class: 'fp-chip' + (netFocus === d.Id ? ' is-on' : ''), type: 'button', title: `${kindName(d.Kind)}. Select it to bring its jacks and cables forward.` },
+          el('span', { class: 'fp-swatch-dot', style: { background: netColor(d.Id) } }), devName(d), el('span', { class: 'fp-chip-n', text: `${usedPorts(d)}/${portCount(d)}` }));
+        b.onclick = () => { if (d.Floor && d.Floor !== floorNow()?.floor.Id) { floorId = d.Floor; viewFor = ''; } selection = netFocus === d.Id ? null : { type: 'item', id: d.Id }; extra = []; render(); };
+        box.appendChild(b);
+      });
+      const loose = jacks.filter((j: any) => !parsePort(j.Port)?.dev).length;
+      if (loose) box.appendChild(el('span', { class: 'fp-chip is-static' }, el('span', { class: 'fp-swatch-dot is-unknown' }), `${loose} jack${loose === 1 ? '' : 's'} on no port`));
       legend.appendChild(box);
     }
     drawScaleBar();
@@ -1765,6 +1866,14 @@ export default function mount(sec: any, host: any) {
       const it = itemOf(hit.item);
       if (!it) return [];
       const supply = PLAN_SUPPLY_KINDS.includes(it.Kind);
+      if (isNet(it)) return [
+        { label: it.Kind === 'jack' ? jackLabel(it) || itemName(it) : devName(it), head: true },
+        { label: 'Cable from here', run: onEdit(() => { mode = 'edit'; tool = 'wire'; wireKind = 'network'; wireDraft = { from: it.Id, pts: [] }; render(); })},
+        ...(host.pdf ? [{ label: 'Port schedule…', run: () => portScheduleSheet() } as Entry] : []),
+        { label: 'Duplicate', run: onEdit(() => duplicate())},
+        { label: 'Delete', danger: true, run: onEdit(() => deleteSelection())},
+        ...(editing ? [] : [toEdit]),
+      ];
       return [
         { label: itemName(it), head: true },
         ...(it.Circuit ? [{ label: 'Show its circuit', run: () => { focused = focused === it.Circuit ? '' : it.Circuit; drawPlan(); } } as Entry] : []),
@@ -1906,6 +2015,7 @@ export default function mount(sec: any, host: any) {
       act(() => {
         const it: any = { Id: id, Kind: itemKind, Label: '', Room: room?.Id || '', Floor: floorNow()!.floor.Id, X: q.X, Y: q.Y, Circuit: '', Node: '' };
         if (itemKind === 'outlet' && gfciNext) it.Gfci = true;
+        if (PLAN_PORTED_KINDS.includes(itemKind)) it.Ports = PLAN_DEFAULT_PORTS;
         const fp = PLAN_FOOTPRINTS.find(f => f[0] === itemPreset);
         if (fp) {
           const inch = 0.0254 * scale();
@@ -1916,7 +2026,7 @@ export default function mount(sec: any, host: any) {
         itemsIn().push(it);
         selection = { type: 'item', id };
       });
-      if (!room && !PLAN_SUPPLY_KINDS.includes(itemKind)) toast('Placed outdoors — outside every room. That is fine for an exterior light or a yard outlet.', true);
+      if (!room && !PLAN_SUPPLY_KINDS.includes(itemKind) && !PLAN_PORTED_KINDS.includes(itemKind)) toast('Placed outdoors — outside every room. That is fine for an exterior light or a yard outlet.', true);
       return;
     }
     if (tool === 'door' || tool === 'window') {
@@ -2111,16 +2221,24 @@ export default function mount(sec: any, host: any) {
     const pathLen = (d.from ? 1 : 0) + d.pts.length + (to ? 1 : 0);
     if (pathLen < 2) { render(); return; }
     const from = d.from ? itemOf(d.from) : null, end = to ? itemOf(to) : null;
-    const circuit = from?.Circuit || end?.Circuit || '';
+    // A cable between network gear is a network cable, whatever the wire kind picked.
+    const ends = [from, end].filter(Boolean);
+    const kind = ends.length && ends.every(isNet) ? 'network' : wireKind;
+    const circuit = kind === 'circuit' ? from?.Circuit || end?.Circuit || '' : '';
     const id = freshIn(runsIn(), 'run');
-    let adopted = '';
+    let adopted = '', patched = '';
     act(() => {
-      runsIn().push({ Id: id, Kind: wireKind, Floor: floorNow()!.floor.Id, Circuit: wireKind === 'circuit' ? circuit : '', From: d.from, To: to, Points: d.pts, Label: '' });
+      runsIn().push({ Id: id, Kind: kind, Floor: floorNow()!.floor.Id, Circuit: circuit, From: d.from, To: to, Points: d.pts, Label: '' });
       // Wiring an item to one on a known circuit puts it on that circuit — said, and undoable.
-      if (wireKind === 'circuit' && circuit) [from, end].forEach(it => { if (it && !it.Circuit && !PLAN_SUPPLY_KINDS.includes(it.Kind)) { it.Circuit = circuit; adopted = itemName(it); } });
+      if (circuit) [from, end].forEach(it => { if (it && !it.Circuit && !PLAN_SUPPLY_KINDS.includes(it.Kind) && !isNet(it)) { it.Circuit = circuit; adopted = itemName(it); } });
+      // Cabling a jack on no port to a patch panel or switch puts it on that device's first free port.
+      const jack = ends.find((x: any) => x.Kind === 'jack' && !parsePort(x.Port)?.dev), dev = ends.find(isPorted);
+      const n = kind === 'network' && jack && dev ? freePort(dev) : 0;
+      if (n) { jack.Port = `${dev.Id}/${n}`; patched = `${itemName(jack)} is on ${portText(jack.Port)}, ${portName(dev, n)}`; }
       selection = { type: 'run', id };
     });
     if (adopted) toast(`${adopted} is wired to ${refLabel(circuit)}, so it is now on that circuit. Ctrl+Z undoes it.`, true);
+    if (patched) toast(`${patched}. Change the port in the jack's panel; Ctrl+Z undoes it.`, true);
   };
 
   // --- Tool options --------------------------------------------------------------------------------
@@ -2224,8 +2342,8 @@ export default function mount(sec: any, host: any) {
       add(seg(PLAN_OPENINGS.filter(o => o[0] !== 'window'), doorKind, v => { doorKind = v; render(); }));
     } else if (tool === 'item') {
       const grid = el('div', { class: 'fp-kinds' });
-      ['Inside', 'Power'].forEach(group => {
-        grid.appendChild(el('span', { class: 'fp-kinds-group', text: group === 'Inside' ? 'Loads' : 'Supply & utility' }));
+      ['Inside', 'Power', 'Network'].forEach(group => {
+        grid.appendChild(el('span', { class: 'fp-kinds-group', text: group === 'Inside' ? 'Loads' : group === 'Power' ? 'Supply & utility' : 'Network' }));
         PLAN_KINDS.filter(k => k[2] === group).forEach(([k, label]) => {
           const b = el('button', { class: 'fp-kind' + (itemKind === k && !itemPreset ? ' is-on' : ''), type: 'button', title: label });
           const icon = svgEl('svg', { viewBox: '-13 -13 26 26', class: 'fp-kind-icon' });
@@ -2257,8 +2375,8 @@ export default function mount(sec: any, host: any) {
       add(grid);
       if (itemKind === 'outlet') add(check('GFCI', gfciNext, v => { gfciNext = v; remember('gfci', v ? '1' : '0'); }, 'Place GFCI outlets: whatever is wired from their load side is protected by them.'));
     } else if (tool === 'wire') {
-      add(seg([['circuit', 'Circuit'], ['feeder', 'Feeder'], ['service', 'Service']], wireKind, v => { wireKind = v; render(); },
-        'A branch circuit, a feeder between panels, or the utility service from the pole.'));
+      add(seg([['circuit', 'Circuit'], ['feeder', 'Feeder'], ['service', 'Service'], ['network', 'Network']], wireKind, v => { wireKind = v; render(); },
+        'A branch circuit, a feeder between panels, the utility service from the pole, or a network cable from a patch panel or switch to a jack.'));
       if (wireDraft) {
         const done = btn('Finish here', 'primary');
         done.disabled = (wireDraft.from ? 1 : 0) + wireDraft.pts.length < 2;
@@ -2500,9 +2618,22 @@ export default function mount(sec: any, host: any) {
     if (outside.length) {
       side.appendChild(el('h4', { text: 'Outdoors' }));
       const ol = el('div', { class: 'fp-list' });
-      outside.forEach((it: any) => ol.appendChild(listRow(itemName(it), it.Circuit ? refLabel(it.Circuit) : PLAN_SUPPLY_KINDS.includes(it.Kind) ? kindName(it.Kind) : 'circuit unknown',
+      outside.forEach((it: any) => ol.appendChild(listRow(itemName(it), isNet(it) ? (it.Kind === 'jack' ? jackLabel(it) || 'no port' : kindName(it.Kind)) : it.Circuit ? refLabel(it.Circuit) : PLAN_SUPPLY_KINDS.includes(it.Kind) ? kindName(it.Kind) : 'circuit unknown',
         () => { selection = { type: 'item', id: it.Id }; render(); })));
       side.appendChild(ol);
+    }
+    // The network on this floor: its jacks, and which are on no port yet.
+    const jacks = itemsNow().filter((it: any) => it.Kind === 'jack');
+    if (jacks.length || itemsNow().some(isPorted)) {
+      side.appendChild(el('h4', { text: 'Network' }));
+      const loose = jacks.filter((j: any) => !parsePort(j.Port)?.dev);
+      side.appendChild(el('div', { class: 'desc', text: `${jacks.length} jack${jacks.length === 1 ? '' : 's'}${loose.length ? `, ${loose.length} on no port yet` : ', every one on a port'}.` }));
+      if (loose.length) {
+        const nl = el('div', { class: 'fp-list' });
+        loose.forEach((j: any) => nl.appendChild(listRow(itemName(j), j.Room ? nameOfPlace(j.Room) : 'Outdoors', () => goTo(j))));
+        side.appendChild(nl);
+      }
+      if (host.pdf) { const sched = btn('Port schedule…'); sched.onclick = () => portScheduleSheet(); side.appendChild(actions(sched)); }
     }
   };
 
@@ -2740,8 +2871,118 @@ export default function mount(sec: any, host: any) {
     }
   };
 
+  /// Selects an item, on its own floor.
+  const goTo = (x: any) => { if (x.Floor && x.Floor !== floorNow()?.floor.Id) { floorId = x.Floor; viewFor = ''; } selection = { type: 'item', id: x.Id }; extra = []; render(); };
+
+  /// A jack, patch panel or switch: its port, or its ports, and the cables to it.
+  const drawNet = (it: any, editing: boolean) => {
+    const jack = it.Kind === 'jack';
+    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: jack ? jackLabel(it) || itemName(it) : devName(it) }), el('span', { class: 'fp-pill', text: kindName(it.Kind) })));
+    if (editing) {
+      const lbl = el('input', { type: 'text', class: 'fp-name', value: it.Label || '', placeholder: jack ? (jackLabel({ ...it, Label: '' }) || 'e.g. Office 1') : devName({ ...it, Label: '' }) }) as HTMLInputElement;
+      lbl.onchange = () => act(() => { it.Label = lbl.value.trim(); });
+      const rooms: [string, string][] = [['', 'Outdoors / not in a room'], ...roomsNow().map(r => [r.Id, (r.Name || r.Id) + (r.Outdoor ? ' (outdoor)' : '')] as [string, string])];
+      side.append(field('Label', lbl, jack ? 'What is written on the faceplate. Blank uses its port, as the plan shows it.' : 'Its name in the rack. Blank numbers it; its jacks are labelled from it, PP1-07.'),
+        el('div', { class: 'fp-two' },
+          field('Kind', select(PLAN_KINDS.map(k => [k[0], k[1]] as [string, string]), it.Kind, v => act(() => { it.Kind = v; }))),
+          field('Where', select(rooms, it.Room || '', v => act(() => { it.Room = v; it.Floor = floorNow()!.floor.Id; })))));
+    } else side.append(row('Where', it.Room ? nameOfPlace(it.Room) : 'Outdoors'));
+
+    if (jack) {
+      const p = parsePort(it.Port), sw = switchPortOf(it);
+      if (editing) {
+        side.appendChild(field('Patch panel port', searchSelect(portChoices(false, it.Port || '', '— not known —'), it.Port || '', v => {
+          let moved: string[] = [];
+          act(() => { moved = setJackPort(it, v); });
+          if (moved.length) toast(`${moved.join(', ')} was on that port, and is now on none. Ctrl+Z undoes it.`, false);
+        }, { placeholder: 'Search by patch panel, switch or port…' }), 'Where its cable is punched down: a patch panel port, or a switch port when it runs straight to the switch.'));
+        if (p?.dev?.Kind === 'patch-panel')
+          side.appendChild(field('Switch port', searchSelect(portChoices(true, sw, '— not patched —'), sw, v => act(() => setPatch(p.dev, p.n, v)), { placeholder: 'Search switch ports…' }),
+            `The patch cord from ${portName(p.dev, p.n)} to the switch. It is kept on the patch panel, so it stays when the jack is re-cabled.`));
+      } else {
+        side.append(row('Port', it.Port ? portText(it.Port) : 'not known yet'));
+        if (p?.dev?.Kind === 'patch-panel') side.append(row('Switch port', sw ? portText(sw) : 'not patched'));
+      }
+      if (p && !p.dev) side.appendChild(el('div', { class: 'fp-note is-warn', text: `${it.Port} names no patch panel or switch on any floor, so this jack is on no port.` }));
+      else if (p && p.n > portCount(p.dev)) side.appendChild(el('div', { class: 'fp-note is-warn', text: `${devName(p.dev)} has ${portCount(p.dev)} ports, so there is no port ${p.n}.` }));
+      if (p?.dev) { side.appendChild(el('h4', { text: 'On' })); side.appendChild(el('div', { class: 'fp-list' }, listRow(devName(p.dev), `port ${p.n}`, () => goTo(p.dev)))); }
+    } else {
+      const count = portCount(it);
+      if (editing) {
+        const ports = el('input', { type: 'number', class: 'fp-deg', value: String(count), min: '1', max: '512', step: '1' }) as HTMLInputElement;
+        ports.onchange = () => { const n = Math.round(Number(ports.value)); if (n >= 1 && n <= 512) act(() => { it.Ports = n; }); else ports.classList.add('is-bad'); };
+        side.appendChild(field('Ports', ports));
+      }
+      side.appendChild(row('In use', `${usedPorts(it)} of ${count} ports`));
+      // Port by port: the jack on it and where that is, and the switch port its cord goes to — or, on a switch, what is patched to it.
+      side.appendChild(el('h4', { text: 'Ports' }));
+      const list = el('div', { class: 'fp-list fp-ports' });
+      const top = Math.max(count, ...jacksOnDev(it).map((j: any) => parsePort(j.Port)!.n), ...(it.Patches || []).map((x: any) => Number(x.Port) || 0));
+      for (let n = 1; n <= top; n++) {
+        const ref = `${it.Id}/${n}`;
+        const jacks = jacksOn(ref), cords = it.Kind === 'network-switch' ? cordsTo(ref) : [];
+        const far = cords.flatMap(c => jacksOn(`${c.pp.Id}/${c.n}`));
+        const who = [...jacks, ...far];
+        const what = [...jacks.map((j: any) => jackLabel(j) || itemName(j)), ...cords.map(c => portName(c.pp, c.n) + (jacksOn(`${c.pp.Id}/${c.n}`).length ? '' : ' (no jack)'))].join(', ');
+        const where = who.map((j: any) => j.Room ? nameOfPlace(j.Room) : floorById(j.Floor)?.floor.Name || '').filter(Boolean).join(', ');
+        const r = el('div', { class: 'fp-port' + (n > count ? ' is-over' : '') + (what ? '' : ' is-free') },
+          el('span', { class: 'fp-port-n', text: String(n) }),
+          who.length ? Object.assign(el('button', { class: 'fp-port-who', type: 'button', text: what + (where ? ` · ${where}` : '') }), { onclick: () => goTo(who[0]) }) : el('span', { class: 'fp-port-who', text: what || 'free' }));
+        if (it.Kind === 'patch-panel') {
+          const sw = patchOf(it, n);
+          if (editing) {
+            const pick = el('select', { class: 'fp-port-sw', title: `The switch port ${portName(it, n)} is patched to.` }) as HTMLSelectElement;
+            pick.appendChild(el('option', { value: '', text: '—' }));
+            portedAll().filter((d: any) => d.Kind === 'network-switch').forEach((d: any) => {
+              const og = el('optgroup', { label: devName(d) });
+              for (let k = 1; k <= portCount(d); k++) og.appendChild(el('option', { value: `${d.Id}/${k}`, text: portName(d, k) }));
+              pick.appendChild(og);
+            });
+            const swAt = parsePort(sw);
+            if (sw && !(swAt?.dev?.Kind === 'network-switch' && swAt.n <= portCount(swAt.dev))) pick.appendChild(el('option', { value: sw, text: sw }));
+            pick.value = sw;
+            pick.onchange = () => act(() => setPatch(it, n, pick.value));
+            r.appendChild(pick);
+          } else r.appendChild(el('span', { class: 'fp-port-sw', text: sw ? (parsePort(sw)?.dev ? portName(parsePort(sw)!.dev, parsePort(sw)!.n) : sw) : '' }));
+        }
+        list.appendChild(r);
+      }
+      side.appendChild(list);
+      if (editing && it.Kind === 'patch-panel' && !portedAll().some((d: any) => d.Kind === 'network-switch'))
+        side.appendChild(el('div', { class: 'desc', text: 'Place a network switch to patch these ports to it.' }));
+    }
+
+    const wired = runsIn().filter((r: any) => r.From === it.Id || r.To === it.Id);
+    if (wired.length) {
+      side.appendChild(el('h4', { text: 'Cables' }));
+      const wl = el('div', { class: 'fp-list' });
+      wired.forEach((r: any) => {
+        const other = r.From === it.Id ? r.To : r.From;
+        const o = other ? itemOf(other) : null;
+        wl.appendChild(listRow(o ? (o.Kind === 'jack' ? jackLabel(o) || itemName(o) : isPorted(o) ? devName(o) : itemName(o)) : 'a loose end', `${len(planPathLength(runPath(r)))} · ${r.Kind}`,
+          () => { selection = { type: 'run', id: r.Id }; render(); }));
+      });
+      side.appendChild(wl);
+    }
+    const btns: any[] = [];
+    if (!jack && host.pdf) { const sched = btn('Port schedule…'); sched.onclick = () => portScheduleSheet(); btns.push(sched); }
+    if (editing) {
+      const copy = btn('Duplicate');
+      copy.title = 'A copy beside it (Ctrl+D).';
+      copy.onclick = () => duplicate();
+      const wire = btn('Cable from here');
+      wire.title = jack ? 'Draw its cable: tap the bends, then the patch panel or switch.' : 'Draw a cable to a jack: tap the bends, then the jack. A jack on no port goes on the first free one.';
+      wire.onclick = () => { tool = 'wire'; wireKind = 'network'; wireDraft = { from: it.Id, pts: [] }; render(); };
+      const del = btn('Delete', 'danger');
+      del.onclick = () => deleteSelection();
+      btns.push(copy, wire, del);
+    }
+    if (btns.length) side.appendChild(actions(...btns));
+  };
+
   const drawItem = (it: any, editing: boolean) => {
     if (!it) { selection = null; return drawSide(); }
+    if (isNet(it)) return drawNet(it, editing);
     const supply = PLAN_SUPPLY_KINDS.includes(it.Kind);
     side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: itemName(it) }), el('span', { class: 'fp-pill', text: kindName(it.Kind) })));
     const where = it.Room ? nameOfPlace(it.Room) : 'Outdoors';
@@ -2909,20 +3150,25 @@ export default function mount(sec: any, host: any) {
   const drawRun = (r: any, editing: boolean) => {
     if (!r) { selection = null; return drawSide(); }
     const from = r.From ? itemOf(r.From) : null, to = r.To ? itemOf(r.To) : null;
-    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: r.Label || `${r.Kind === 'service' ? 'Service' : r.Kind === 'feeder' ? 'Feeder' : 'Circuit'} run` }), el('span', { class: 'fp-pill', text: r.Kind })));
-    side.appendChild(row('Supply side', from ? itemName(from) : 'a loose end'));
-    side.appendChild(row('Load side', to ? itemName(to) : 'a loose end'));
+    const net = r.Kind === 'network';
+    const endName = (x: any) => x.Kind === 'jack' ? jackLabel(x) || itemName(x) : isPorted(x) ? devName(x) : itemName(x);
+    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: r.Label || (net ? 'Network cable' : `${r.Kind === 'service' ? 'Service' : r.Kind === 'feeder' ? 'Feeder' : 'Circuit'} run`) }), el('span', { class: 'fp-pill', text: r.Kind })));
+    side.appendChild(row(net ? 'From' : 'Supply side', from ? endName(from) : 'a loose end'));
+    side.appendChild(row(net ? 'To' : 'Load side', to ? endName(to) : 'a loose end'));
     side.appendChild(row('Length on the plan', len(planPathLength(runPath(r)))));
+    // A cable to a jack says the port the jack is on, and the switch port beyond it.
+    const jackEnd = [from, to].find((x: any) => x?.Kind === 'jack');
+    if (net && jackEnd) side.appendChild(row('Port', jackEnd.Port ? portText(jackEnd.Port) + (switchPortOf(jackEnd) && switchPortOf(jackEnd) !== jackEnd.Port ? ` → ${portText(switchPortOf(jackEnd))}` : '') : 'the jack is on no port'));
     if (editing) {
-      const note = el('input', { type: 'text', value: r.Label || '', placeholder: 'e.g. through the attic' }) as HTMLInputElement;
+      const note = el('input', { type: 'text', value: r.Label || '', placeholder: net ? 'e.g. Cat6 through the attic' : 'e.g. through the attic' }) as HTMLInputElement;
       note.onchange = () => act(() => { r.Label = note.value.trim(); });
-      side.append(field('Kind', select([['circuit', 'Branch circuit'], ['feeder', 'Feeder'], ['service', 'Utility service']], r.Kind || 'circuit', v => act(() => { r.Kind = v; }))),
-        field('Circuit', searchSelect(circuitChoices(r.Kind === 'feeder', r.Circuit || ''), r.Circuit || '', v => act(() => {
+      side.append(field('Kind', select([['circuit', 'Branch circuit'], ['feeder', 'Feeder'], ['service', 'Utility service'], ['network', 'Network cable']], r.Kind || 'circuit', v => act(() => { r.Kind = v; if (v === 'network') r.Circuit = ''; }))));
+      if (!net) side.append(field('Circuit', searchSelect(circuitChoices(r.Kind === 'feeder', r.Circuit || ''), r.Circuit || '', v => act(() => {
           r.Circuit = v;
           // Both ends of a branch circuit are on it, unless one says otherwise already.
           [from, to].forEach(it => { if (v && it && !it.Circuit && !PLAN_SUPPLY_KINDS.includes(it.Kind)) it.Circuit = v; });
-        }), { placeholder: 'Search circuits…' }), 'Setting it also puts either end with no circuit of its own on this one.'),
-        field('Note', note));
+        }), { placeholder: 'Search circuits…' }), 'Setting it also puts either end with no circuit of its own on this one.'));
+      side.append(field('Note', note));
       const flip = btn('Reverse direction');
       flip.title = 'Swap which end is the supply side. What is downstream of a GFCI follows this.';
       flip.onclick = () => act(() => { const f = r.From; r.From = r.To; r.To = f; r.Points = [...(r.Points || [])].reverse(); });
@@ -2933,7 +3179,8 @@ export default function mount(sec: any, host: any) {
       side.appendChild(actions(...btns2, del));
       side.appendChild(el('div', { class: 'desc', text: 'Double-click a bend to remove it.' }));
       side.appendChild(el('div', { class: 'desc', text: 'Drag a bend to move it; drag a small dot to add a bend.' }));
-    } else if (r.Circuit) side.appendChild(row('Circuit', refLabel(r.Circuit)));
+    } else if (r.Label) side.appendChild(row('Note', r.Label));
+    if (!editing && r.Circuit) side.appendChild(row('Circuit', refLabel(r.Circuit)));
     const c = r.Circuit ? circuitOf(r.Circuit) : null;
     if (c) side.appendChild(circuitRow(c));
   };
@@ -2962,7 +3209,9 @@ export default function mount(sec: any, host: any) {
       const it = itemOf(sel.id);
       if (!it) return;
       const id = freshIn(itemsIn(), String(it.Kind || 'item').replace(/-/g, '_'));
-      act(() => { itemsIn().push({ ...JSON.parse(JSON.stringify(it)), Id: id, X: planRound(it.X + off), Y: planRound(it.Y + off), Node: '' }); selection = { type: 'item', id }; });
+      // A copy is not on its original's port, nor patched like it.
+      const net = it.Kind === 'jack' ? { Port: '', Label: '' } : {};
+      act(() => { const copy = { ...JSON.parse(JSON.stringify(it)), ...net, Id: id, X: planRound(it.X + off), Y: planRound(it.Y + off), Node: '' }; delete copy.Patches; itemsIn().push(copy); selection = { type: 'item', id }; });
     } else if (sel.type === 'opening') {
       const o = openingOf(sel.id);
       if (!o) return;
@@ -3079,6 +3328,11 @@ export default function mount(sec: any, host: any) {
           const it = itemOf(x.id);
           if (!it) return;
           itemsIn().splice(itemsIn().indexOf(it), 1);
+          // Jacks on a patch panel or switch that is gone are on no port, and cords to a switch that is gone are unplugged.
+          if (isPorted(it)) {
+            itemsIn().forEach((j: any) => { if (j.Kind === 'jack' && parsePort(j.Port)?.id === it.Id) j.Port = ''; });
+            portedAll().forEach((pp: any) => { if (pp.Patches) { pp.Patches = pp.Patches.filter((x: any) => parsePort(x.Switch)?.id !== it.Id); if (!pp.Patches.length) delete pp.Patches; } });
+          }
           runsIn().forEach((r: any) => { if (r.From === it.Id) { ensure(r, 'Points', []).unshift({ X: it.X, Y: it.Y }); r.From = ''; } if (r.To === it.Id) { ensure(r, 'Points', []).push({ X: it.X, Y: it.Y }); r.To = ''; } });
         } else if (x.type === 'opening') { const o = openingOf(x.id); if (o) openingsNow().splice(openingsNow().indexOf(o), 1); }
         else if (x.type === 'run') { const r = runOf(x.id); if (r) runsIn().splice(runsIn().indexOf(r), 1); }
@@ -3571,12 +3825,108 @@ export default function mount(sec: any, host: any) {
     body.append(
       option('This floor as SVG', 'A drawing that stays sharp at any size, with the plan image inside it.', exportSvg, true),
       option('This floor as PNG', 'A picture, for sharing or a document.', exportPng),
+      ...(host.pdf ? [option('Network port schedule', 'Every patch panel and switch, port by port: the jack on it, where that is, and the switch port it is patched to. PDF, to print for the rack.', () => { closeSheet(); portScheduleSheet(); })] : []),
       option('All floor plans (JSON)', 'Every site, floor, room, item and wire, with the plan images inside — a backup you can import here or on another bridge.', exportJson),
       option('Import floor plans…', 'Replace the floor plans here with an exported file.', () => file.click()),
       file);
     openSheet({ title: 'Export', body });
   };
   exportBtn.onclick = exportSheet;
+
+  // --- Port schedule -------------------------------------------------------------------------------
+  /// One line of the schedule: a port, the jack on it and where that is, and the far side of its cord.
+  type PortLine = { port: string; jack: string; room: string; floor: string; via: string; free: boolean };
+  const floorName = (x: any) => { const f = floorById(x?.Floor)?.floor || floorsAll().find(y => ensure(y.floor, 'Rooms', []).some((r: any) => r.Id === x?.Room))?.floor; return f ? f.Name || f.Id : ''; };
+  const roomName = (x: any) => x?.Room ? nameOfPlace(x.Room) : x ? 'Outdoors' : '';
+  /// Every patch panel, then every switch, each port on it: like the panel directory, every port is printed, a free
+  /// one left blank to write in. Then the jacks on no port, to be traced.
+  const portSchedule = () => {
+    const level = (d: any) => Number(floorById(d.Floor)?.floor.Level) || 0;
+    const devs = portedAll().sort((a: any, b: any) => (a.Kind === b.Kind ? 0 : a.Kind === 'patch-panel' ? -1 : 1) || level(a) - level(b) || devName(a).localeCompare(devName(b), undefined, { numeric: true }));
+    const sections = devs.map((d: any) => {
+      const top = Math.max(portCount(d), ...jacksOnDev(d).map((j: any) => parsePort(j.Port)!.n), ...(d.Patches || []).map((x: any) => Number(x.Port) || 0));
+      const lines: PortLine[] = Array.from({ length: top }, (_, i) => {
+        const n = i + 1, ref = `${d.Id}/${n}`;
+        const cords = d.Kind === 'network-switch' ? cordsTo(ref) : [];
+        const jacks = [...jacksOn(ref), ...cords.flatMap(c => jacksOn(`${c.pp.Id}/${c.n}`))];
+        const sw = d.Kind === 'patch-panel' ? parsePort(patchOf(d, n)) : null;
+        const via = d.Kind === 'patch-panel' ? (sw ? (sw.dev ? portName(sw.dev, sw.n) : patchOf(d, n)) : '') : [...cords.map(c => portName(c.pp, c.n)), ...(jacksOn(ref).length ? ['direct'] : [])].join(', ');
+        return { port: String(n), jack: jacks.map((j: any) => jackLabel(j) || itemName(j)).join(', '), room: [...new Set(jacks.map(roomName))].join(', '),
+          floor: [...new Set(jacks.map(floorName))].join(', '), via, free: !jacks.length && !via };
+      });
+      return { title: devName(d), kind: d.Kind, where: [roomName(d), floorName(d)].filter(Boolean).join(', '), count: portCount(d), used: usedPorts(d), lines };
+    });
+    const loose = itemsIn().filter((j: any) => j.Kind === 'jack' && !parsePort(j.Port)?.dev)
+      .map((j: any) => ({ port: '', jack: jackLabel(j) || itemName(j), room: roomName(j), floor: floorName(j), via: '', free: false }));
+    return { sections, loose };
+  };
+
+  /// The schedule as a PDF: Letter, a section a device, its title and header carried onto any page it runs over.
+  const portSchedulePdf = (): Uint8Array => {
+    const { page: newPage, document: pdfDoc, wrap } = host.pdf;
+    const { sections, loose } = portSchedule();
+    const margin = 36, left = margin, right = 612 - margin, bottom = 792 - margin, size = 9, lead = size * 1.25, pad = 4;
+    const widths = [40, 120, 150, 90, right - left - 400];
+    const xs = widths.reduce((a: number[], w: number) => [...a, a[a.length - 1] + w], [left]);
+    const when = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    const pages: any[] = [];
+    let page: any = null, y = 0;
+    const fresh = () => { page = newPage(); pages.push(page); page.text(left, margin + 14, 'Network port schedule', 14, { face: 'bold' }); y = margin + 34; };
+    const head = (title: string, sub: string, cols: string[]) => {
+      page.text(left, y + 12, title, 11, { face: 'bold' });
+      if (sub) page.text(right, y + 12, sub, 8, { gray: 0.33, align: 'right' });
+      y += 18;
+      page.fill(left, y, right - left, 15, 0.93);
+      cols.forEach((c, i) => page.text(xs[i] + pad, y + 10.5, c.toUpperCase(), 7, { face: 'bold' }));
+      page.rule(left, y, right, y, 0.75); y += 15; page.rule(left, y, right, y, 0.75);
+    };
+    const table = (title: string, sub: string, cols: string[], lines: PortLine[]) => {
+      if (!page || y + 18 + 15 + lead + 2 * pad > bottom) fresh(); else y += 14;
+      head(title, sub, cols);
+      lines.forEach(l => {
+        const cells = [l.port, l.jack, l.room, l.floor, l.via].map((t, i) => wrap(t || '', widths[i] - 2 * pad, size));
+        const h = Math.max(1, ...cells.map(c => c.length)) * lead + 2 * pad;
+        if (y + h > bottom) { page.rule(left, y, right, y, 0.75); fresh(); head(title + ' (continued)', sub, cols); }
+        if (l.free) page.fill(xs[0], y, widths[0], h, 0.97);
+        cells.forEach((c: string[], i: number) => c.forEach((t, k) => page.text(xs[i] + pad, y + pad + lead * k + size * 0.95, t, size, i === 0 ? { face: 'bold' } : {})));
+        y += h;
+        page.rule(left, y, right, y, 0.5);
+      });
+      page.rule(left, y, right, y, 0.75);
+    };
+    sections.forEach(sct => table(sct.title, `${sct.kind === 'patch-panel' ? 'Patch panel' : 'Switch'}${sct.where ? ' · ' + sct.where : ''} · ${sct.used} of ${sct.count} ports in use`,
+      ['Port', 'Jack', 'Room', 'Floor', sct.kind === 'patch-panel' ? 'Switch port' : 'Patched from'], sct.lines));
+    if (loose.length) table('Jacks on no port', `${loose.length} to trace`, ['', 'Jack', 'Room', 'Floor', 'Port'], loose);
+    if (!pages.length) { fresh(); page.text(left, y + 12, 'No patch panels, switches or jacks are placed yet.', size, { face: 'italic', gray: 0.33 }); }
+    pages.forEach((pg, i) => pg.text(right, margin + 14, `${when}${pages.length > 1 ? ` · page ${i + 1} of ${pages.length}` : ''}`, 9, { gray: 0.33, align: 'right' }));
+    return pdfDoc(pages, 'Network port schedule');
+  };
+
+  /// Print it, as the panel directory prints: the PDF itself, so paper always gets the same layout.
+  const printPdf = (bytes: Uint8Array, title: string) => {
+    const url = URL.createObjectURL(new Blob([bytes as any], { type: 'application/pdf' }));
+    const frame: any = el('iframe', { class: 'ps-print-frame', title });
+    frame.onload = () => {
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+      catch { window.open(url, '_blank'); }
+      setTimeout(() => { frame.remove(); URL.revokeObjectURL(url); }, 60000);
+    };
+    frame.src = url;
+    document.body.appendChild(frame);
+  };
+  const portScheduleSheet = () => {
+    const { sections, loose } = portSchedule();
+    const body = el('div', { class: 'fp-sheet' });
+    const ports = sections.reduce((n, sct) => n + sct.count, 0), used = sections.reduce((n, sct) => n + sct.used, 0);
+    body.appendChild(el('div', { class: 'desc', text: sections.length
+      ? `${sections.length} patch panel${sections.length === 1 ? '' : 's'} and switch${sections.length === 1 ? '' : 'es'}, ${used} of ${ports} ports in use${loose.length ? `; ${loose.length} jack${loose.length === 1 ? '' : 's'} on no port, listed last` : ''}. Every port is printed, a free one left blank to write in.`
+      : 'No patch panel or switch is placed yet. Place them with the Item tool, under Network.' }));
+    const save = btn('Save PDF', 'primary');
+    save.onclick = () => { host.saveFile(portSchedulePdf(), 'port-schedule.pdf', 'application/pdf'); closeSheet(); };
+    const print = btn('Print');
+    print.onclick = () => { printPdf(portSchedulePdf(), 'Network port schedule'); closeSheet(); };
+    openSheet({ title: 'Network port schedule', body, footer: [print, save] });
+  };
 
   const toolsSheet = () => {
     const body = el('div', { class: 'fp-sheet' });

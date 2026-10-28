@@ -138,6 +138,43 @@ public class LocationsPluginTests
         Assert.Equal("new_room", EntityExtensions.Read<NodeLocation>(cfg.EnergyFlow.Nodes[0], "locations").Location);
     }
 
+    [Fact]
+    public void NetworkJacks_PatchPanelsAndCables_AreRead()
+    {
+        var cfg = YamlConfigLoader.DeserializeString("""
+            Plugins:
+              locations:
+                Placements:
+                  - Id: patch_panel_1
+                    Kind: patch-panel
+                    Ports: 24
+                    Patches:
+                      - Port: 3
+                        Switch: network_switch_1/7
+                  - Id: network_switch_1
+                    Kind: network-switch
+                    Ports: 8
+                  - Id: jack_1
+                    Kind: jack
+                    Port: patch_panel_1/3
+                Runs:
+                  - Id: run_1
+                    Kind: network
+                    From: patch_panel_1
+                    To: jack_1
+            """);
+
+        var places = LocationSettings.Of(cfg);
+        var panel = places.Placements.Single(p => p.Id == "patch_panel_1");
+        Assert.Equal(24, panel.Ports);
+        Assert.Equal("network_switch_1/7", Assert.Single(panel.Patches).Switch);
+        Assert.Equal("patch_panel_1/3", places.Placements.Single(p => p.Id == "jack_1").Port);
+        Assert.Equal(RunKind.Network, places.Runs.Single().Kind);
+        foreach (var p in places.Placements)
+            Assert.True(System.ComponentModel.DataAnnotations.Validator.TryValidateObject(p, new(p), null, validateAllProperties: true), p.Id);
+        Assert.True(System.ComponentModel.DataAnnotations.Validator.TryValidateObject(places.Runs[0], new(places.Runs[0]), null, validateAllProperties: true));
+    }
+
     private sealed class PastHost(Config cfg, IMeasurementHistory? history) : IPluginHost
     {
         public Config Config => cfg;

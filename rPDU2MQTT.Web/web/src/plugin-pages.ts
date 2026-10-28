@@ -1,5 +1,5 @@
 // Plugin-provided GUI pages, mounted on first open.
-import { activate, api, btn, closeSheet, el, ensure, formatMeasure, navLink, openSheet, svgEl, toast } from './helpers.js';
+import { activate, api, btn, closeSheet, el, ensure, formatMeasure, navLink, openSheet, saveFile, svgEl, toast } from './helpers.js';
 import { state } from './state.js';
 import { refreshDirty } from './dirty.js';
 import { saveConfig } from './sections/flow.js';
@@ -15,6 +15,7 @@ import { analyse } from './circuit-finder.js';
 import { circuitSession } from './circuit-session.js';
 import { searchSelect } from './search-select.js';
 import { makeMenu } from './context-menu.js';
+import { pdfDocument, pdfPage, pdfTextWidth, pdfWrap } from './pdf.js';
 
 export type PluginPage = { integration: string; id: string; title: string; group: string; icon?: string; configSection?: string };
 
@@ -33,7 +34,8 @@ export async function loadPluginPages() {
 }
 
 const pluginPageHost = () => ({ api, btn, el, ensure, toast, state, refreshDirty, saveConfig, openHistorySheet, busyInSection, timelineStrip, stepToFit,
-  openSheet, closeSheet, svgEl, formatMeasure, sparkline, analyse, circuitSession, searchSelect, makeMenu,
+  openSheet, closeSheet, svgEl, formatMeasure, sparkline, analyse, circuitSession, searchSelect, makeMenu, saveFile,
+  pdf: { document: pdfDocument, page: pdfPage, textWidth: pdfTextWidth, wrap: pdfWrap },
   followRange, rangeMoment, goLive: () => setRange(LIVE),
   temp: { unit: tempUnit, to: toTemp, from: fromTemp, fmt: fmtTemp } });
 

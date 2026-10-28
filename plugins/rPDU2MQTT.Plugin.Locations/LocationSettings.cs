@@ -9,10 +9,10 @@ public sealed class LocationSettings
     [Description("Where things are: sites, their floors, and the rooms and areas on each floor. Energy rolls up room → floor → site alongside the electrical hierarchy.")]
     public List<SiteConfig> Sites { get; set; } = new();
 
-    [Description("Outlets, switches, fixtures, appliances and devices placed on the floor plans, each with its room and the circuit feeding it.")]
+    [Description("Outlets, switches, fixtures, appliances, devices and network gear placed on the floor plans, each with its room and the circuit feeding it or the port it is cabled to.")]
     public List<PlacementConfig> Placements { get; set; } = new();
 
-    [Description("Cable runs drawn on the floor plans: branch circuits, feeders and the utility service, each between placed items.")]
+    [Description("Cable runs drawn on the floor plans: branch circuits, feeders, the utility service and network cables, each between placed items.")]
     public List<RunConfig> Runs { get; set; } = new();
 
     [Description("Locations for derived nodes (PDUs and outlets), which have no entry of their own. Matched by node id with '*' as a wildcard; the first match wins, and an exact id beats a pattern.")]
