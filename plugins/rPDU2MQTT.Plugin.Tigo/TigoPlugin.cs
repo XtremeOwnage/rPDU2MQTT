@@ -121,7 +121,9 @@ public sealed class TigoPlugin : IIntegration, IConfigurablePlugin, IValueSource
             try { if (JsonSerializer.Deserialize<OptimizerReading>(json, StoreJson) is { } o) saved.Add(o); }
             catch (JsonException) { }
         }
-        r.Bus.Restore(names, saved);
+        var gateway = store.Read("gateway:" + r.Settings.Id).TryGetValue("id", out var id)
+            && ushort.TryParse(id, System.Globalization.NumberStyles.HexNumber, null, out var learned) ? learned : (ushort?)null;
+        r.Bus.Restore(names, saved, gateway);
     }
 
     internal void Save()
@@ -130,6 +132,8 @@ public sealed class TigoPlugin : IIntegration, IConfigurablePlugin, IValueSource
         {
             store.Write("serials:" + r.Settings.Id, r.Bus.Serials.ToDictionary(x => $"{x.Gw:X4}:{x.Node}", x => x.Serial));
             store.Write("readings:" + r.Settings.Id, r.Bus.Optimizers.ToDictionary(o => o.Serial, o => JsonSerializer.Serialize(o, StoreJson)));
+            if (r.Bus.GatewayId is { } gw && r.Bus.LastAnswerUtc is not null)
+                store.Write("gateway:" + r.Settings.Id, new Dictionary<string, string> { ["id"] = gw.ToString("X4") });
         }
     }
 
@@ -267,7 +271,9 @@ public sealed class TigoPlugin : IIntegration, IConfigurablePlugin, IValueSource
         if (r.Standby) return new(HealthLevel.Good, "Standby", "another process reads this gateway");
         if (!r.Connected) return new(HealthLevel.Bad, "Not connected", r.LastError ?? "connecting");
         if (r.Bus.OtherController && r.Settings.Kind == TigoMode.Poll)
-            return new(HealthLevel.Warn, "Another controller on the bus", "a CCA is polling, so Poll mode is not transmitting; switch to Listen");
+            return new(HealthLevel.Warn, "Another controller on the bus", $"a CCA is polling, so Poll mode is not transmitting; it resumes {TigoBus.ControllerGone.TotalSeconds:0} s after the CCA goes quiet, or switch to Listen");
+        if (r.Settings.Kind == TigoMode.Poll && r.Bus.GatewayId is null && r.Bus.LastAnswerUtc is null)
+            return new(HealthLevel.Warn, "Looking for the TAP", $"no TAP answered gateway id {string.Join(" or ", TigoBus.ProbeIds.Select(i => i.ToString("X4")))}; set the gateway id, and check A/B wiring and the gateway's serial settings (38400 8N1, raw TCP)");
         if (r.SilentSeconds(nowUtc) is { } quiet)
             return new(HealthLevel.Warn, "No serial data", $"connected to {r.Settings.Host}:{r.Settings.Port}, no bytes from the RS485 side in {quiet} s; check A/B wiring and the gateway's serial settings (38400 8N1, raw TCP)");
         if (r.Bus.Frames == 0)

@@ -28,6 +28,8 @@ public sealed class TigoBus
     private DateTime lastNodeTable = DateTime.MinValue;
     private ushort? nodeTablePage;
     private byte dsn;
+    private DateTime lastForeignPoll = DateTime.MinValue;
+    private int probes;
 
     public TigoBus(TigoMode mode, ushort? gatewayId = null, double ampsScale = TapPackets.DefaultAmpsScale, DateTime? startedUtc = null)
     {
@@ -54,6 +56,11 @@ public sealed class TigoBus
     public static readonly TimeSpan ListenFirst = TimeSpan.FromSeconds(5);
     public static readonly TimeSpan AnswerTimeout = TimeSpan.FromMilliseconds(800);
     public static readonly TimeSpan NodeTableEvery = TimeSpan.FromMinutes(10);
+    /// <summary>Poll mode resumes this long after the other controller goes quiet.</summary>
+    public static readonly TimeSpan ControllerGone = TimeSpan.FromSeconds(30);
+
+    /// <summary>Gateway ids probed when none is configured or learned: the CCA's usual assignments.</summary>
+    public static readonly ushort[] ProbeIds = [0x1209, 0x120A];
 
     /// <summary>Another controller is polling; Poll mode stands down.</summary>
     public bool OtherController { get; private set; }
@@ -66,10 +73,11 @@ public sealed class TigoBus
     }
 
     /// <summary>Seed from a store after a restart; what the bus has already said wins.</summary>
-    public void Restore(IEnumerable<(ushort Gw, ushort Node, string Serial)> names, IEnumerable<OptimizerReading> saved)
+    public void Restore(IEnumerable<(ushort Gw, ushort Node, string Serial)> names, IEnumerable<OptimizerReading> saved, ushort? gatewayId = null)
     {
         lock (gate)
         {
+            GatewayId ??= gatewayId;
             foreach (var r in saved)
                 if (!readings.ContainsKey(r.Serial)) readings[r.Serial] = r;
             foreach (var (gw, node, serial) in names)
@@ -86,10 +94,19 @@ public sealed class TigoBus
             // A poll the bridge did not send.
             if (!frame.FromTap && mode == TigoMode.Poll && frame.Type == TapFrames.Poll && awaitingSince == DateTime.MinValue
                 && nowUtc - lastPoll > TimeSpan.FromSeconds(1))
+            {
                 OtherController = true;
+                lastForeignPoll = nowUtc;
+            }
             // Enumeration frames carry address 0.
             if (frame.Type is TapFrames.Poll or TapFrames.PollResponse && frame.GatewayId != 0)
                 GatewayId = mode == TigoMode.Poll ? GatewayId ?? frame.GatewayId : frame.GatewayId;
+            // A TAP answering a probe.
+            if (frame.FromTap && frame.Type == TapFrames.ProbeResponse && frame.GatewayId != 0 && mode == TigoMode.Poll && GatewayId is null)
+            {
+                GatewayId = frame.GatewayId;
+                awaitingSince = DateTime.MinValue;
+            }
             if (!frame.FromTap || (mode == TigoMode.Poll && frame.GatewayId != GatewayId)) return;
 
             if (frame.Type == TapFrames.PollResponse) Answer(frame, nowUtc);
@@ -117,6 +134,9 @@ public sealed class TigoBus
             nextPacket = (ushort)(echoed + packets.Count);
             awaitingSince = DateTime.MinValue;
         }
+        // Follow the other controller's cursor, to take over where it stops.
+        else if (mode == TigoMode.Poll && OtherController)
+            nextPacket = (ushort)((((parsed.Status.PacketCounterHigh ?? (byte)(nextPacket >> 8)) << 8) | parsed.Status.PacketCounterLow) + packets.Count);
 
         foreach (var p in packets)
         {
@@ -165,7 +185,8 @@ public sealed class TigoBus
         if (mode != TigoMode.Poll) return null;
         lock (gate)
         {
-            if (OtherController || GatewayId is not { } gw) return null;
+            if (OtherController && nowUtc - lastForeignPoll >= ControllerGone) OtherController = false;
+            if (OtherController) return null;
             if (nowUtc - StartedUtc < ListenFirst) return null;
             if (awaitingSince != DateTime.MinValue)
             {
@@ -173,6 +194,15 @@ public sealed class TigoBus
                 Unanswered++;
                 awaitingSince = DateTime.MinValue;
                 if (nodeTablePage is not null) { nodeTablePage = null; lastNodeTable = nowUtc; }
+            }
+
+            // No CCA to learn the id from: ask the likely ones.
+            if (GatewayId is not { } gw)
+            {
+                if (nowUtc - lastPoll < pollEvery) return null;
+                lastPoll = nowUtc;
+                awaitingSince = nowUtc;
+                return TapFrames.Encode(ProbeIds[probes++ % ProbeIds.Length], TapFrames.Probe, []);
             }
 
             if (nodeTablePage is null && nowUtc - lastNodeTable >= NodeTableEvery) nodeTablePage = 0;
