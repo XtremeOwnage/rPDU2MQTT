@@ -14,6 +14,9 @@ public static class TapFrames
     public const ushort PollResponse = 0x0149;
     public const ushort Command = 0x0B0F;
     public const ushort CommandResponse = 0x0B10;
+    /// <summary>Network info request; read-only, answered with <see cref="ProbeResponse"/>.</summary>
+    public const ushort Probe = 0x003A;
+    public const ushort ProbeResponse = 0x003B;
 
     private static readonly byte[] Unescaped = [0x7E, 0x24, 0x23, 0x25, 0xA4, 0xA3, 0xA5];
     private static readonly ushort[] CrcTable = BuildCrcTable();

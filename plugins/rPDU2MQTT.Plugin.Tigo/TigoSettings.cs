@@ -48,7 +48,7 @@ public sealed class TigoConnection
     [JsonIgnore]
     public TigoMode Kind => string.Equals(Mode?.Trim(), "Poll", StringComparison.OrdinalIgnoreCase) ? TigoMode.Poll : TigoMode.Listen;
 
-    [Description("Poll mode: the TAP's gateway id in hex (e.g. 1209). Blank learns it from the bus.")]
+    [Description("Poll mode: the TAP's gateway id in hex (e.g. 1209). Blank finds it on the bus, trying 1209 and 120A.")]
     public string? GatewayId { get; set; }
 
     [DefaultValue(1000)]

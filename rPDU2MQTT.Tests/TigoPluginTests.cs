@@ -170,7 +170,55 @@ public class TigoPluginTests
         var bus = new TigoBus(TigoMode.Poll, gatewayId: Gw, startedUtc: T0);
         bus.OnFrame(new TapFrame(false, Gw, TapFrames.Poll, TapPackets.PollPayload(0x99)), T0.AddSeconds(2));
         Assert.True(bus.OtherController);
-        Assert.Null(bus.NextTransmit(T0.AddMinutes(5), TimeSpan.FromSeconds(1)));
+        Assert.Null(bus.NextTransmit(T0.AddSeconds(20), TimeSpan.FromSeconds(1)));
+    }
+
+    [Fact]
+    public void Polling_TakesOver_WhereTheOtherControllerStopped()
+    {
+        var bus = new TigoBus(TigoMode.Poll, gatewayId: Gw, startedUtc: T0);
+        bus.OnFrame(new TapFrame(false, Gw, TapFrames.Poll, TapPackets.PollPayload(0x99)), T0.AddSeconds(2));
+        bus.OnFrame(FromTap(TapFrames.PollResponse, Answer(0x0099, Packet(0x31, 5, PowerData(764, 401, 128, 1450, 417)))), T0.AddSeconds(2));
+        Assert.Null(bus.NextTransmit(T0.AddSeconds(20), TimeSpan.FromSeconds(1)));
+
+        var t = T0.AddSeconds(2) + TigoBus.ControllerGone;
+        var first = Assert.Single(new TapFramer().Push(bus.NextTransmit(t, TimeSpan.FromSeconds(1))!));
+        Assert.False(bus.OtherController);
+        Assert.Equal(TapFrames.Command, first.Type);   // the node table first
+        bus.OnFrame(FromTap(TapFrames.CommandResponse, [0x00, 0x05, 0x00, 0x27, TapPackets.Command(first.Payload)!.Value.Dsn, .. NodeTable(0)]), t);
+        var poll = Assert.Single(new TapFramer().Push(bus.NextTransmit(t, TimeSpan.FromSeconds(1))!));
+        Assert.Equal(TapPackets.PollPayload(0x009A), poll.Payload);
+    }
+
+    [Fact]
+    public void Polling_WithoutAGatewayId_ProbesForTheTap()
+    {
+        var bus = new TigoBus(TigoMode.Poll, startedUtc: T0);
+        var t = T0 + TigoBus.ListenFirst;
+        var probe = Assert.Single(new TapFramer().Push(bus.NextTransmit(t, TimeSpan.FromSeconds(1))!));
+        Assert.Equal(TapFrames.Probe, probe.Type);
+        Assert.Equal(TigoBus.ProbeIds[0], probe.GatewayId);
+
+        // No answer on the first id: the next poll interval tries the second.
+        Assert.Null(bus.NextTransmit(t.AddSeconds(0.9), TimeSpan.FromSeconds(1)));
+        var second = Assert.Single(new TapFramer().Push(bus.NextTransmit(t.AddSeconds(1), TimeSpan.FromSeconds(1))!));
+        Assert.Equal(TigoBus.ProbeIds[1], second.GatewayId);
+        bus.OnFrame(new TapFrame(true, TigoBus.ProbeIds[1], TapFrames.ProbeResponse, []), t.AddSeconds(1.1));
+        Assert.Equal(TigoBus.ProbeIds[1], bus.GatewayId);
+
+        var next = Assert.Single(new TapFramer().Push(bus.NextTransmit(t.AddSeconds(1.2), TimeSpan.FromSeconds(1))!));
+        Assert.Equal(TigoBus.ProbeIds[1], next.GatewayId);
+        Assert.NotEqual(TapFrames.Probe, next.Type);
+    }
+
+    [Fact]
+    public void Polling_UsesTheGatewayIdLearnedBeforeARestart()
+    {
+        var bus = new TigoBus(TigoMode.Poll, startedUtc: T0);
+        bus.Restore([], [], Gw);
+        var first = Assert.Single(new TapFramer().Push(bus.NextTransmit(T0 + TigoBus.ListenFirst, TimeSpan.FromSeconds(1))!));
+        Assert.Equal(Gw, first.GatewayId);
+        Assert.Equal(TapFrames.Command, first.Type);
     }
 
     /// <summary>Status, Test, Optimizers and the page agree on the bus state.</summary>
@@ -286,6 +334,7 @@ public class TigoPluginTests
         var json = System.Text.Json.JsonSerializer.Serialize(second.Snapshot(DateTime.UtcNow));
         Assert.Contains("04C05B4000ABCDEF", json);
         Assert.Contains("\"named\":true", json);
+        Assert.Equal("1209", store.Read("gateway:roof")["id"]);
         await second.ReconcileAsync(new Config(), [], default);
     }
 
