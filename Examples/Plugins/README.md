@@ -11,7 +11,7 @@ every reading and every energy-flow tier to a file. Copy it and change the middl
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <Nullable>enable</Nullable>
     <!-- Name and one-line description on System › Plugins. -->
     <AssemblyTitle>My Plugin</AssemblyTitle>
@@ -191,7 +191,7 @@ including the single-owner lease that stops two replicas hammering one serial ga
 
 ```
 dotnet build
-cp bin/Debug/net10.0/MyPlugin.dll  <bridge>/plugins/
+cp bin/Debug/net11.0/MyPlugin.dll  <bridge>/plugins/
 ```
 
 Restart the bridge. It logs `Plugin loaded: MyPlugin.dll — influx.` Set `RPDU2MQTT_PLUGINS` to load from

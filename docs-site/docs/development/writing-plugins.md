@@ -13,7 +13,7 @@ Example: [HelloWorld](https://github.com/XtremeOwnage/rPDU2MQTT/tree/main/Exampl
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
@@ -223,7 +223,7 @@ public Task<string> ControlOutletAsync(Config cfg, string deviceId, int outlet, 
 
 ```
 dotnet build
-cp bin/Debug/net10.0/MyPlugin.dll  <bridge>/plugins/
+cp bin/Debug/net11.0/MyPlugin.dll  <bridge>/plugins/
 ```
 
 Restart. The log shows `Plugin loaded: MyPlugin.dll — influx.` `RPDU2MQTT_PLUGINS` sets another directory.

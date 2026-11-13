@@ -29,13 +29,13 @@ See [Helm chart](../deployment/helm.md), [Argo CD](../deployment/argo-cd.md), [K
 
 ## From source
 
-Requires .NET 10.
+Requires .NET 11.
 
 ```bash
 git clone https://github.com/XtremeOwnage/rPDU2MQTT.git
 cd rPDU2MQTT
 dotnet build rPDU2MQTT/rPDU2MQTT.csproj -c Release
-cd rPDU2MQTT/bin/Release/net10.0
+cd rPDU2MQTT/bin/Release/net11.0
 dotnet rPDU2MQTT.dll
 ```
 

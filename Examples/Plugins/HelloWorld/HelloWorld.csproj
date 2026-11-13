@@ -3,7 +3,7 @@
   <!-- A plugin is an ordinary class library. One project reference, no host, no Orleans, no ASP.NET.
        Build it and copy the DLL into the bridge's plugins/ directory. -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>rPDU2MQTT.Plugin.HelloWorld</AssemblyName>

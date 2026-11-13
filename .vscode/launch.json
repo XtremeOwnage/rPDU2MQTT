@@ -9,7 +9,7 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            "program": "${workspaceFolder}/rPDU2MQTT/bin/Debug/net10.0/rPDU2MQTT.dll",
+            "program": "${workspaceFolder}/rPDU2MQTT/bin/Debug/net11.0/rPDU2MQTT.dll",
             "args": [],
             "cwd": "${workspaceFolder}/rPDU2MQTT",
             "console": "internalConsole",
