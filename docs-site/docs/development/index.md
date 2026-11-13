@@ -28,7 +28,7 @@ title: Development
 
 ```bash
 # regenerate the settings reference
-dotnet rPDU2MQTT/bin/Release/net10.0/rPDU2MQTT.dll --emit-schema > /tmp/schema.json
+dotnet rPDU2MQTT/bin/Release/net11.0/rPDU2MQTT.dll --emit-schema > /tmp/schema.json
 python3 docs-site/generate-settings.py /tmp/schema.json
 
 # build (or serve)
