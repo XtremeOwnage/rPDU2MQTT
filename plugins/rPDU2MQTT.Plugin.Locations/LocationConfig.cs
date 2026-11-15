@@ -416,6 +416,10 @@ public class GangConfig
     [DefaultValue(false)]
     [Description("Switches nothing.")]
     public bool Dead { get; set; }
+
+    [Range(3, 4, ErrorMessage = "Way must be 3 or 4.")]
+    [Description("3 or 4 for a 3-way or 4-way switch. Blank is single-pole.")]
+    public int? Way { get; set; }
 }
 
 public class PatchConfig
@@ -473,4 +477,12 @@ public class RunConfig
 
     [Description("A note on the run, for example 'through the attic'.")]
     public string Label { get; set; } = "";
+
+    [DefaultValue(false)]
+    [Description("A switch loop or traveler: carries power to a switch and back, not one way to a load.")]
+    public bool SwitchLoop { get; set; }
+
+    [DefaultValue(false)]
+    [Description("Capped or disconnected: drawn, but carries nothing.")]
+    public bool Disconnected { get; set; }
 }

@@ -118,16 +118,18 @@ export function planGlyph(kind: string, r: number): any {
   return g;
 }
 
-export function planSwitchGlyph(dead: boolean[], r: number): any {
-  if (dead.length <= 1 && !dead[0]) return planGlyph('switch', r);
+export function planSwitchGlyph(gangs: { dead: boolean; on: boolean | null }[], r: number): any {
+  if (gangs.length <= 1 && !gangs[0]?.dead && gangs[0]?.on == null) return planGlyph('switch', r);
   const g = svgEl('g', { class: 'fp-glyph' });
-  const k = r * 0.5, n = Math.max(1, dead.length);
+  const k = r * 0.5, n = Math.max(1, gangs.length);
   const w = n > 1 ? 0.7 : 0.9, h = n > 1 ? 1.5 : 1.8, step = 1.1;
-  dead.forEach((d, i) => {
-    const x = (i - (n - 1) / 2) * step;
-    g.appendChild(svgEl('rect', { x: (x - w / 2) * k, y: -h / 2 * k, width: w * k, height: h * k, rx: 0.15 * k, class: d ? 'is-dead' : null }));
-    g.appendChild(svgEl('line', { x1: x * k, y1: -h * 0.28 * k, x2: x * k, y2: 0.03 * k, class: d ? 'is-dead' : null }));
-    if (d) g.appendChild(svgEl('line', { x1: (x - w / 2) * k, y1: h / 2 * k, x2: (x + w / 2) * k, y2: -h / 2 * k, class: 'fp-glyph-dead' }));
+  gangs.forEach((x, i) => {
+    const cx = (i - (n - 1) / 2) * step;
+    const cls = x.dead ? 'is-dead' : x.on ? 'is-on' : null;
+    g.appendChild(svgEl('rect', { x: (cx - w / 2) * k, y: -h / 2 * k, width: w * k, height: h * k, rx: 0.15 * k, class: cls }));
+    const [y1, y2] = x.on == null || x.dead ? [-h * 0.28, 0.03] : x.on ? [-h * 0.32, 0] : [0, h * 0.32];
+    g.appendChild(svgEl('line', { x1: cx * k, y1: y1 * k, x2: cx * k, y2: y2 * k, class: cls }));
+    if (x.dead) g.appendChild(svgEl('line', { x1: (cx - w / 2) * k, y1: h / 2 * k, x2: (cx + w / 2) * k, y2: -h / 2 * k, class: 'fp-glyph-dead' }));
   });
   return g;
 }

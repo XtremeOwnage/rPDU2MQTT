@@ -262,6 +262,21 @@ export default function mount(sec: any, host: any) {
     if (at >= 0) list.splice(at, 1); else { list.push(id); delete g.Dead; }
   });
   let gangPick: { sw: string; n: number } | null = null;
+  const sim = new Map<string, boolean>();
+  const simKey = (sw: any, n: number) => `${sw.Id}/${n}`;
+  const liveRuns = () => runsIn().filter((r: any) => !r.Disconnected);
+  const switchCut = (sw: any) => { const rs = runsIn().filter((r: any) => r.From === sw.Id || r.To === sw.Id); return rs.length > 0 && rs.every((r: any) => r.Disconnected); };
+  const wayText = (g: any) => g?.Way === 3 ? '3-way' : g?.Way === 4 ? '4-way' : '';
+  const simLit = (id: string): boolean | null => {
+    if (!sim.size) return null;
+    const gs = switchedBy(id).filter((x: any) => !x.g.Dead && !switchCut(x.sw));
+    if (!gs.length) return null;
+    const st = (x: any) => !!sim.get(simKey(x.sw, x.n));
+    const multi = gs.filter((x: any) => x.g.Way), single = gs.filter((x: any) => !x.g.Way);
+    const m = multi.length ? multi.filter(st).length % 2 === 1 : true;
+    const o = single.length ? single.some(st) : true;
+    return m && o;
+  };
 
   const isNet = (it: any) => !!it && PLAN_NETWORK_KINDS.includes(it.Kind);
   const isPorted = (it: any) => !!it && PLAN_PORTED_KINDS.includes(it.Kind);
@@ -901,7 +916,7 @@ export default function mount(sec: any, host: any) {
     const loadOn = trace && showLoad;
     const focusRooms = new Set<string>(focus ? [...(circuitOf(focus)?.rooms || []), ...itemsIn().filter((i: any) => i.Circuit === focus).map((i: any) => i.Room).filter(Boolean)] : []);
     const gfci = selection?.type === 'item' && !extra.length ? itemOf(selection.id) : null;
-    const downstream = gfci?.Gfci ? planDownstream(runsIn(), gfci.Id) : null;
+    const downstream = gfci?.Gfci ? planDownstream(liveRuns(), gfci.Id) : null;
     const isGfci = (id: string) => !!itemOf(id)?.Gfci;
     const netOn = !hidden.has('network');
     const one = extra.length ? null : selection;
@@ -910,7 +925,7 @@ export default function mount(sec: any, host: any) {
     const legs = (oneItem?.Kind === 'switch' ? gangsOf(oneItem).map((g: any, n: number) => ({ sw: oneItem, n, g })) : oneItem ? switchedBy(oneItem.Id) : [])
       .flatMap((x: any) => (x.g.Controls || []).filter((id: string) => oneItem.Kind === 'switch' || id === oneItem.Id).map((id: string) => ({ sw: x.sw, n: x.n, to: itemOf(id) })))
       .filter((l: any) => l.to && onFloor(l.to, floorNow()!.floor) && onFloor(l.sw, floorNow()!.floor));
-    const switched = new Set<string>(legs.flatMap((l: any) => [l.sw.Id, l.to.Id]));
+    const switched = new Set<string>(legs.flatMap((l: any) => [l.sw.Id, l.to.Id, ...switchedBy(l.to.Id).map((x: any) => x.sw.Id)]));
     const fitsIn = (b: { w: number; h: number }, lines: string[], f: number) =>
       Math.max(...lines.map(ln => ln.length)) * f * 0.58 <= b.w * 0.95 && lines.length * f * 1.2 <= b.h * 0.95;
     const broken = (name: string) => {
@@ -1043,12 +1058,17 @@ export default function mount(sec: any, host: any) {
       const onRef = lit && focus ? focus : r.Circuit || [r.From, r.To].map(id => id && itemOf(id)?.Circuit).find(Boolean) || '';
       const colour = net ? netColor(runDev(r)) : r.Kind === 'circuit' ? (loadOn ? loadColor(onRef) || 'var(--muted)' : planCircuitColor(lit && focus ? focus : r.Circuit))
         : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
-      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${mode === 'edit' && !inLayer({ type: 'run', id: r.Id }) ? ' is-aside' : ''}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit || net ? '' : ' is-unknown'}` });
+      const loop = !net && !!r.SwitchLoop, cut = !!r.Disconnected;
+      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${loop ? ' is-loop' : ''}${cut ? ' is-cut' : ''}${mode === 'edit' && !inLayer({ type: 'run', id: r.Id }) ? ' is-aside' : ''}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit || net ? '' : ' is-unknown'}` });
       const sw = (r.Kind === 'circuit' ? 2.5 : net ? 2 : 4) * u * (sel ? 1.5 : lit ? 2.2 : trace ? 1.8 : 1);
       if (lit || (trace && !dim)) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-case', 'stroke-width': sw + 6 * u }));
-      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': sw, 'stroke-dasharray': net ? `${8 * u} ${2.5 * u} ${1.5 * u} ${2.5 * u}` : r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
+      g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': sw, 'stroke-dasharray': net ? `${8 * u} ${2.5 * u} ${1.5 * u} ${2.5 * u}` : loop ? `${10 * u} ${3 * u} ${2 * u} ${3 * u}` : r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
+      if (cut) [[path[0], path[1]], [path[path.length - 1], path[path.length - 2]]].forEach(([e, n]) => {
+        const L = Math.hypot(n.X - e.X, n.Y - e.Y) || 1, dx = (n.X - e.X) / L, dy = (n.Y - e.Y) / L, c = { X: e.X + dx * 14 * u, Y: e.Y + dy * 14 * u };
+        g.appendChild(svgEl('line', { x1: c.X - dy * 6 * u, y1: c.Y + dx * 6 * u, x2: c.X + dy * 6 * u, y2: c.Y - dx * 6 * u, class: 'fp-run-cap', 'stroke-width': 3 * u }));
+      });
       // And current is shown flowing along it, supply to load.
-      if (lit) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-flow', 'stroke-width': sw * 0.45, 'stroke-dasharray': `${3 * u} ${9 * u}`, style: `--fp-flow:${-12 * u}px` }));
+      if (lit && !loop && !cut) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-flow', 'stroke-width': sw * 0.45, 'stroke-dasharray': `${3 * u} ${9 * u}`, style: `--fp-flow:${-12 * u}px` }));
       const cp = mode === 'view' && r.Circuit ? circuitOf(r.Circuit)?.power : undefined;
       const cl = loadOn && r.Circuit ? loadOf(r.Circuit) : null;
       if (mode === 'view' && r.Circuit && path.length >= 2 && !(loadOn && cl == null)) {
@@ -1059,7 +1079,7 @@ export default function mount(sec: any, host: any) {
       }
       let seg = 0, best = -1;
       for (let i = 0; i + 1 < path.length; i++) { const L = Math.hypot(path[i + 1].X - path[i].X, path[i + 1].Y - path[i].Y); if (L > best) { best = L; seg = i; } }
-      if (best / u > 30) {
+      if (best / u > 30 && !loop) {
         const a = path[seg], b = path[seg + 1];
         const ang = Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI;
         const mx = (a.X + b.X) / 2, my = (a.Y + b.Y) / 2;
@@ -1168,7 +1188,7 @@ export default function mount(sec: any, host: any) {
       }
       // An appliance drawn as itself needs no icon on top.
       if (!hasArt) {
-        const glyph = item.Kind === 'switch' ? planSwitchGlyph(gangsOf(item).map((x: any) => !!x.Dead), rr) : planGlyph(item.Kind || 'outlet', rr);
+        const glyph = item.Kind === 'switch' ? planSwitchGlyph(gangsOf(item).map((x: any, n: number) => ({ dead: !!x.Dead || switchCut(item), on: sim.has(simKey(item, n)) ? !!sim.get(simKey(item, n)) : null })), rr) : planGlyph(item.Kind || 'outlet', rr);
         glyph.setAttribute('stroke-width', 1.4 * u);
         g.appendChild(glyph);
       }
@@ -1180,9 +1200,16 @@ export default function mount(sec: any, host: any) {
         g.appendChild(b);
         const tag = svgEl('text', { y: r + 13 * u, class: 'fp-gfci-tag', 'font-size': font * 0.7 }); tag.textContent = 'GFCI';
         g.appendChild(tag);
-      } else if ((showWiring || trace) && planProtectedBy(runsIn(), isGfci, item.Id)) {
+      } else if ((showWiring || trace) && planProtectedBy(liveRuns(), isGfci, item.Id)) {
         g.appendChild(svgEl('circle', { cx: r * 0.8, cy: r * 0.75, r: r * 0.28, class: 'fp-protected-dot', 'stroke-width': u }));
       }
+      const ways = [...new Set(gangsOf(item).map(wayText).filter(Boolean))];
+      if (ways.length && !item.Gfci) {
+        const tag = svgEl('text', { y: r + 13 * u, class: 'fp-way-tag', 'font-size': font * 0.7 }); tag.textContent = ways.join(' ').toUpperCase();
+        g.appendChild(tag);
+      }
+      const on = simLit(item.Id);
+      if (on != null) g.classList.add(on ? 'is-lit' : 'is-dark');
       if (!known) {
         const badge = svgEl('text', { x: r * 0.85, y: -r * 0.6, class: 'fp-item-q', 'font-size': font * 0.9 });
         badge.textContent = '?';
@@ -3022,8 +3049,10 @@ export default function mount(sec: any, host: any) {
 
   const drawGangs = (it: any, editing: boolean) => {
     const gangs = gangsOf(it);
+    if (switchCut(it)) side.appendChild(el('div', { class: 'fp-note is-warn', text: 'Disconnected' }));
     if (gangPick && (gangPick.sw !== it.Id || gangPick.n >= gangs.length || !editing)) gangPick = null;
     side.appendChild(el('h4', { text: gangs.length > 1 ? 'Gangs' : 'Controls' }));
+    if (sim.size) { const reset = btn('Reset simulation'); reset.onclick = () => { sim.clear(); render(); }; side.appendChild(actions(reset)); }
     if (editing) {
       const count = el('input', { type: 'number', class: 'fp-deg', value: String(gangs.length), min: '1', max: '6', step: '1' }) as HTMLInputElement;
       count.onchange = () => {
@@ -3036,16 +3065,25 @@ export default function mount(sec: any, host: any) {
     gangs.forEach((g: any, n: number) => {
       const ctl = (g.Controls || []).map((id: string) => itemOf(id)).filter(Boolean);
       const head = gangs.length > 1 ? `${n + 1}${g.Label ? ' · ' + g.Label : ''}` : g.Label || '';
+      const simBtn = () => {
+        const k = simKey(it, n), now = !!sim.get(k);
+        const b = btn(now ? 'On' : 'Off', now ? 'primary' : '');
+        b.title = 'Simulate';
+        b.onclick = () => { sim.set(k, !now); render(); };
+        return b;
+      };
       if (!editing) {
         const what = g.Dead ? 'nothing' : ctl.length ? ctl.map((x: any) => itemName(x)).join(', ') : 'not set';
-        side.appendChild(row(head || 'Switches', what, g.Dead ? 'is-muted' : ''));
+        const label = [head || 'Switches', wayText(g)].filter(Boolean).join(' · ');
+        side.appendChild(row(label, g.Dead || !ctl.length ? what : el('span', { class: 'fp-colour-row' }, el('span', { class: 'fp-row-v', text: what }), simBtn()), g.Dead ? 'is-muted' : ''));
         return;
       }
       const box = el('div', { class: 'fp-gang' + (gangPick?.n === n ? ' is-picking' : '') });
       if (gangs.length > 1) box.appendChild(el('div', { class: 'fp-gang-head', text: `Gang ${n + 1}` }));
       const lbl = el('input', { type: 'text', class: 'fp-name', value: g.Label || '', placeholder: 'Label' }) as HTMLInputElement;
       lbl.onchange = () => act(() => { const x = gangsEdit(it)[n]; x.Label = lbl.value.trim(); });
-      box.appendChild(lbl);
+      const way = select([['', 'Single-pole'], ['3', '3-way'], ['4', '4-way']], g.Way ? String(g.Way) : '', v => act(() => { const x = gangsEdit(it)[n]; if (v) x.Way = Number(v); else delete x.Way; }));
+      box.appendChild(el('div', { class: 'fp-two' }, lbl, way));
       if (ctl.length) {
         const list = el('div', { class: 'fp-list' });
         ctl.forEach((x: any) => {
@@ -3065,7 +3103,7 @@ export default function mount(sec: any, host: any) {
       const pick = btn(picking ? 'Done' : 'Pick on plan', picking ? 'primary' : '');
       pick.onclick = () => { gangPick = picking ? null : { sw: it.Id, n }; render(); };
       const dead = check('Controls nothing', !!g.Dead, v => act(() => { const x = gangsEdit(it)[n]; if (v) { x.Dead = true; x.Controls = []; } else delete x.Dead; }));
-      box.appendChild(el('div', { class: 'fp-colour-row' }, ...(g.Dead ? [] : [pick]), dead));
+      box.appendChild(el('div', { class: 'fp-colour-row' }, ...(g.Dead ? [] : [pick]), dead, ...(g.Dead || !ctl.length ? [] : [simBtn()])));
       side.appendChild(box);
     });
   };
@@ -3152,7 +3190,7 @@ export default function mount(sec: any, host: any) {
     }
 
     if (it.Gfci) {
-      const ds = planDownstream(runsIn(), it.Id);
+      const ds = planDownstream(liveRuns(), it.Id);
       side.appendChild(el('h4', { text: 'Protects' }));
       if (!ds.items.size) side.appendChild(el('div', { class: 'desc', text: 'Nothing is wired from its load side yet. Draw a wire from this outlet to the ones it feeds; everything they lead to is protected.' }));
       else {
@@ -3163,7 +3201,7 @@ export default function mount(sec: any, host: any) {
         side.appendChild(el('div', { class: 'desc', text: `${ds.items.size} downstream, shown in green on the plan. Tripping this GFCI cuts them all.` }));
       }
     } else {
-      const by = planProtectedBy(runsIn(), (id: string) => !!itemOf(id)?.Gfci, it.Id);
+      const by = planProtectedBy(liveRuns(), (id: string) => !!itemOf(id)?.Gfci, it.Id);
       if (by) {
         const g = itemOf(by);
         side.appendChild(el('h4', { text: 'Protected by' }));
@@ -3250,7 +3288,8 @@ export default function mount(sec: any, host: any) {
     const from = r.From ? itemOf(r.From) : null, to = r.To ? itemOf(r.To) : null;
     const net = r.Kind === 'network';
     const endName = (x: any) => x.Kind === 'jack' ? jackLabel(x) || itemName(x) : isPorted(x) ? devName(x) : itemName(x);
-    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: r.Label || (net ? 'Network cable' : `${r.Kind === 'service' ? 'Service' : r.Kind === 'feeder' ? 'Feeder' : 'Circuit'} run`) }), el('span', { class: 'fp-pill', text: r.Kind })));
+    side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: r.Label || (net ? 'Network cable' : r.SwitchLoop ? 'Switch loop' : `${r.Kind === 'service' ? 'Service' : r.Kind === 'feeder' ? 'Feeder' : 'Circuit'} run`) }), el('span', { class: 'fp-pill', text: r.Kind })));
+    if (r.Disconnected) side.appendChild(el('div', { class: 'fp-note is-warn', text: 'Disconnected' }));
     side.appendChild(row(net ? 'From' : 'Supply side', from ? endName(from) : 'a loose end'));
     side.appendChild(row(net ? 'To' : 'Load side', to ? endName(to) : 'a loose end'));
     side.appendChild(row('Length on the plan', len(planPathLength(runPath(r)))));
@@ -3265,6 +3304,9 @@ export default function mount(sec: any, host: any) {
           [from, to].forEach(it => { if (v && it && !it.Circuit && !PLAN_SUPPLY_KINDS.includes(it.Kind)) it.Circuit = v; });
         }), { placeholder: 'Search circuits…' }), 'Setting it also puts either end with no circuit of its own on this one.'));
       side.append(field('Note', note));
+      if (!net) side.appendChild(el('div', { class: 'fp-colour-row' },
+        check('Switch loop', !!r.SwitchLoop, v => act(() => { if (v) r.SwitchLoop = true; else delete r.SwitchLoop; })),
+        check('Disconnected', !!r.Disconnected, v => act(() => { if (v) r.Disconnected = true; else delete r.Disconnected; }))));
       const flip = btn('Reverse direction');
       flip.title = 'Swap which end is the supply side. What is downstream of a GFCI follows this.';
       flip.onclick = () => act(() => { const f = r.From; r.From = r.To; r.To = f; r.Points = [...(r.Points || [])].reverse(); });

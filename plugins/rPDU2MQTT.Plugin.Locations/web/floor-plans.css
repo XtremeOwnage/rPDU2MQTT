@@ -147,6 +147,13 @@
 .fp-glyph-dead { stroke: var(--bad); }
 .fp-switch-leg { stroke: var(--accent); stroke-linecap: round; opacity: .8; pointer-events: none; }
 .fp-switch-leg.is-active { opacity: 1; }
+.fp-glyph .is-on { stroke: var(--warn); }
+.fp-way-tag { fill: var(--accent); text-anchor: middle; font-weight: 800; letter-spacing: .04em; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; pointer-events: none; }
+.fp-item.is-lit .fp-item-disc { stroke: var(--warn) !important; filter: drop-shadow(0 0 6px var(--warn)); }
+.fp-item.is-lit .fp-glyph { stroke: var(--warn); }
+.fp-item.is-dark { opacity: .45; }
+.fp-run.is-cut { opacity: .45; }
+.fp-run-cap { stroke: var(--bad); stroke-linecap: round; pointer-events: none; }
 .fp-switch-gang { fill: var(--accent); text-anchor: middle; dominant-baseline: middle; font-weight: 800; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; pointer-events: none; }
 .fp-item.is-unknown .fp-item-disc { stroke: var(--warn); stroke-dasharray: 3 2; }
 .fp-item-q { fill: var(--warn); font-weight: 800; pointer-events: none; }

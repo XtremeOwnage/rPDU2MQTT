@@ -187,9 +187,16 @@ public class LocationsPluginTests
                     Gangs:
                       - Label: Lights
                         Controls: [ fixture_1 ]
+                        Way: 3
                       - Dead: true
                   - Id: fixture_1
                     Kind: fixture
+                Runs:
+                  - Id: run_1
+                    From: fixture_1
+                    To: switch_1
+                    SwitchLoop: true
+                    Disconnected: true
             """);
 
         var sw = LocationSettings.Of(cfg).Placements.Single(p => p.Id == "switch_1");
@@ -198,6 +205,12 @@ public class LocationsPluginTests
         Assert.False(sw.Gangs[0].Dead);
         Assert.True(sw.Gangs[1].Dead);
         Assert.Empty(sw.Gangs[1].Controls);
+        Assert.Equal(3, sw.Gangs[0].Way);
+        Assert.Null(sw.Gangs[1].Way);
+        var run = LocationSettings.Of(cfg).Runs.Single();
+        Assert.True(run.SwitchLoop);
+        Assert.True(run.Disconnected);
+        Assert.True(System.ComponentModel.DataAnnotations.Validator.TryValidateObject(sw.Gangs[0], new(sw.Gangs[0]), null, validateAllProperties: true));
     }
 
     private sealed class PastHost(Config cfg, IMeasurementHistory? history) : IPluginHost
