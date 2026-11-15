@@ -487,8 +487,12 @@ public class RunConfig
     public int? ToGang { get; set; }
 
     [DefaultValue(false)]
-    [Description("A switch loop or traveler: carries power to a switch and back, not one way to a load.")]
+    [Description("A switch loop: carries power to a switch and back, not one way to a load.")]
     public bool SwitchLoop { get; set; }
+
+    [DefaultValue(false)]
+    [Description("The travelers between 3-way or 4-way switches.")]
+    public bool Traveler { get; set; }
 
     [DefaultValue(false)]
     [Description("Capped or disconnected: drawn, but carries nothing.")]

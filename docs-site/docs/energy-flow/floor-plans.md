@@ -89,8 +89,8 @@ On a phone, every tool shows in two rows, the plan fills the screen and fits wha
 | `service` | Pole or transformer to meter and main panel |
 | `network` | Patch panel or switch to a wall jack |
 
-- **Gang at …**: a wire to a multi-gang switch can be tied to one gang. Blank is the whole switch.
-- **Switch loop**: drawn without a direction arrow.
+- **Supply side gang / Load side gang**: a wire to a multi-gang switch can be tied to one gang. Blank is the whole switch.
+- **Carries**: power to the load (arrow), switch loop (dashed, no arrow) or travelers (double line, no arrow). A wire drawn from switch to switch is travelers.
 - **Disconnected**: drawn faded and capped at both ends. A gang whose wires are all disconnected is dead.
 
 Wiring an item with no circuit to one on a known circuit puts it on that circuit. A wire between network items is always a `network` cable.
