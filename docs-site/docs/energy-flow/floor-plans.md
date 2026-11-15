@@ -74,7 +74,7 @@ On a phone, every tool shows in two rows, the plan fills the screen and fits wha
 - **At real size**: washer, dryer, fridge, freezer, range, dishwasher, water heater, furnace, condenser, rack, hot tub.
 - Wall items (outlets, switches, network jacks) snap to the nearest wall and face the room.
 - **GFCI outlet**: everything wired from its load side is protected.
-- **Switch**: **Gangs** sets how many. Each gang lists what it switches (**Add**, or **Pick on plan** and tap the items), or **Controls nothing**. Selecting a switch, or something it switches, draws the link.
+- **Switch**: **Gangs** sets how many. Each gang lists what it switches (**Add**, or **Pick on plan** and tap the items), or **Controls nothing**. Selecting a switch, or something it switches, highlights the wires between them, through junction boxes and travelers. Where no wires join them, a dotted link is drawn.
 - **3-way / 4-way**: set per gang. Gangs of these that switch the same light flip it together.
 - **Simulate**: **On** / **Off** on each gang lights or darkens what it switches. **Reset simulation** clears it.
 - **Circuit** or **Metered by**: the breaker feeding it, or, when its circuit is not known, the node measuring it. A meter it already had is placed beneath its circuit in the energy flow.

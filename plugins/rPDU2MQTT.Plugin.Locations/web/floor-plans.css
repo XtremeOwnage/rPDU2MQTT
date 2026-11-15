@@ -154,6 +154,7 @@
 .fp-item.is-dark { opacity: .45; }
 .fp-run.is-cut { opacity: .45; }
 .fp-run-gap { fill: none; stroke: var(--bg); stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.fp-run.is-switched .fp-run-line { filter: drop-shadow(0 0 4px var(--accent)); }
 .fp-run-cap { stroke: var(--bad); stroke-linecap: round; pointer-events: none; }
 .fp-switch-gang { fill: var(--accent); text-anchor: middle; dominant-baseline: middle; font-weight: 800; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; pointer-events: none; }
 .fp-item.is-unknown .fp-item-disc { stroke: var(--warn); stroke-dasharray: 3 2; }

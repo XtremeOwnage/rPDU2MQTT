@@ -273,6 +273,32 @@ export default function mount(sec: any, host: any) {
     return use.length > 0 && use.every((r: any) => r.Disconnected);
   };
   const wayText = (g: any) => g?.Way === 3 ? '3-way' : g?.Way === 4 ? '4-way' : '';
+  const wiredPath = (sw: any, n: number, to: string): Set<string> | null => {
+    const runs = liveRuns();
+    const prev = new Map<string, { at: string; run: string }>();
+    const seen = new Set<string>([sw.Id]);
+    let frontier = [sw.Id];
+    for (let depth = 0; depth < 8 && frontier.length; depth++) {
+      const next: string[] = [];
+      for (const at of frontier) for (const r of runs) {
+        if (r.From !== at && r.To !== at) continue;
+        if (at === sw.Id) { const g = gangEnd(r, sw); if (g && g !== n + 1) continue; }
+        const other = r.From === at ? r.To : r.From;
+        if (!other || seen.has(other)) continue;
+        seen.add(other);
+        prev.set(other, { at, run: r.Id });
+        if (other === to) {
+          const path = new Set<string>();
+          for (let k = to; k !== sw.Id; k = prev.get(k)!.at) path.add(prev.get(k)!.run);
+          return path;
+        }
+        const o = itemOf(other);
+        if (o?.Kind === 'junction' || (o?.Kind === 'switch' && r.Traveler)) next.push(other);
+      }
+      frontier = next;
+    }
+    return null;
+  };
   const simLit = (id: string): boolean | null => {
     if (!sim.size) return null;
     const gs = switchedBy(id).filter((x: any) => !x.g.Dead && !gangCut(x.sw, x.n));
@@ -932,6 +958,8 @@ export default function mount(sec: any, host: any) {
       .flatMap((x: any) => (x.g.Controls || []).filter((id: string) => oneItem.Kind === 'switch' || id === oneItem.Id).map((id: string) => ({ sw: x.sw, n: x.n, to: itemOf(id) })))
       .filter((l: any) => l.to && onFloor(l.to, floorNow()!.floor) && onFloor(l.sw, floorNow()!.floor));
     const switched = new Set<string>(legs.flatMap((l: any) => [l.sw.Id, l.to.Id, ...switchedBy(l.to.Id).map((x: any) => x.sw.Id)]));
+    const swRuns = new Set<string>();
+    legs.forEach((l: any) => { l.path = wiredPath(l.sw, l.n, l.to.Id); l.path?.forEach((id: string) => swRuns.add(id)); });
     const fitsIn = (b: { w: number; h: number }, lines: string[], f: number) =>
       Math.max(...lines.map(ln => ln.length)) * f * 0.58 <= b.w * 0.95 && lines.length * f * 1.2 <= b.h * 0.95;
     const broken = (name: string) => {
@@ -1083,14 +1111,15 @@ export default function mount(sec: any, host: any) {
       const prot = !net && !!downstream?.runs.has(r.Id);
       const lit = net ? !!netFocus && runDev(r) === netFocus : prot || onFocus(r);
       if (net ? !netOn && !sel : !showWiring && !trace && mode !== 'edit' && !lit && !sel) return;
-      const dim = !!(focus || downstream || netFocus) && !lit;
+      const onSw = swRuns.has(r.Id);
+      const dim = (!!(focus || downstream || netFocus) || (legs.length > 0 && !net)) && !lit && !onSw;
       const onRef = lit && focus ? focus : r.Circuit || [r.From, r.To].map(id => id && itemOf(id)?.Circuit).find(Boolean) || '';
       const colour = net ? netColor(runDev(r)) : r.Kind === 'circuit' ? (loadOn ? loadColor(onRef) || 'var(--muted)' : planCircuitColor(lit && focus ? focus : r.Circuit))
         : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
       const trav = !net && !!r.Traveler, loop = !net && (!!r.SwitchLoop || trav), cut = !!r.Disconnected;
-      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${trav ? ' is-traveler' : loop ? ' is-loop' : ''}${cut ? ' is-cut' : ''}${mode === 'edit' && !inLayer({ type: 'run', id: r.Id }) ? ' is-aside' : ''}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit || net ? '' : ' is-unknown'}` });
-      const sw = (r.Kind === 'circuit' ? 2.5 : net ? 2 : 4) * u * (sel ? 1.5 : lit ? 2.2 : trace ? 1.8 : 1);
-      if (lit || (trace && !dim)) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-case', 'stroke-width': sw + 6 * u }));
+      const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${trav ? ' is-traveler' : loop ? ' is-loop' : ''}${cut ? ' is-cut' : ''}${mode === 'edit' && !inLayer({ type: 'run', id: r.Id }) ? ' is-aside' : ''}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${onSw && !lit ? ' is-switched' : ''}${r.Circuit || net ? '' : ' is-unknown'}` });
+      const sw = (r.Kind === 'circuit' ? 2.5 : net ? 2 : 4) * u * (sel ? 1.5 : lit || onSw ? 2.2 : trace ? 1.8 : 1);
+      if (lit || onSw || (trace && !dim)) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-case', 'stroke-width': sw + 6 * u }));
       if (trav) {
         g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': sw * 2.6 }));
         g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-gap', 'stroke-width': sw * 0.9 }));
@@ -1131,7 +1160,7 @@ export default function mount(sec: any, host: any) {
       }
     });
 
-    legs.forEach((l: any) => {
+    legs.filter((l: any) => !l.path).forEach((l: any) => {
       const a = wallOffset(l.sw).off, b = wallOffset(l.to).off;
       const active = !!gangPick && gangPick.sw === l.sw.Id && gangPick.n === l.n;
       const x1 = l.sw.X + a.X, y1 = l.sw.Y + a.Y, x2 = l.to.X + b.X, y2 = l.to.Y + b.Y;
