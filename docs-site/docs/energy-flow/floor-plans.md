@@ -74,6 +74,7 @@ On a phone, every tool shows in two rows, the plan fills the screen and fits wha
 - **At real size**: washer, dryer, fridge, freezer, range, dishwasher, water heater, furnace, condenser, rack, hot tub.
 - Wall items (outlets, switches, network jacks) snap to the nearest wall and face the room.
 - **GFCI outlet**: everything wired from its load side is protected.
+- **Switch**: **Gangs** sets how many. Each gang lists what it switches (**Add**, or **Pick on plan** and tap the items), or **Controls nothing**. Selecting a switch, or something it switches, draws the link.
 - **Circuit** or **Metered by**: the breaker feeding it, or, when its circuit is not known, the node measuring it. A meter it already had is placed beneath its circuit in the energy flow.
 - **Trace its circuit**: switch a load on the item on and off; the matching channel is offered.
 
@@ -171,6 +172,7 @@ Plugins:
       - { Id: p_panel, Kind: panel, Label: Main Panel, Room: garage, Floor: ground, X: 48, Y: 200, Facing: 0, Panel: main }
       - { Id: p_fridge, Kind: appliance, Label: Fridge, Room: kitchen, Floor: ground, X: 430, Y: 82, Width: 85, Depth: 75, Footprint: fridge, Circuit: main/12, Node: fridge }
       - { Id: p_ko1, Kind: outlet, Label: Counter left, Room: kitchen, Floor: ground, X: 388, Y: 180, Facing: 0, Gfci: true, Circuit: main/2 }
+      - { Id: p_sw1, Kind: switch, Room: garage, Floor: ground, X: 300, Y: 44, Facing: 90, Gangs: [ { Label: Lights, Controls: [ p_light1 ] }, { Dead: true } ] }
       - { Id: patch_panel_1, Kind: patch-panel, Room: garage, Floor: ground, X: 60, Y: 300, Ports: 24, Patches: [ { Port: 7, Switch: network_switch_1/7 } ] }
       - { Id: network_switch_1, Kind: network-switch, Label: Core, Room: garage, Floor: ground, X: 60, Y: 330, Ports: 24 }
       - { Id: jack_1, Kind: jack, Room: kitchen, Floor: ground, X: 388, Y: 240, Facing: 0, Port: patch_panel_1/7 }

@@ -2,7 +2,6 @@ using System.ComponentModel;
 
 namespace rPDU2MQTT.Plugin.Locations;
 
-/// <summary>The kinds of place a location id can name (#461).</summary>
 public static class LocationKind
 {
     public const string Site = "site";
@@ -11,7 +10,6 @@ public static class LocationKind
     public const string Area = "area";
 }
 
-/// <summary>A site: a house, a building, a plot. Holds floors (#461).</summary>
 public class SiteConfig
 {
     [Description("Stable unique id for this site, used to refer to it from elsewhere. For example 'home'. Ids are shared by sites, floors, rooms and areas, so each must be unique across all of them.")]
@@ -24,7 +22,6 @@ public class SiteConfig
     public List<FloorConfig> Floors { get; set; } = new();
 }
 
-/// <summary>A floor of a site, with its plan and the rooms and areas drawn on it (#461, #463).</summary>
 public class FloorConfig
 {
     [Description("Stable unique id for this floor, for example 'ground'.")]
@@ -110,7 +107,6 @@ public static class PlanConstraintKind
     public const string Length = "length";
 }
 
-/// <summary>A constraint on corners and walls of the rooms and areas on a floor (#463).</summary>
 public class PlanConstraintConfig
 {
     [Description("Stable unique id for this constraint.")]
@@ -128,7 +124,6 @@ public class PlanConstraintConfig
     public double? Value { get; set; }
 }
 
-/// <summary>A corner or wall of a room or area, by position in its outline.</summary>
 public class PlanRefConfig
 {
     [Description("The id of the room or area.")]
@@ -141,7 +136,6 @@ public class PlanRefConfig
     public int? Edge { get; set; }
 }
 
-/// <summary>The textures a room, an outdoor zone or the ground can be drawn with (#463).</summary>
 public static class Surfaces
 {
     public const string Wood = "wood";
@@ -170,7 +164,6 @@ public static class OpeningKind
     public const string Opening = "opening";
 }
 
-/// <summary>A door, window or plain opening, centred on a point of a wall and lying along it (#463).</summary>
 public class OpeningConfig
 {
     [Description("Stable unique id for this opening.")]
@@ -203,7 +196,6 @@ public class OpeningConfig
     public bool Flip { get; set; }
 }
 
-/// <summary>A wall drawn on its own, as a line with bends (#601).</summary>
 public class WallConfig
 {
     [Description("Stable unique id for this wall.")]
@@ -217,7 +209,6 @@ public class WallConfig
     public double Thickness { get; set; }
 }
 
-/// <summary>A room on a floor, outlined on the plan (#461, #463).</summary>
 public class RoomConfig
 {
     [Description("Stable unique id for this room, for example 'kitchen'.")]
@@ -261,7 +252,6 @@ public class RoomConfig
     public ClimateConfig Climate { get; set; } = new();
 }
 
-/// <summary>An area on a floor: a named part of it that can span rooms (#461).</summary>
 public class AreaConfig
 {
     [Description("Stable unique id for this area, for example 'server_corner'.")]
@@ -292,7 +282,6 @@ public static class ClimateCombine
     public const string Max = "max";
 }
 
-/// <summary>A place's temperature and humidity sensors. Not inherited.</summary>
 public class ClimateConfig
 {
     [ChoicesFrom("/api/integrations/locations/nodes")]
@@ -309,7 +298,6 @@ public class ClimateConfig
     public string Combine { get; set; } = ClimateCombine.Average;
 }
 
-/// <summary>A point on a floor plan, in the floor's drawing units.</summary>
 public class PlanPoint
 {
     public double X { get; set; }
@@ -344,7 +332,6 @@ public static class PlacementKind
     public static readonly string[] All = [Outlet, Switch, Fixture, Appliance, Device, Fan, Hvac, EvCharger, Junction, Panel, Meter, Pole, Transformer, Solar, Battery, Inverter, Generator, Jack, PatchPanel, NetworkSwitch];
 }
 
-/// <summary>An outlet, switch, fixture, appliance or device placed on a floor plan (#464).</summary>
 public class PlacementConfig
 {
     [Description("Stable unique id for this item.")]
@@ -412,9 +399,25 @@ public class PlacementConfig
 
     [Description("For a patch panel, the patch cords from its ports to switch ports.")]
     public List<PatchConfig> Patches { get; set; } = new();
+
+    [Description("For a light switch, its gangs, left to right, and what each controls. Blank is one gang.")]
+    public List<GangConfig> Gangs { get; set; } = new();
 }
 
-/// <summary>A patch cord from a patch panel port to a switch port.</summary>
+/// <summary>One gang of a light switch.</summary>
+public class GangConfig
+{
+    [Description("What it is called, for example 'Lights'.")]
+    public string Label { get; set; } = "";
+
+    [Description("Ids of the placed items it switches.")]
+    public List<string> Controls { get; set; } = new();
+
+    [DefaultValue(false)]
+    [Description("Switches nothing.")]
+    public bool Dead { get; set; }
+}
+
 public class PatchConfig
 {
     [Range(1, 512, ErrorMessage = "Port must be between 1 and 512.")]
@@ -425,7 +428,6 @@ public class PatchConfig
     public string Switch { get; set; } = "";
 }
 
-/// <summary>A location for every derived node whose id matches a pattern (#461).</summary>
 public class AutoLocationRule
 {
     [Description("Node id to match, with '*' matching any run of characters. For example 'outlet:rack_pdu_1:*' for every outlet on that PDU.")]
@@ -438,17 +440,12 @@ public class AutoLocationRule
 /// <summary>What a drawn run of cable is (#464).</summary>
 public static class RunKind
 {
-    /// <summary>A branch circuit from a breaker to what it feeds.</summary>
     public const string Circuit = "circuit";
-    /// <summary>A feeder between panels, or from a panel to a subpanel.</summary>
     public const string Feeder = "feeder";
-    /// <summary>The utility service: pole or transformer to the meter and main panel.</summary>
     public const string Service = "service";
-    /// <summary>A network cable, from a patch panel or switch to a wall jack.</summary>
     public const string Network = "network";
 }
 
-/// <summary>A cable run drawn on a floor plan, from one placed item to another through the points between (#464).</summary>
 public class RunConfig
 {
     [Description("Stable unique id for this run.")]

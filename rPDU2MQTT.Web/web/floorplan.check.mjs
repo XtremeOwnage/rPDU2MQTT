@@ -1,7 +1,3 @@
-// Floor Plans (#470): rooms shaded by what they draw and never zero where nothing is metered (#466); rooms drawn,
-// sized in feet and inches, snapped, moved and undone (#463); doors, windows and outdoor zones; items placed,
-// moved, left outdoors and wired to one another (#464); the scale set by measuring; tags brought in as rooms
-// with a preview (#461); and rooms published to Home Assistant as areas (#467).
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { makeDom, query, pickRange } from './domstub.mjs';
@@ -45,7 +41,6 @@ const config = {
 
 const loc = () => config.Plugins.locations;
 
-// The bridge's rollup as the plugin's totals action reports it: the kitchen known, the office waiting on a reading, the garage with nothing metered.
 const places = [
   { id: 'home', name: 'Home', kind: 'site', site: 'home', floor: null, value: 500, state: 'known', nodes: [], missing: [], split: [] },
   { id: 'ground', name: 'Ground', kind: 'floor', site: 'home', floor: 'ground', value: 500, state: 'known', nodes: [], missing: [], split: [] },
@@ -115,17 +110,13 @@ vm.createContext(sandbox);
 vm.runInContext(code, sandbox, { filename: 'app.js' });
 await wait(50);
 
-// --- The geometry, the units and the history the editor stands on ---
-// The page's own helpers, from the plugin's script.
 const lib = vm.runInContext('(function () {\n' + pageJs.replace(/\nreturn mount;\n?$/, '\nreturn { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planSolve, planCornerAngle, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea, planWallMass, planInset, planLabelPoint };\n') + '})()', sandbox);
 const { planSnap, planShapeAt, planContains, planRect, planCentroid, planParseLen, planFmtLen, planUnitSystem, planHistory, planUnion, planRefsAfterMerge, planFaces, planJoin, planArea, planWallMass, planInset, planLabelPoint } = lib;
-// The space left enclosed between rooms is found as its own region, and regions join back into one outline.
 const ring = [rect(0, 0, 300, 100), rect(0, 200, 300, 300), rect(0, 100, 100, 200), rect(200, 100, 300, 200)];
 const hole = planFaces(ring).filter(f => !planShapeAt(ring.map((r, i) => ({ Id: 'r' + i, Shape: r })), f.at));
 if (hole.length !== 1 || Math.abs(Math.abs(planArea(hole[0].shape)) - 10000) > 1) fail(`the space enclosed by rooms was not found: ${JSON.stringify(hole)}`);
 const cut = planFaces([rect(0, 0, 200, 100), rect(150, 0, 250, 100)]);
 if (cut.length !== 3 || planJoin(cut.map(f => f.shape))?.length !== 4) fail(`overlapping outlines did not cut into three regions that join back up: ${JSON.stringify(cut)}`);
-// Merging: two rooms sharing all or part of a wall become one outline; apart or overlapping, they cannot.
 const ell = planUnion(rect(0, 0, 400, 100), rect(300, 100, 400, 300));
 if (!ell || ell.length !== 6) fail(`an L-shaped merge came out wrong: ${JSON.stringify(ell)}`);
 const strip = planUnion(rect(0, 0, 400, 100), rect(400, 0, 600, 100));
@@ -144,7 +135,6 @@ const s1 = planSnap({ X: 405, Y: 4 }, [office], 12, 10);
 if (s1.to !== 'corner' || s1.pt.X !== 400 || s1.pt.Y !== 0) fail(`a point beside a corner did not snap to it: ${JSON.stringify(s1)}`);
 const s2 = planSnap({ X: 395, Y: 150 }, [office], 12, 10);
 if (s2.to !== 'edge' || s2.pt.X !== 400 || s2.pt.Y !== 150) fail(`a point beside an edge did not snap onto it: ${JSON.stringify(s2)}`);
-// Next door, a point snaps to the far face of the wall, and each way on its own to the walls it is near.
 const s3 = planSnap({ X: 386, Y: 147 }, [office], 12, 10, 11.4);
 if (s3.to !== 'edge' || Math.abs(s3.pt.X - 388.6) > 0.01 || s3.pt.Y !== 150) fail(`a point beside a room did not snap to the far face of its wall: ${JSON.stringify(s3)}`);
 const s4 = planSnap({ X: 386, Y: 147 }, [office.slice().reverse()], 12, 10, 11.4);
@@ -154,7 +144,6 @@ if (s5.pt.X !== 400) fail(`a point inside a room snapped to the outside face of 
 if (!planContains(office, { X: 500, Y: 100 }) || planContains(office, { X: 100, Y: 100 })) fail('containment is wrong');
 if (planShapeAt([{ Id: 'office', Shape: office }, { Id: 'closet', Shape: rect(420, 20, 480, 80) }], { X: 450, Y: 50 })?.Id !== 'closet') fail('a point in a closet inside a room is not in the closet');
 {
-  // An L-shaped hall is named in its widest part, inside it; a rectangle at its centre.
   const L = [{ X: 0, Y: 0 }, { X: 400, Y: 0 }, { X: 400, Y: 40 }, { X: 40, Y: 40 }, { X: 40, Y: 400 }, { X: 0, Y: 400 }];
   const at = planLabelPoint(L);
   if (!planContains(L, at)) fail(`an L-shaped room's name fell outside it: ${JSON.stringify(at)}`);
@@ -172,7 +161,6 @@ const ft = 0.3048, inch = 0.0254;
 if (planParseLen('twelve', 'imperial') !== null) fail('nonsense read as a length');
 if (planFmtLen(12 * ft + 6 * inch, 'imperial') !== '12′ 6″') fail(`12 ft 6 in was written ${planFmtLen(12 * ft + 6 * inch, 'imperial')}`);
 if (planFmtLen(4.5 * inch, 'imperial') !== '4½″' || !near(planParseLen('4½"', 'imperial'), 4.5 * inch)) fail(`a wall's thickness is not written or read to the half inch: ${planFmtLen(4.5 * inch, 'imperial')}`);
-// Walls from rooms drawn touching: the stretch two rooms share is one wall between them, the rest are outside walls.
 const wm = planWallMass([{ Id: 'a', Shape: rect(0, 0, 100, 100) }, { Id: 'b', Shape: rect(100, 0, 200, 50) }]);
 if (wm.filter(w => w.shared).length !== 2 || wm.filter(w => w.shared && w.draw).length !== 1 || wm.filter(w => !w.shared).length !== 7) fail(`the walls between and around two rooms are wrong: ${JSON.stringify(wm)}`);
 const ins = planInset(rect(0, 0, 100, 100), [0, 5, 0, 0]);
@@ -219,7 +207,6 @@ const near1 = (a, b) => Math.abs(a - b) <= 1;
   if (!near1(b.Shape[0].Y, 0) || !near1(b.Shape[1].Y, 0)) fail(`two walls held in line are not: ${JSON.stringify(b.Shape)}`);
 }
 {
-  // Rooms sharing a wall share its corners: a length held on one room's wall moves the corner in both.
   const a = { Id: 'a', Shape: rect(0, 0, 400, 300) }, b = { Id: 'b', Shape: rect(400, 0, 800, 300) };
   planSolve([a, b], [{ Id: 'k', Kind: 'length', Refs: [{ Room: 'a', Edge: 0 }], Value: 450 }], new Set(['a#0', 'a#3', 'b#1', 'b#2']));
   if (!near1(a.Shape[1].X, 450) || !near1(b.Shape[0].X, 450)) fail(`a shared corner did not move in both rooms: ${a.Shape[1].X}, ${b.Shape[0].X}`);
@@ -235,7 +222,6 @@ const near1 = (a, b) => Math.abs(a - b) <= 1;
 }
 
 {
-  // Widening a room by typing: the room sharing its top wall follows the corner it shared, as a rectangle (#602).
   const two = { Id: 'two', Shape: rect(350, 200, 650, 400) }, four = { Id: 'four', Shape: rect(350, 50, 650, 200) };
   const before = JSON.parse(JSON.stringify([two, four]));
   two.Shape = rect(350, 200, 750, 400);
@@ -243,7 +229,6 @@ const near1 = (a, b) => Math.abs(a - b) <= 1;
   if (JSON.stringify(four.Shape) !== JSON.stringify(rect(350, 50, 750, 200))) fail(`the room above did not follow the wall it shares: ${JSON.stringify(four.Shape)}`);
 }
 {
-  // Joined corners are one point: the second room comes to the first, and comes along when the first moves.
   const a = { Id: 'a', Shape: rect(0, 0, 100, 100) }, b = { Id: 'b', Shape: rect(130, 20, 230, 120) };
   const join = [{ Id: 'j', Kind: 'coincident', Refs: [{ Room: 'a', Corner: 1 }, { Room: 'b', Corner: 0 }] }];
   const before = planSolve([a, b], join, new Set(), 0);
@@ -262,7 +247,6 @@ const near1 = (a, b) => Math.abs(a - b) <= 1;
   if (r.unmet.length || !near1(b.Shape[0].X, 100) || !near1(b.Shape[0].Y, 30)) fail(`a corner held on a wall is not on it: ${JSON.stringify(b.Shape)}`);
 }
 {
-  // Two right angles leave a room free to skew; held level and plumb, it stays a rectangle as a corner is dragged (#601).
   const a = { Id: 'a', Shape: rect(0, 0, 200, 100) };
   const hv = [0, 1, 2, 3].map(i => ({ Id: `square_${i}`, Kind: i % 2 ? 'vertical' : 'horizontal', Refs: [{ Room: 'a', Edge: i }] }));
   a.Shape[2] = { X: 260, Y: 140 };
@@ -279,7 +263,6 @@ const sec = query(getEl('sections'), '.section', true).find(s => s.classList.con
 if (!sec) fail('clicking Floor Plans activated no section');
 const svg = query(sec, 'svg.fp-svg');
 if (!svg) fail('no plan drawn');
-// The plan fits the floor with a 3% margin, so a 1060×760 box is one pixel to one unit, offset by 30.
 svg.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1060, height: 760 });
 const at = (x, y) => ({ clientX: x + 30, clientY: y + 30 });
 const buttons = (root = sec) => query(root, 'button', true);
@@ -311,12 +294,10 @@ const drag = (target, from, to, mods = {}) => {
   svg.dispatch('pointerup', { ...at(...to), pointerId: id, target, ...mods });
 };
 
-// View: the kitchen shaded by what it draws, the office unknown, the garage unmetered — and no zero anywhere.
 const kitchen = polygonFor('kitchen');
 if (!kitchen?.classList.contains('is-known')) fail(`the kitchen is not shaded as known: ${kitchen?.className}`);
 if (!/color-mix/.test(kitchen.style.fill || '')) fail(`the kitchen is not shaded by its reading: ${kitchen.style.fill}`);
 if (!polygonFor('office')?.classList.contains('is-unknown')) fail('the office, waiting on a reading, is not drawn as unknown');
-// Room labels are fitted to their rooms as drawn, and the stub's pane is only 100px wide: zoom in to read them.
 const tooSmall = labels();
 if (tooSmall.some(t => /Kitchen\s*300 W/.test(t))) fail(`a 40px-wide kitchen kept a label wider than itself: ${JSON.stringify(tooSmall)}`);
 svg.dispatch('wheel', { deltaX: 0, deltaY: -300, deltaMode: 0, preventDefault() { }, clientX: 50, clientY: 50 });
@@ -334,7 +315,6 @@ if (!query(sec, '.fp-palette').hidden) fail('the drawing tools show while only v
 // A metered item shows its reading under it while viewing.
 if (!labels().some(t => t === '150 W')) fail(`the fridge's reading is not shown on the plan: ${JSON.stringify(labels())}`);
 
-// Live load, under Show in the Circuits view: each circuit and what is on it coloured by its amps against its breaker.
 button('Circuits', sec).onclick();
 await wait(20);
 const loadBox = () => query(query(sec, '.fp-show-menu'), 'label', true).find(l => /Live load/.test(textOf(l)));
@@ -347,7 +327,6 @@ if (!/80% and over/.test(textOf(query(sec, '.fp-legend')))) fail('the legend doe
 circuits[0].current = 17;
 button('Power now', sec).onclick(); await wait(20); button('Circuits', sec).onclick(); await wait(20);
 if (!itemEl('fridge').classList.contains('is-load-over')) fail(`17 A on a 20 A breaker is not coloured as over: ${itemEl('fridge').className}`);
-// No current reading: left uncoloured, never guessed from watts.
 circuits[0].current = null;
 button('Power now', sec).onclick(); await wait(20); button('Circuits', sec).onclick(); await wait(20);
 if (!itemEl('fridge').classList.contains('is-load-none') || (itemEl('fridge').children.find(c => c.classList.contains('fp-item-disc'))?.style.stroke)) fail('a circuit with no current reading was coloured');
@@ -357,7 +336,6 @@ loadOff.checked = false; loadOff.onchange();
 button('Power now', sec).onclick(); await wait(20);
 if (query(sec, '.fp-show-menu') && loadBox()) fail('the live load is offered outside the Circuits view');
 
-// A past moment picked in the header: the load as it stood then, moved along a timeline of each circuit's load.
 button('Circuits', sec).onclick(); await wait(20);
 const loadAgain = query(loadBox(), 'input', false);
 loadAgain.checked = true; loadAgain.onchange();
@@ -371,7 +349,6 @@ if (!/Showing .* from prometheus/.test(textOf(query(sec, '.fp-status')))) fail(`
 const timeline = () => query(sec, '.fp-timeline');
 if (!timeline() || timeline().hidden) fail('no timeline to move through the past');
 if (!/Load/.test(textOf(query(sec, '.fp-show-menu'))) || /Live load/.test(textOf(query(sec, '.fp-show-menu')))) fail('the load is still called live while showing the past');
-// Today and This week are totals, not a moment: they say the picked time is not theirs.
 button('Today', sec).onclick(); await wait(20);
 if (!asked.at(-1).includes('period=today') || asked.at(-1).includes('at=')) fail(`Today asked for the past moment: ${asked.at(-1)}`);
 if (!timeline().hidden) fail('the timeline shows on Today');
@@ -384,13 +361,11 @@ if (!timeline().hidden) fail('the timeline stays up while live');
 query(loadBox(), 'input', false).checked = false; query(loadBox(), 'input', false).onchange();
 button('Power now', sec).onclick(); await wait(20);
 
-// Tapping an outlet while viewing brings its whole circuit forward: its items, and the rooms it serves.
 tap(itemEl('fridge'), 100, 100);
 if (!itemEl('fridge').classList.contains('is-focus')) fail('tapping an item did not highlight its circuit');
 if (!polygonFor('kitchen').classList.contains('is-circuit')) fail('the room the circuit serves is not highlighted');
 key('Escape');
 
-// Tapping a room: its total, the circuits serving it and what is in it.
 tap(kitchen, 200, 150);
 if (!/Kitchen/.test(textOf(query(side(), 'h3')))) fail(`tapping the kitchen did not select it: ${textOf(side())}`);
 if (!/Main Panel · B06/.test(textOf(side()))) fail(`the kitchen does not list the circuit serving it: ${textOf(side())}`);
@@ -398,7 +373,6 @@ if (!/Floor area/.test(textOf(side()))) fail('the kitchen does not give its floo
 query(side(), '.fp-list-row', true).find(b => /B06/.test(textOf(b))).onclick();
 if (!/Unmetered remainder\s*350 W/.test(textOf(sheet()))) fail(`the circuit does not report its unmetered remainder: ${textOf(sheet())}`);
 if (!/Placed on it.*Fridge/.test(textOf(sheet()))) fail('the circuit does not list what is placed on it');
-// Which rooms the circuit serves is set here — and undone with Ctrl+Z, and redone with Ctrl+Y.
 const officeBox = query(query(sheet(), 'label', true).find(l => /Office/.test(textOf(l))), 'input', false);
 officeBox.checked = true; officeBox.onchange();
 const served = () => config.EnergyFlow.Panels[0].Breakers[0].Ext?.locations?.Rooms;
@@ -410,7 +384,6 @@ key('y', { ctrlKey: true });
 if (!served().includes('office')) fail('Ctrl+Y did not redo it');
 key('Escape');
 
-// Edit: the tools appear. Draw the garage, which has no outline, by selecting it and dragging.
 button('Edit', sec).onclick();
 if (query(sec, '.fp-palette').hidden) fail('the tools do not show in Edit');
 button('‹ All rooms', side())?.onclick();
@@ -418,7 +391,6 @@ query(side(), '.fp-list-row', true).find(b => /Garage/.test(textOf(b))).onclick(
 if (query(side(), '.fp-name')?.value !== 'Garage') fail('the garage could not be selected from the list');
 button('Draw outline', side()).onclick();
 drag(svg, [850, 50], [950, 250]);
-// Corners snap to a 3-inch grid, so the garage lands within a snap of where it was dragged.
 const drawn = roomById('garage').Shape, meant = rect(850, 50, 950, 250);
 if (drawn.length !== 4 || drawn.some((q, i) => Math.abs(q.X - meant[i].X) > 7.62 || Math.abs(q.Y - meant[i].Y) > 7.62)) fail(`the garage was not given the rectangle drawn: ${JSON.stringify(drawn)}`);
 
@@ -442,7 +414,6 @@ if (!labels().some(t => /′/.test(t))) fail('the selected room shows no wall le
 key('z', { ctrlKey: true });
 if (Math.abs(widthOf(denNow()) - 381) > 0.2) fail(`undo did not put the width back: ${widthOf(denNow())}`);
 
-// An outline drawn corner by corner: a nearly level wall comes out exactly level.
 toolBtn('Outline').onclick();
 tap(svg, 820, 330); tap(svg, 960, 336); tap(svg, 960, 420);
 button('Finish outline', sec).onclick();
@@ -450,7 +421,6 @@ const traced = floor().Rooms[floor().Rooms.length - 1];
 if (traced.Shape.length !== 3 || traced.Shape[1].Y !== traced.Shape[0].Y) fail(`a nearly level wall was not made level: ${JSON.stringify(traced.Shape)}`);
 if (traced.Shape[2].X !== traced.Shape[1].X) fail(`a nearly plumb wall was not made plumb: ${JSON.stringify(traced.Shape)}`);
 
-// Items: an outlet in the kitchen, a light outdoors that belongs to no room, and a utility pole.
 toolBtn('Item').onclick();
 query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Outlet').onclick();
 tap(svg, 300, 200);
@@ -471,13 +441,11 @@ const outletId = placement('outlet').Id;
 drag(itemEl(outletId), [300, 200], [600, 100]);
 if (placement('outlet').Room !== 'office' || Math.abs(placement('outlet').X - 600) > 15) fail(`dragging the outlet into the office did not move it there: ${JSON.stringify(placement('outlet'))}`);
 
-// An outlet dropped beside a wall sits on it, and Ctrl+D copies it.
 toolBtn('Item').onclick();
 query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Outlet').onclick();
 tap(svg, 50, 290);
 const wallOutlet = loc().Placements[loc().Placements.length - 1];
 if (wallOutlet.Kind !== 'outlet' || wallOutlet.Y !== 300 || wallOutlet.Room !== 'kitchen') fail(`an outlet dropped by the kitchen's wall did not sit on it: ${JSON.stringify(wallOutlet)}`);
-// …on the kitchen's side of it: it faces up into the kitchen, and is drawn beside the wall rather than across it.
 if (wallOutlet.Facing !== 270) fail(`the wall outlet does not face into the kitchen: ${wallOutlet.Facing}`);
 const drawnAt = (itemEl(wallOutlet.Id).getAttribute('transform') || '').match(/translate\(([-\d.]+),([-\d.]+)\)/);
 if (!drawnAt || !(Number(drawnAt[2]) < 300)) fail(`the wall outlet is drawn across its wall rather than beside it: ${itemEl(wallOutlet.Id).getAttribute('transform')}`);
@@ -488,7 +456,6 @@ if (loc().Placements.length !== before + 1) fail('Ctrl+D did not duplicate the s
 key('z', { ctrlKey: true });
 if (loc().Placements.length !== before) fail('undo did not remove the duplicate');
 
-// A door tapped beside the kitchen's right wall sits in it, lying along it.
 toolBtn('Door').onclick();
 tap(svg, 396, 150);
 const door = floor().Openings?.[0];
@@ -499,15 +466,12 @@ toolBtn('Window').onclick();
 tap(svg, 200, 4);
 if (floor().Openings.length !== 2 || floor().Openings[1].Kind !== 'window') fail('a window could not be put in the wall');
 
-// Several at once: a box dragged across empty plot selects everything of the mode's wholly inside it: under Floor plan,
-// the kitchen, its door and its window, and not the items in it.
 toolBtn('Select').onclick();
 key('Escape');
 drag(svg, [-20, -20], [405, 305]);
 if (!/\d+ selected/.test(textOf(side()))) fail(`a box drag did not select several things: ${textOf(side())}`);
 const boxed = Number(textOf(query(side(), 'h3')).match(/(\d+) selected/)[1]);
 if (boxed !== 3) fail(`the box caught ${boxed} things, not the kitchen, its door and its window`);
-// Shift-click adds one more, and dragging any of them moves them all together.
 tap(polygonFor('office'), 600, 150);
 svg.dispatch('pointerdown', { ...at(600, 150), pointerId: 900, button: 0, target: polygonFor('office'), shiftKey: true });
 svg.dispatch('pointerup', { ...at(600, 150), pointerId: 900, target: polygonFor('office'), shiftKey: true });
@@ -522,7 +486,6 @@ const officeMoved = roomById('office').Shape[0].Y;
 if (fridgeMoved < 90 || officeMoved < 90) fail(`dragging the kitchen did not move the rest of the selection with it: fridge ${fridgeMoved}, office ${officeMoved}`);
 key('z', { ctrlKey: true });
 if (roomById('office').Shape[0].Y !== 0 || loc().Placements.find(p => p.Id === 'fridge').Y !== fridgeY) fail('undo did not put the whole group back');
-// Merging the kitchen and office: one room, with what was in or around the office now the kitchen's; undo splits them.
 tap(polygonFor('kitchen'), 200, 150);
 svg.dispatch('pointerdown', { ...at(600, 150), pointerId: 902, button: 0, target: polygonFor('office'), shiftKey: true });
 svg.dispatch('pointerup', { ...at(600, 150), pointerId: 902, target: polygonFor('office'), shiftKey: true });
@@ -532,7 +495,6 @@ if (roomById('office') || roomById('kitchen')?.Shape.length !== 4 || Math.max(..
 if (floor().Areas[0].Rooms.join() !== 'kitchen') fail(`the area still names the merged room: ${floor().Areas[0].Rooms}`);
 key('z', { ctrlKey: true });
 if (!roomById('office') || roomById('kitchen').Shape.length !== 4) fail('undo did not split the merged rooms');
-// Take in space: the office grows over the kitchen's right-hand strip, which the kitchen gives up.
 tap(polygonFor('office'), 600, 150);
 button('Take in space', side()).onclick();
 drag(svg, [300, 0], [400, 300]);
@@ -540,7 +502,6 @@ const kx = Math.max(...roomById('kitchen').Shape.map(q => q.X)), ox = Math.min(.
 if (Math.abs(kx - 300) > 4 || Math.abs(kx - ox) > 0.5 || roomById('office').Shape.length !== 4) fail(`the office did not take in the strip from the kitchen: kitchen ${JSON.stringify(roomById('kitchen').Shape)}, office ${JSON.stringify(roomById('office').Shape)}`);
 key('z', { ctrlKey: true });
 if (Math.max(...roomById('kitchen').Shape.map(q => q.X)) !== 400) fail('undo did not give the kitchen its strip back');
-// With the floor's wall thickness set, the walls are drawn at it and gone again at 0.
 loc().Sites.forEach(st => st.Floors.forEach(f => { f.InteriorWall = 20; f.ExteriorWall = 15; }));
 tap(polygonFor('kitchen'), 200, 150);
 if (!query(sec, 'line', true).some(l => l.classList.contains('fp-wallmass'))) fail(`walls are not drawn at the floor's thickness: ${query(sec, 'line', true).length} lines, ${query(sec, 'polygon', true).length} polygons, rooms ${JSON.stringify(floor().Rooms.map(r => r.Id))} mode ${textOf(query(sec, '.fp-opts'))}`);
@@ -552,7 +513,6 @@ key('a', { ctrlKey: true });
 if (!/\d+ selected/.test(textOf(side()))) fail('Ctrl+A did not select everything');
 key('Escape');
 
-// The plot's edges drag it bigger; the left edge grows it leftwards and carries the drawing so nothing moves on screen.
 const plotHandle = (side) => query(sec, 'rect', true).find(r => r.dataset?.plot === side);
 drag(plotHandle('r'), [1000, 350], [1100, 350]);
 if (!(floor().Width > 1090 && floor().Width < 1110)) fail(`dragging the right edge did not widen the plot: ${floor().Width}`);
@@ -574,7 +534,6 @@ if (svg.getAttribute('viewBox') === vbBefore || vbWidth() !== Number(vbBefore.sp
 key('0');
 if (svg.getAttribute('viewBox') !== vbBefore) fail('0 did not fit the floor back into view');
 
-// The circuit and meter pickers open with a search box, and list only what can be one.
 tap(itemEl(wallOutlet.Id), 50, 290);
 const pickers = query(side(), '.ss', true);
 if (pickers.length < 2) fail('the item panel has no searchable pickers');
@@ -592,11 +551,9 @@ const offered = query(circuitPick, '.ss-opt', true);
 if (offered.length !== 1 || !/B06/.test(textOf(offered[0]))) fail(`searching the circuits did not narrow them: ${offered.map(textOf).join(' | ')}`);
 offered[0].onclick();
 if (loc().Placements.find(p => p.Id === wallOutlet.Id).Circuit !== 'main/B06') fail('picking from the searched list did not set the circuit');
-// Once its circuit is known, that is what meters it: no second picker beside it (#593).
 if (query(side(), '.ss', true).length !== 1) fail('an item on a known circuit still offers a separate meter');
 key('Escape');
 
-// A wire from the fridge to the outlet: the outlet, on no circuit, takes the fridge's.
 toolBtn('Wire').onclick();
 tap(itemEl('fridge'), 100, 100);
 tap(svg, 300, 100);
@@ -606,7 +563,6 @@ if (!run || run.From !== 'fridge' || run.To !== outletId || run.Points.length !=
 if (run.Circuit !== 'main/B06' || placement('outlet').Circuit !== 'main/B06') fail(`wiring the outlet to the fridge did not put it on the fridge's circuit: ${placement('outlet').Circuit}`);
 if (!query(sec, 'polyline', true).some(p => p.classList.contains('fp-run-line'))) fail('the wire is not drawn');
 
-// The circuit legend brings one circuit forward and fades everything else.
 const chip = query(sec, '.fp-chip', true).find(b => /B06/.test(textOf(b)));
 if (!chip) fail('the circuits on the floor are not listed');
 toolBtn('Select').onclick();
@@ -623,7 +579,6 @@ query(side(), '.fp-list-row', true).find(b => /B06/.test(textOf(b))).onclick();
 if (!/Cable drawn\s*\d/.test(textOf(sheet()))) fail(`the circuit does not say how much cable is drawn for it: ${textOf(sheet())}`);
 shut();
 
-// A wire's bend lands on a wall corner when one is near, however the straight-line help would have placed it.
 toolBtn('Wire').onclick();
 tap(svg, 394, 6);
 tap(svg, 520, 12);
@@ -632,7 +587,6 @@ const cornerRun = loc().Runs[loc().Runs.length - 1];
 if (cornerRun.Points[0].X !== 400 || cornerRun.Points[0].Y !== 0) fail(`a bend next to a wall corner did not land on it: ${JSON.stringify(cornerRun.Points)}`);
 key('z', { ctrlKey: true });
 
-// The middle button pans in Select, even starting over a room, and moves nothing.
 key('0');
 const vbStill = svg.getAttribute('viewBox');
 const kitchenBefore = JSON.stringify(roomById('kitchen').Shape);
@@ -643,8 +597,6 @@ if (svg.getAttribute('viewBox') === vbStill) fail('a middle-button drag did not 
 if (JSON.stringify(roomById('kitchen').Shape) !== kitchenBefore) fail('a middle-button drag moved the room under it');
 key('0');
 
-// A corner or a wire bend goes with a double-tap, or with Delete once it is picked. Rooms are shaped under Floor plan;
-// tapping a wire there takes Edit to Wiring with it selected.
 modeTab('Floor plan').onclick();
 toolBtn('Select').onclick();
 const denId = floor().Rooms.find(r => r.Name === 'Den').Id;
@@ -665,7 +617,6 @@ if (loc().Runs[0].Points.length !== 0) fail(`double-tapping a wire bend did not 
 key('z', { ctrlKey: true });
 key('Escape');
 
-// A GFCI: marked from the outlet's panel, wired to the wall outlet, and everything downstream of it lights up.
 toolBtn('Select').onclick();
 tap(itemEl(outletId), 600, 100);
 const gfciBox = query(side(), 'label', true).find(l => /GFCI outlet/.test(textOf(l)));
@@ -686,8 +637,39 @@ tap(itemEl(wallOutlet.Id), 50, 290);
 if (!/Protected by\s*GFCI/.test(textOf(side()))) fail(`a protected outlet does not say which GFCI protects it: ${textOf(side())}`);
 key('Escape');
 
-// Measure a wall and say how long it really is: the scale follows, and the undo button takes it back.
-// In Edit a tool says what it does in its options bar, not in a bubble over the plan being drawn on.
+modeTab('Wiring').onclick();
+toolBtn('Item').onclick();
+query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Light').onclick();
+tap(svg, 200, 150);
+const gangLight = loc().Placements[loc().Placements.length - 1];
+query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Switch').onclick();
+tap(svg, 120, 150);
+const sw = loc().Placements[loc().Placements.length - 1];
+if (sw.Kind !== 'switch') fail(`a switch could not be placed: ${JSON.stringify(sw)}`);
+toolBtn('Select').onclick();
+tap(itemEl(sw.Id), 120, 150);
+const gangCount = query(side(), 'label', true).find(l => /^Gangs/.test(textOf(l)));
+if (!gangCount) fail('a switch has no gang count');
+query(gangCount, 'input', false).value = '2'; query(gangCount, 'input', false).onchange();
+if (sw.Gangs?.length !== 2) fail(`setting two gangs did not: ${JSON.stringify(sw.Gangs)}`);
+button('Pick on plan', side()).onclick();
+tap(itemEl(gangLight.Id), 200, 150);
+if (JSON.stringify(sw.Gangs[0].Controls) !== JSON.stringify([gangLight.Id])) fail(`picking the light on the plan did not put it on gang 1: ${JSON.stringify(sw.Gangs)}`);
+if (!query(sec, 'line', true).some(l => l.classList.contains('fp-switch-leg'))) fail('what the switch controls is not drawn');
+key('Escape');
+const deadBox = query(side(), 'label', true).filter(l => /Controls nothing/.test(textOf(l)))[1];
+const deadInput = query(deadBox, 'input', false);
+deadInput.checked = true; deadInput.onchange();
+if (!sw.Gangs[1].Dead || sw.Gangs[0].Dead) fail(`gang 2 was not marked as controlling nothing: ${JSON.stringify(sw.Gangs)}`);
+if (!query(itemEl(sw.Id), 'line', true).some(l => l.classList.contains('fp-glyph-dead'))) fail('a dead gang is not struck through on the plan');
+tap(itemEl(gangLight.Id), 200, 150);
+if (!/Switched by/.test(textOf(side()))) fail(`a switched light does not say what switches it: ${textOf(side())}`);
+if (!query(itemEl(sw.Id), 'circle', true).some(c => c.classList.contains('fp-halo'))) fail('the switch is not lit when its light is selected');
+key('Delete');
+if (sw.Gangs[0].Controls.length) fail('deleting the light left it on the switch');
+key('z', { ctrlKey: true });
+key('Escape');
+
 toolBtn('Door').onclick();
 if (!/Tap a wall to put a door/.test(textOf(query(sec, '.fp-opts'))) || !query(sec, '.fp-hint').hidden) fail(`the Door tool's help is not in its options bar: ${textOf(query(sec, '.fp-opts'))}`);
 toolBtn('Measure').onclick();
@@ -715,12 +697,10 @@ if (loc().Placements.some(p => p.Id === porch.Id)) fail('Delete did not remove t
 key('z', { ctrlKey: true });
 if (!loc().Placements.some(p => p.Id === porch.Id)) fail('Ctrl+Z did not bring the deleted item back');
 
-// The background image is a button of its own, with a place to drop the file.
 button('Background', sec).onclick();
 if (!query(sheet(), '.fp-drop') || !button('Choose an image…', sheet())) fail('the background sheet offers nowhere to upload an image');
 shut();
 
-// Tools › Rooms from tags: suggestions shown, the plan previewed, then applied.
 button('Tools…', sec).onclick();
 button('Rooms from tags…', sheet()).onclick();
 await wait(20);
@@ -733,7 +713,6 @@ button('Apply', sheet()).onclick();
 if (!floor().Rooms.some(r => r.Id === 'laundry')) fail('applying did not create the room');
 if (config.EnergyFlow.Nodes[0].Ext?.locations?.Location !== 'office' || config.EnergyFlow.Nodes[0].Tags.includes('office')) fail('applying did not place the node and drop its tag');
 
-// Tools › Home Assistant: the plan shown, then applied, and each room remembers its area.
 button('Tools…', sec).onclick();
 button('Publish rooms to Home Assistant…', sheet()).onclick();
 await wait(20);
@@ -742,7 +721,6 @@ buttons(sheet()).find(b => /^Apply/.test(b.textContent)).onclick();
 await wait(20);
 if (roomById('kitchen').HaArea !== 'area_kitchen') fail('the kitchen did not remember the area it was published as');
 
-// A door's panel sizes it in feet; dragging it along to the office's far wall turns it to lie along that wall.
 modeTab('Floor plan').onclick();
 toolBtn('Select').onclick();
 const doorId = floor().Openings[0].Id;
@@ -755,11 +733,9 @@ if (moved.Y !== 300 || Math.abs(moved.Angle) % 180 !== 0) fail(`dragging the doo
 button('Rotate 90°', side()).onclick();
 if (floor().Openings[0].Angle === moved.Angle && Math.abs(floor().Openings[0].Angle) % 180 === 0) fail('rotating the door did nothing');
 
-// The wire's panel gives its length on the plan and its circuit.
 tap(query(sec, 'polyline', true).find(p => p.dataset?.run), 300, 100);
 if (!/Length on the plan/.test(textOf(side())) || !/Supply side\s*Fridge/.test(textOf(side()))) fail(`the wire's panel does not describe it: ${textOf(side())}`);
 
-// Rooms sharing a wall share its corners: dragging the kitchen's corner moves the office's with it.
 modeTab('Floor plan').onclick();
 toolBtn('Select').onclick();
 key('Escape');
@@ -768,7 +744,6 @@ const kCorner = (i) => query(sec, 'circle', true).find(c => c.dataset?.corner ==
 drag(kCorner(1), [400, 0], [420, 0]);
 if (!(Math.abs(roomById('office').Shape[0].X - roomById('kitchen').Shape[1].X) < 0.01) || !(roomById('kitchen').Shape[1].X > 410)) fail(`a shared corner did not move in both rooms: kitchen ${JSON.stringify(roomById('kitchen').Shape[1])}, office ${JSON.stringify(roomById('office').Shape[0])}`);
 key('z', { ctrlKey: true });
-// Dragging a wall's middle slides the wall, and the neighbour sharing it follows.
 tap(polygonFor('office'), 600, 150);
 const wallMid = (i) => query(sec, 'circle', true).find(c => c.dataset?.mid === String(i));
 drag(wallMid(3), [400, 150], [430, 150]);
@@ -777,7 +752,6 @@ if (!(oS[0].X > 420 && oS[3].X > 420 && Math.abs(oS[0].X - oS[3].X) < 0.01)) fai
 if (!(Math.abs(kS[1].X - oS[0].X) < 0.01 && Math.abs(kS[2].X - oS[3].X) < 0.01)) fail(`the kitchen did not follow the wall it shares: ${JSON.stringify(kS)}`);
 key('z', { ctrlKey: true });
 
-// Constraints: the kitchen's top wall fixed at its length holds while its far corner is dragged.
 toolBtn('Constrain').onclick();
 tap(svg, 200, 2);
 if (!/Kitchen wall 1/.test(textOf(query(sec, '.fp-opts')))) fail(`tapping a wall with Constrain did not pick it: ${textOf(query(sec, '.fp-opts'))}`);
@@ -798,8 +772,6 @@ if (!/Constraints/.test(textOf(side())) || !/fixed at/.test(textOf(side()))) fai
 key('z', { ctrlKey: true }); key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
 if ((floor().Constraints || []).length) fail(`undo did not take the constraints back: ${JSON.stringify(floor().Constraints)}`);
 
-// A room stays square while its corner is dragged, Shift lets it go, and Square up straightens it again, storing
-// nothing (#601).
 tap(polygonFor('kitchen'), 200, 150);
 if (!button('Square up', side())?.disabled) fail('a square room offers to be squared up');
 drag(kCorner(2), [400, 300], [450, 350]);
@@ -832,7 +804,6 @@ toolBtn('Constrain').onclick();
 key('z', { ctrlKey: true });
 toolBtn('Select').onclick();
 
-// Join: two corners picked with Constrain become one, and the corner and wall pair offers On wall (#602).
 toolBtn('Constrain').onclick();
 tap(svg, 2, 298);
 tap(svg, 798, 298);
@@ -850,7 +821,6 @@ if (!button('On wall', sec)) fail(`a corner and a wall picked offer no On wall: 
 button('Clear', sec).onclick();
 toolBtn('Select').onclick();
 
-// A wall drawn right across a room splits it in two; undo puts it back whole.
 toolBtn('Wall').onclick();
 tap(svg, 600, 0); tap(svg, 600, 300); tap(svg, 600, 300);
 const halves = floor().Rooms.filter(r => /^Office/.test(r.Name));
@@ -860,13 +830,11 @@ key('z', { ctrlKey: true });
 if (floor().Rooms.filter(r => /^Office/.test(r.Name)).length !== 1) fail('undo did not put the split office back');
 toolBtn('Select').onclick();
 
-// A standalone wall: drawn end to end with the Wall tool, its end dragged, a door put in it, and deleted.
 toolBtn('Wall').onclick();
 tap(svg, 100, 500); tap(svg, 300, 500); tap(svg, 300, 500);
 const wl = (floor().Walls || [])[0];
 if (!wl || wl.Points.length !== 2 || Math.abs(wl.Points[1].X - wl.Points[0].X - 200) > 16 || wl.Points[0].Y !== wl.Points[1].Y) fail(`the Wall tool did not draw a wall: ${JSON.stringify(floor().Walls)}`);
 if (!/Wall/.test(textOf(side())) || !/Thickness/.test(textOf(side()))) fail('a new wall is not selected with its thickness');
-// A second wall started beside the first's end begins exactly on it.
 toolBtn('Wall').onclick();
 tap(svg, wl.Points[1].X + 4, wl.Points[1].Y + 5); tap(svg, wl.Points[1].X + 4, 700); tap(svg, wl.Points[1].X + 4, 700);
 const wNext = floor().Walls[1];
@@ -893,7 +861,6 @@ if ((floor().Walls || []).length) fail(`Delete did not remove the wall: ${JSON.s
 key('z', { ctrlKey: true }); key('z', { ctrlKey: true });
 if ((floor().Walls || []).length) fail(`undo did not take the wall back: ${JSON.stringify(floor().Walls)}`);
 
-// A standalone wall takes constraints like a room's wall: held parallel to the kitchen's side, it stays so when dragged.
 toolBtn('Wall').onclick();
 tap(svg, 600, 400); tap(svg, 640, 600); tap(svg, 640, 600);
 const cw = floor().Walls[0];
@@ -933,7 +900,6 @@ drag(kCorner(1), [400, 0], [420, 30]);
 if (roomById('kitchen').Shape[1].X !== 400) fail('a corner of a locked wall moved');
 key('z', { ctrlKey: true });
 
-// The carpet's colour: a surface recoloured draws in a pattern of its own.
 act_surface: {
   const surfaceSel = query(side(), 'select', true).find(x => query(x, 'option', true).some(o => o.value === 'carpet'));
   surfaceSel.value = 'carpet'; surfaceSel.onchange();
@@ -944,17 +910,13 @@ act_surface: {
   if (!query(sec, 'polygon', true).some(p => p.getAttribute('fill') === 'url(#fp-tex-carpet-aa3344)')) fail('the kitchen is not drawn in its carpet colour');
 }
 
-// Nowhere persistent to keep plan images: said above everything.
 if (query(sec, '.fp-banner').hidden || !/will not be kept/.test(textOf(query(sec, '.fp-banner')))) fail(`there is no warning that plan images will be lost: ${textOf(query(sec, '.fp-banner'))}`);
-// Export: pictures of the floor, and every plan as a file to import again.
 button('Export…', sec).onclick();
 ['This floor as SVG', 'This floor as PNG', 'All floor plans (JSON)', 'Import floor plans…'].forEach(t => { if (!button(t, sheet())) fail(`the export sheet has no "${t}"`); });
 shut();
-// On a phone the floor's settings fold into More, which opens each of them.
 const more = button('More…', sec);
 if (!more) fail('there is no More menu for a phone');
 more.onclick();
-// Editing, it offers what changes the floor; viewing, what takes it away.
 ['Add a floor', 'Floor settings', 'Background', 'Tools…'].forEach(t => { if (!button(t, sheet())) fail(`More has no "${t}" while editing`); });
 ['Export…', 'Print'].forEach(t => { if (button(t, sheet())) fail(`More offers "${t}" while editing`); });
 if (!button('Export…', sec).classList.contains('fp-off') || button('Floor settings', sec).classList.contains('fp-off')) fail('the bar shows Export while editing, or hides Floor settings');
@@ -968,8 +930,6 @@ if (!button('This floor as SVG', sheet())) fail('More › Export did not open th
 shut();
 button('Edit', sec).onclick();
 
-// Appliances at their real size, placed under Interior: a washer dropped by the kitchen's left wall stands with its back
-// to it, facing in.
 modeTab('Interior').onclick();
 toolBtn('Item').onclick();
 query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Washer').onclick();
@@ -1041,7 +1001,6 @@ rightClick(svg, 900, 600);
 if (!menuItem('Fit the floor in view') || !menuItem('Background image…')) fail(`the menu on bare plot offers nothing: ${textOf(menu())}`);
 key('Escape');
 if (!menu().hidden) fail('Escape did not close the menu');
-// …and while viewing, the menu offers only looking, and Edit this floor.
 button('View', sec).onclick();
 rightClick(itemEl('fridge'), 100, 100);
 if (menuItem('Duplicate') || menuItem('Delete') || menuItem('Wire from here') || !menuItem('Edit this floor')) fail(`the item menu offers editing while viewing: ${textOf(menu())}`);
@@ -1051,7 +1010,6 @@ if (menuItem('Add a room here') || menuItem('Background image…') || !menuItem(
 menuItem('Edit this floor').onclick();
 if (!button('Edit', sec).classList.contains('is-on')) fail('Edit this floor did not switch to Edit');
 
-// Floor settings: the plot is sized in feet, and the ground can be grass.
 button('Floor settings', sec).onclick();
 const plotW = query(sheet(), 'input', true).find(i => i.classList.contains('fp-len'));
 plotW.value = '40'; plotW.onchange();
@@ -1062,7 +1020,6 @@ if (floor().Ground !== 'grass') fail('the ground could not be set to grass');
 shut();
 if (!query(sec, 'rect', true).some(r => r.getAttribute('fill') === 'url(#fp-tex-grass)' && r.classList.contains('fp-paper'))) fail('the ground is not drawn as grass');
 
-// A second floor, added from its own sheet with a plot in feet.
 button('+ Floor', sec).onclick();
 query(sheet(), 'input', true).find(i => (i.placeholder || i.getAttribute('placeholder')) === 'Ground floor').value = 'Upstairs';
 button('Add floor', sheet()).onclick();
@@ -1072,7 +1029,6 @@ if (!query(sec, '.fp-empty').hidden) fail('the empty-floor card covers the plan 
 button('View', sec).onclick();
 if (query(sec, '.fp-empty').hidden) fail('an empty floor does not say how to start');
 
-// Edit fills the screen, in modes: each shows its own tools, and what belongs to another is seen but not moved.
 button('Edit', sec).onclick();
 if (!sec.classList.contains('is-full')) fail('Edit does not fill the screen');
 const edFloor = query(query(sec, '.fp-edbar'), 'select', false);
@@ -1096,7 +1052,6 @@ tap(itemEl('fridge'), 100, 100);
 if (!modeTab('Interior').classList.contains('is-on') || query(side(), 'input', true).every(i => i.value !== 'Fridge')) fail('tapping the fridge under Floor plan did not select it in its own mode');
 key('r');
 if (!modeTab('Floor plan').classList.contains('is-on') || !toolBtn('Room').classList.contains('is-on')) fail('the Room tool\'s key did not take Edit to Floor plan');
-// Interior lays floors: the Floor tool tiles the kitchen, and a room there is selected but not moved.
 modeTab('Interior').onclick();
 toolBtn('Floor').onclick();
 query(sec, '.fp-kind', true).find(b => b.getAttribute('aria-label') === 'Tile').onclick();
@@ -1110,7 +1065,6 @@ if (JSON.stringify(roomById('kitchen').Shape) !== kitchenShape) fail('a room mov
 button('Done', sec).onclick();
 if (sec.classList.contains('is-full') || !button('View', sec).classList.contains('is-on')) fail('Done did not go back to viewing');
 
-// Usable on a tablet and a phone: the side panel drops below the plan, the tools run across, pinch is ours.
 if (!/\.fp-svg\s*\{[^}]*touch-action:\s*none/.test(css)) fail('the plan does not take over touch, so a pinch would zoom the page');
 if (!/@media \(max-width:\s*1100px\)\s*\{\s*\.fp-body,\s*\.fp-body\.is-editing\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(css)) fail('the layout does not drop to one column on a narrow screen');
 

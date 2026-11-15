@@ -889,10 +889,7 @@ function planRefsAfterMerge(constraints                  , keep        , gone   
 }
 
 // ── plan-art.ts ─────────────────────────────────────────────────
-// What the floor plans are drawn with (#463, #464): surface textures at their real size, a pictogram per kind of
-// placed item, and doors and windows as an architect draws them.
 
-/// Surfaces a room, outdoor zone or the ground can have, with their names.
 const PLAN_SURFACES                     = [
   ['', 'Plain'], ['wood', 'Wood'], ['tile', 'Tile'], ['carpet', 'Carpet'], ['concrete', 'Concrete'], ['stone', 'Stone'],
   ['grass', 'Grass'], ['gravel', 'Gravel'], ['dirt', 'Dirt'], ['deck', 'Deck'], ['pavers', 'Pavers'], ['water', 'Water'], ['snow', 'Snow'], ['stairs', 'Stairs'],
@@ -901,7 +898,6 @@ const PLAN_SURFACES                     = [
 /// Grounds a floor can sit on.
 const PLAN_GROUNDS                     = [['', 'Plain'], ['grass', 'Grass'], ['concrete', 'Concrete'], ['gravel', 'Gravel'], ['dirt', 'Dirt'], ['pavers', 'Pavers'], ['snow', 'Snow']];
 
-/// Placed item kinds, grouped for the picker: [kind, name, group].
 const PLAN_KINDS                             = [
   ['outlet', 'Outlet', 'Inside'], ['switch', 'Switch', 'Inside'], ['fixture', 'Light', 'Inside'], ['fan', 'Fan', 'Inside'],
   ['appliance', 'Appliance', 'Inside'], ['device', 'Device', 'Inside'], ['hvac', 'HVAC', 'Inside'], ['junction', 'Junction box', 'Inside'],
@@ -911,7 +907,6 @@ const PLAN_KINDS                             = [
   ['jack', 'Network jack', 'Network'], ['patch-panel', 'Patch panel', 'Network'], ['network-switch', 'Network switch', 'Network'],
 ];
 
-/// Things with a real footprint, in inches: [key, name, kind, width, depth, round]. Placed at their size, backs to the wall.
 const PLAN_FOOTPRINTS                                                      = [
   ['washer', 'Washer', 'appliance', 27, 30, false], ['dryer', 'Dryer', 'appliance', 27, 30, false], ['fridge', 'Fridge', 'appliance', 36, 30, false],
   ['freezer', 'Chest freezer', 'appliance', 42, 28, false], ['range', 'Range / oven', 'appliance', 30, 26, false], ['dishwasher', 'Dishwasher', 'appliance', 24, 24, false],
@@ -919,18 +914,14 @@ const PLAN_FOOTPRINTS                                                      = [
   ['rack', 'Server rack', 'device', 24, 42, false], ['hot-tub', 'Hot tub', 'appliance', 84, 84, false],
 ];
 
-/// Kinds that supply or carry power rather than use it; they get a ring of their own.
 const PLAN_SUPPLY_KINDS = ['panel', 'meter', 'pole', 'transformer', 'solar', 'battery', 'inverter', 'generator'];
 
-/// The network layer: wall jacks, and the patch panels and switches their cables land on. None is on a circuit.
 const PLAN_NETWORK_KINDS = ['jack', 'patch-panel', 'network-switch'];
-/// Network gear with numbered ports, and how many a new one has.
 const PLAN_PORTED_KINDS = ['patch-panel', 'network-switch'];
 const PLAN_DEFAULT_PORTS = 24;
 
 const PLAN_OPENINGS                     = [['door', 'Door'], ['double-door', 'Double door'], ['sliding-door', 'Sliding door'], ['garage-door', 'Garage door'], ['window', 'Window'], ['opening', 'Opening']];
 
-/// Each surface's own colours: its base, a darker detail, and a lighter one.
 const PLAN_SURFACE_COLOURS                                           = {
   wood: ['#c99d6b', '#a37649', '#dcb689'], tile: ['#e4ded1', '#bbb3a1', '#f2eee6'], carpet: ['#959cb2', '#848ca4', '#a6adc1'],
   concrete: ['#c4c3bd', '#adaca5', '#d2d1cb'], stone: ['#b4ac9d', '#958d7e', '#c7c0b3'], grass: ['#78ab5d', '#5d9146', '#93c476'],
@@ -939,7 +930,6 @@ const PLAN_SURFACE_COLOURS                                           = {
   stairs: ['#d3cbbd', '#8f8676', '#b7ae9e'],
 };
 
-/// A colour lighter or darker by a fraction: a detail drawn in the same colour as what it sits on.
 function planShade(hex        , by        )         {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
   if (!m) return hex;
@@ -948,12 +938,10 @@ function planShade(hex        , by        )         {
   return '#' + ch.map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('');
 }
 
-/// The pattern id for a surface, in its own colours or in a chosen one.
 function planTextureId(name        , colour = '')         {
   return 'fp-tex-' + name + (colour ? '-' + colour.replace('#', '').toLowerCase() : '');
 }
 
-/// One surface texture at real size, in its own colours or recoloured from a base colour. `s` is units per metre.
 function planTexture(name        , s        , colour = '')      {
   const own = PLAN_SURFACE_COLOURS[name];
   const [base, dark, light] = colour ? [colour, planShade(colour, -0.2), planShade(colour, 0.18)] : own || ['#cccccc', '#aaaaaa', '#eeeeee'];
@@ -987,7 +975,6 @@ function planTextures(s        )        {
   return Object.keys(PLAN_SURFACE_COLOURS).map(name => planTexture(name, s));
 }
 
-/// A pictogram for a placed item, centred on 0,0 inside a disc of radius r.
 function planGlyph(kind        , r        )      {
   const g = svgEl('g', { class: 'fp-glyph' });
   const k = r * 0.5;
@@ -1006,19 +993,15 @@ function planGlyph(kind        , r        )      {
     case 'hvac': rect(-0.9, -0.9, 1.8, 1.8, 0.2); circle(0, 0, 0.6); line(-0.42, -0.42, 0.42, 0.42); line(-0.42, 0.42, 0.42, -0.42); break;
     case 'junction': rect(-0.75, -0.75, 1.5, 1.5, 0.1); circle(0, 0, 0.3); break;
     case 'ev-charger': rect(-0.6, -0.9, 1.2, 1.8, 0.25); path('M0.12 -0.6 L-0.25 0.08 L0.05 0.08 L-0.12 0.6 L0.28 -0.12 L-0.02 -0.12 Z'); break;
-    // A breaker panel: the bus down the middle and a row of breakers either side of it.
     case 'panel': line(0, -1.25, 0, 1.25); [-0.95, -0.5, -0.05, 0.4, 0.85].forEach(y => { line(-0.75, y, -0.2, y); line(0.2, y, 0.75, y); }); break;
     case 'meter': circle(0, 0, 0.85); line(0, 0.2, 0.45, -0.35); circle(0, 0.2, 0.08); break;
     case 'pole': line(0, -0.95, 0, 0.95); line(-0.75, -0.55, 0.75, -0.55); circle(-0.6, -0.72, 0.1); circle(0.6, -0.72, 0.1); break;
     case 'transformer': circle(-0.3, 0, 0.5); circle(0.3, 0, 0.5); break;
     case 'solar': rect(-0.95, -0.65, 1.9, 1.3, 0.05); line(-0.95, 0, 0.95, 0); line(-0.32, -0.65, -0.32, 0.65); line(0.32, -0.65, 0.32, 0.65); break;
     case 'battery': rect(-0.8, -0.5, 1.5, 1.0, 0.12); rect(0.7, -0.2, 0.2, 0.4, 0.05); line(-0.45, 0, -0.1, 0); line(-0.275, -0.18, -0.275, 0.18); break;
-    // The drawing symbol: a box cut corner to corner, DC (=) in one half and AC (~) in the other.
     case 'inverter': rect(-0.85, -0.85, 1.7, 1.7, 0.15); line(-0.85, 0.85, 0.85, -0.85); line(-0.62, -0.5, -0.12, -0.5); line(-0.62, -0.26, -0.12, -0.26); path('M0.08 0.42 Q0.22 0.14 0.36 0.42 T0.64 0.42'); break;
     case 'generator': circle(0, 0, 0.85); text('G'); break;
-    // An RJ45 socket face-on: the opening, its latch notch, and the contacts along the top.
     case 'jack': path('M-0.8 -0.6 H0.8 V0.35 H0.35 V0.75 H-0.35 V0.35 H-0.8 Z'); [-0.45, -0.15, 0.15, 0.45].forEach(x => line(x, -0.6, x, -0.25)); break;
-    // A row of ports along a strip, as a patch panel or switch reads from the front.
     case 'patch-panel': rect(-1.05, -0.55, 2.1, 1.1, 0.1); [-0.7, -0.23, 0.23, 0.7].forEach(x => rect(x - 0.17, -0.2, 0.34, 0.4, 0.04)); break;
     case 'network-switch': rect(-1.05, -0.55, 2.1, 1.1, 0.1); path('M-0.6 -0.18 H0.55 M0.35 -0.36 L0.6 -0.18 L0.35 0 M0.6 0.2 H-0.55 M-0.35 0.02 L-0.6 0.2 L-0.35 0.38'); break;
     default: rect(-0.9, -0.65, 1.8, 1.3, 0.2); line(-0.4, 0.9, 0.4, 0.9); break;
@@ -1026,10 +1009,20 @@ function planGlyph(kind        , r        )      {
   return g;
 }
 
-/// A door, window or opening: the wall cut, and what fills it, lying along the wall at its angle.
-/// `u` is drawing units per screen pixel; the wall is drawn a few pixels thick at any zoom.
-/// `thick`: the wall's thickness when the floor gives one, so the gap cuts it through; `shift` moves the opening out
-/// into an outside wall drawn beyond its room.
+function planSwitchGlyph(dead           , r        )      {
+  if (dead.length <= 1 && !dead[0]) return planGlyph('switch', r);
+  const g = svgEl('g', { class: 'fp-glyph' });
+  const k = r * 0.5, n = Math.max(1, dead.length);
+  const w = n > 1 ? 0.7 : 0.9, h = n > 1 ? 1.5 : 1.8, step = 1.1;
+  dead.forEach((d, i) => {
+    const x = (i - (n - 1) / 2) * step;
+    g.appendChild(svgEl('rect', { x: (x - w / 2) * k, y: -h / 2 * k, width: w * k, height: h * k, rx: 0.15 * k, class: d ? 'is-dead' : null }));
+    g.appendChild(svgEl('line', { x1: x * k, y1: -h * 0.28 * k, x2: x * k, y2: 0.03 * k, class: d ? 'is-dead' : null }));
+    if (d) g.appendChild(svgEl('line', { x1: (x - w / 2) * k, y1: h / 2 * k, x2: (x + w / 2) * k, y2: -h / 2 * k, class: 'fp-glyph-dead' }));
+  });
+  return g;
+}
+
 function planOpening(o     , u        , thick = 0, shift                           = { X: 0, Y: 0 })      {
   const w = Math.max(1, Number(o.Width) || 90);
   const half = w / 2;
@@ -1073,7 +1066,6 @@ function planOpening(o     , u        , thick = 0, shift                        
 
 const PLAN_CIRCUIT_COLOURS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)'];
 
-/// A colour per circuit, stable across reloads: the same breaker is always the same colour.
 function planCircuitColor(ref        )         {
   if (!ref) return 'var(--muted)';
   let h = 0;
@@ -1081,8 +1073,6 @@ function planCircuitColor(ref        )         {
   return PLAN_CIRCUIT_COLOURS[h % PLAN_CIRCUIT_COLOURS.length];
 }
 
-/// An appliance seen from above, drawn inside its own footprint of W × D drawing units, its front toward +Y.
-/// `u` is drawing units per screen pixel, so the lines stay a pixel or two wide at any zoom.
 function planFootprintArt(key        , W        , D        , u        )             {
   const g = svgEl('g', { class: 'fp-art' });
   const sw = 1.4 * u;
@@ -1109,7 +1099,6 @@ function planFootprintArt(key        , W        , D        , u        )         
       break;
     }
     case 'fridge': {
-      // French doors across the front, meeting in the middle, a handle each side of the join; the vent at the back.
       line(-hw * 0.92, hd * 0.5, hw * 0.92, hd * 0.5);
       line(0, hd * 0.5, 0, hd * 0.94);
       rect(-W * 0.07, hd * 0.6, W * 0.025, D * 0.24, W * 0.012, 'is-fill');
@@ -1226,14 +1215,7 @@ function haPublishSheet(call                                  , onLinked        
 }
 
 // ── floor-plans.ts ──────────────────────────────────────────────
-// Floor Plans (#470): each floor drawn at real size with its rooms, outdoor zones and areas, doors and windows
-// (#463), the outlets, fixtures, devices and utility gear placed on it and the cable runs between them (#464,
-// #465), shaded live by what each room draws (#466), with a trace that finds an outlet's breaker from the
-// outlet (#468). Edit fills the screen, in modes (Floor plan, Interior, Wiring,
-// Network) that each have their own tools, with undo and redo and sizes in feet or metres. A network layer
-// maps each wall jack to its patch panel port and switch port, with a printable port schedule.
 
-/// Why a place has no total, in the words the page uses. Never a zero.
 const FP_STATE_TEXT                         = {
   unmetered: 'Nothing metered is placed here.',
   unknown: 'A reading this total needs is missing, so it is not shown.',
@@ -1257,7 +1239,6 @@ const FP_TOOLS                                   = [
   ['measure', 'Measure', 'M', 'Tap two points to measure between them, and set the plan’s scale from a distance you know.'],
 ];
 
-/// Edit's modes: what each one draws, in its tool groups. What belongs to another mode is shown but not moved.
 const FP_LAYERS                              = [
   ['plan', 'Floor plan', [['select', 'pan'], ['room', 'outline', 'wall', 'zone', 'area'], ['door', 'window'], ['constrain', 'measure']]],
   ['interior', 'Interior', [['select', 'pan'], ['paint', 'item'], ['measure']]],
@@ -1271,14 +1252,12 @@ const FP_TOOL_IN                         = {
   'item:network': 'Tap to place a wall jack, patch panel or network switch.',
   'wire:network': 'Draw a network cable: tap the patch panel or switch, each bend, then the jack it goes to.',
 };
-/// The kinds of item each mode places and selects. Appliances are both furnishings and loads.
 const FP_LAYER_KINDS                           = {
   interior: ['appliance', 'device', 'hvac'],
   wiring: PLAN_KINDS.filter(k => k[2] !== 'Network').map(k => k[0]),
   network: PLAN_NETWORK_KINDS,
 };
 
-/// A small line icon for each tool, drawn in the button's own colour.
 function fpToolIcon(tool        )      {
   const s = svgEl('svg', { viewBox: '0 0 24 24', class: 'fp-tool-icon', 'aria-hidden': 'true' });
   const p = (d        ) => s.appendChild(svgEl('path', { d }));
@@ -1309,7 +1288,6 @@ function fpToolIcon(tool        )      {
   return s;
 }
 
-/// Mounted by the host on first open; `show` runs on every open.
 function mount(sec     , host     ) {
   ({ api, btn, closeSheet, el, ensure, openSheet, svgEl, toast, formatMeasure, state, refreshDirty, sparkline, analyse, circuitSession, searchSelect, makeMenu } = host);
   sec.classList.add('fp');
@@ -1318,7 +1296,6 @@ function mount(sec     , host     ) {
     'Each floor at real size, with its rooms, doors and windows, and everything wired on it. View shades each room by '
     + 'what it draws (a room with nothing metered reads unmetered, never zero); Edit draws and moves it all.'));
 
-  // Where things are kept, and whether they will survive a restart: said loudly, above everything, when they will not.
   const banner = el('div', { class: 'fp-banner' });
   banner.hidden = true;
   sec.appendChild(banner);
@@ -1379,12 +1356,9 @@ function mount(sec     , host     ) {
   let mode                  = 'view';
   let tool       = 'select';
   let layer = (FP_LAYERS.find(l => l[0] === remembered('layer', 'plan'))?.[0] || 'plan')         ;
-  /// The selection panel folded away while editing, for the whole width of the plan.
   let sideHidden = remembered('side-hidden', '0') === '1';
-  /// What the Floor tool lays: a surface, and a colour of its own or none.
   let paintSurface = remembered('paint', 'wood');
   let paintColor = '';
-  /// The room a rectangle drawn with the Room tool is added to, taking the space from the rooms under it.
   let claimFor = '';
   let itemKind = remembered('kind', 'outlet');
   let doorKind = 'door';
@@ -1392,9 +1366,7 @@ function mount(sec     , host     ) {
   let snapOn = remembered('snap', '1') === '1';
   let showWiring = remembered('wiring', '1') === '1';
   let showSizes = remembered('sizes', '0') === '1';
-  /// The Circuits view coloured by how hard each circuit is working against its breaker, instead of by circuit.
   let showLoad = remembered('load', '0') === '1';
-  /// What the plan leaves out, by kind of item, and the compass: chosen under Show and kept per browser.
   const SHOW_GROUPS                               = [
     ['outlets', 'Outlets and switches', ['outlet', 'switch', 'junction']], ['lights', 'Lights and fans', ['fixture', 'fan']],
     ['appliances', 'Appliances and devices', ['appliance', 'device', 'hvac', 'ev-charger']], ['power', 'Panels and power', PLAN_SUPPLY_KINDS],
@@ -1404,14 +1376,11 @@ function mount(sec     , host     ) {
   const shown = (item     ) => !hidden.has((SHOW_GROUPS.find(g => g[2].includes(item.Kind)) || SHOW_GROUPS[2])[0]);
   let period = remembered('period', 'now');
   let selection            = null;
-  /// Everything else selected with it: Shift, Ctrl or ⌘ adds to a selection, and a box drag selects all it holds.
   let extra                           = [];
   let marquee                          = null;
   let spaceDown = false;
   let gfciNext = remembered('gfci', '0') === '1';
   let showCons = remembered('cons', '1') === '1';
-  // The constraints are drafting marks. On a phone's plan they sit on top of the room names they are about,
-  // so viewing there leaves them out; Edit still shows them.
   const consShown = () => showCons && !(mode === 'view' && !!window.matchMedia?.('(max-width: 560px)').matches);
   let itemPreset = '';
   let selectedCorner = -1;
@@ -1437,12 +1406,9 @@ function mount(sec     , host     ) {
   const roomsNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Rooms', []) : []; };
   const areasNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Areas', []) : []; };
   const openingsNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Openings', []) : []; };
-  /// Walls drawn on their own, not as the side of a room: a half wall, a partition, a wall still to be closed in.
   const wallsNow = ()        => { const f = floorNow(); return f ? ensure(f.floor, 'Walls', []) : []; };
   const standaloneOf = (id        ) => wallsNow().find((w     ) => w.Id === id);
-  /// A standalone wall's thickness: its own, or an interior wall's 4½ inches.
   const wallThick = (w     ) => Number(w.Thickness) > 0 ? Number(w.Thickness) : 0.1143 * scale();
-  /// The wire or standalone wall selected on its own, whose bends can be dragged.
   const lineSel = () => extra.length ? null : selection?.type === 'run' ? runOf(selection.id) : selection?.type === 'wall' ? standaloneOf(selection.id) : null;
   const shapeOf = (sel           ) => sel?.type === 'room' ? roomsNow().find(r => r.Id === sel.id)
     : sel?.type === 'area' ? areasNow().find(a => a.Id === sel.id) : null;
@@ -1466,9 +1432,7 @@ function mount(sec     , host     ) {
   const circuitOf = (ref        ) => live?.circuits.find(c => c.ref === ref) || null;
   const circuitLabel = (c         ) => `${c.panelName} · ${c.number}${c.description ? ' — ' + c.description : ''}`;
   const refLabel = (ref        ) => { const c = circuitOf(ref); return c ? circuitLabel(c) : ref; };
-  /// A circuit's measured current as a share of its breaker's rating; null with no current reading or no rating.
   const loadOf = (ref        ) => { const c = circuitOf(ref); return c?.current == null || !c.amps ? null : c.current / c.amps; };
-  /// The panel schedule's bands: easy under 60%, busy to 80%, over from there. Unmetered is left uncoloured.
   const loadColor = (ref        ) => { const l = loadOf(ref); return l == null ? null : l >= 0.8 ? 'var(--bad)' : l >= 0.6 ? 'var(--warn)' : 'var(--good)'; };
   const loadText = (ref        ) => { const c = circuitOf(ref), l = loadOf(ref); return l == null ? 'load unknown' : `${c .current .toFixed(1)} A of ${c .amps} A — ${Math.round(l * 100)}%`; };
   const nodeLabel = (id        ) => live?.nodes.find(n => n.id === id)?.label || id;
@@ -1477,12 +1441,27 @@ function mount(sec     , host     ) {
   const units = () => live?.units || 'W';
   const fmt = (v                           ) => v == null ? 'no data' : formatMeasure(units() === 'W' ? Math.round(v) : Math.round(v * 100) / 100, units());
 
-  // --- Network -------------------------------------------------------------------------------------
-  // A jack's port is 'patch_panel_1/12'; a patch panel's cords say which switch port each of its ports goes to.
-  // The mapping is the record; cables drawn on the plan are only where the wire goes.
+  // --- Light switches ------------------------------------------------------------------------------
+  const gangsOf = (it     )        => it?.Kind !== 'switch' ? [] : it.Gangs?.length ? it.Gangs : [{ Label: '', Controls: [] }];
+  const gangsEdit = (it     )        => { if (!it.Gangs?.length) it.Gangs = [{ Label: '', Controls: [] }]; return it.Gangs; };
+  const switchedBy = (id        ) => itemsIn().filter((s     ) => s.Kind === 'switch')
+    .flatMap((s     ) => gangsOf(s).map((g     , n        ) => ({ sw: s, n, g })).filter((x     ) => (x.g.Controls || []).includes(id)));
+  const gangName = (sw     , n        ) => {
+    const gs = gangsOf(sw), g = gs[n];
+    return [itemName(sw), g?.Label || (gs.length > 1 ? `gang ${n + 1}` : '')].filter(Boolean).join(' · ');
+  };
+  const switchable = (it     ) => !!it && it.Kind !== 'switch' && !isNet(it) && !PLAN_SUPPLY_KINDS.includes(it.Kind);
+  const toggleControl = (sw     , n        , id        ) => act(() => {
+    const g = gangsEdit(sw)[n];
+    if (!g) return;
+    const list = ensure(g, 'Controls', []);
+    const at = list.indexOf(id);
+    if (at >= 0) list.splice(at, 1); else { list.push(id); delete g.Dead; }
+  });
+  let gangPick                                   = null;
+
   const isNet = (it     ) => !!it && PLAN_NETWORK_KINDS.includes(it.Kind);
   const isPorted = (it     ) => !!it && PLAN_PORTED_KINDS.includes(it.Kind);
-  /// Every patch panel and switch, on every floor: a jack's patch panel is often a floor away.
   const portedAll = () => itemsIn().filter(isPorted);
   const portCount = (dev     ) => Math.max(0, Math.round(Number(dev?.Ports) || 0)) || PLAN_DEFAULT_PORTS;
   const parsePort = (ref        ) => {
@@ -1490,43 +1469,34 @@ function mount(sec     , host     ) {
     return at > 0 && Number.isInteger(n) && n >= 1 ? { id: ref.slice(0, at), dev: itemOf(ref.slice(0, at)), n } : null;
   };
   const numberOf = (dev     ) => /_(\d+)$/.exec(dev?.Id || '')?.[1] || '';
-  /// A device's name, numbered from its id when it has no label of its own: "Patch panel 2".
   const devName = (dev     ) => dev?.Label || `${kindName(dev?.Kind)} ${numberOf(dev)}`.trim();
-  /// A port as it is written on a jack's faceplate: the device's label, or PP1 or SW1, and the port, "PP1-07".
   const portName = (dev     , n        ) => `${dev?.Label || (dev?.Kind === 'network-switch' ? 'SW' : 'PP') + numberOf(dev)}-${String(n).padStart(String(portCount(dev)).length, '0')}`;
   const portText = (ref        ) => { const p = parsePort(ref); return !ref ? '' : p?.dev ? `${devName(p.dev)}, port ${p.n}` : `${ref} (no such patch panel or switch)`; };
-  /// What a jack is called on the plan and on paper: its own label, else its port.
   const jackLabel = (j     ) => { if (j?.Label) return j.Label; const p = parsePort(j?.Port); return p?.dev ? portName(p.dev, p.n) : ''; };
   const jacksOn = (ref        ) => itemsIn().filter((j     ) => j.Kind === 'jack' && j.Port === ref);
   const jacksOnDev = (dev     ) => itemsIn().filter((j     ) => j.Kind === 'jack' && parsePort(j.Port)?.id === dev.Id);
   const patchOf = (pp     , n        )         => (pp?.Patches || []).find((x     ) => Number(x.Port) === n)?.Switch || '';
   /// The patch panel ports corded to a switch port.
   const cordsTo = (ref        ) => portedAll().flatMap((pp     ) => (pp.Patches || []).filter((x     ) => x.Switch === ref).map((x     ) => ({ pp, n: Number(x.Port) })));
-  /// The switch port a jack reaches: through its patch panel's cord, or straight to the switch.
   const switchPortOf = (j     ) => { const p = parsePort(j?.Port); return !p?.dev ? '' : p.dev.Kind === 'network-switch' ? j.Port : patchOf(p.dev, p.n); };
-  /// The patch panel or switch a network item belongs to, for its colour: itself, or a jack's.
   const netDevOf = (it     )         => !it ? '' : isPorted(it) ? it.Id : it.Kind === 'jack' ? parsePort(it.Port)?.id || '' : '';
-  /// A cable's device: the patch panel or switch at one end, else the one the jack at its end is on.
   const runDev = (r     ) => { const ends = [r.From, r.To].map((id        ) => id && itemOf(id)).filter(Boolean); return netDevOf(ends.find(isPorted)) || ends.map(netDevOf).find(Boolean) || ''; };
   const netColor = (devId        ) => devId ? planCircuitColor('net:' + devId) : 'var(--muted)';
   const portUsed = (dev     , n        ) => jacksOn(`${dev.Id}/${n}`).length > 0 || (dev.Kind === 'network-switch' && cordsTo(`${dev.Id}/${n}`).length > 0);
   const usedPorts = (dev     ) => Array.from({ length: portCount(dev) }, (_, i) => i + 1).filter(n => portUsed(dev, n)).length;
   const freePort = (dev     ) => { for (let n = 1; n <= portCount(dev); n++) if (!portUsed(dev, n)) return n; return 0; };
-  /// One jack to a port: putting a jack on it takes it off any other. Says which, so the change is not silent.
   const setJackPort = (j     , ref        ) => {
     const moved = ref ? jacksOn(ref).filter((o     ) => o !== j) : [];
     moved.forEach((o     ) => { o.Port = ''; });
     j.Port = ref;
     return moved.map((o     ) => jackLabel(o) || itemName(o));
   };
-  /// One cord to a switch port: patching it here unpatches it anywhere else.
   const setPatch = (pp     , n        , sw        ) => {
     if (sw) portedAll().forEach((o     ) => { if (o.Patches) o.Patches = o.Patches.filter((x     ) => x.Switch !== sw || (o === pp && Number(x.Port) === n)); });
     const list = (pp.Patches || []).filter((x     ) => Number(x.Port) !== n);
     if (sw) list.push({ Port: n, Switch: sw });
     if (list.length) pp.Patches = list.sort((a     , b     ) => a.Port - b.Port); else delete pp.Patches;
   };
-  /// Ports to pick from, grouped by device: every patch panel's and switch's, or only switches'.
   const portChoices = (switchesOnly         , current        , none        )           => {
     const out           = [{ value: '', label: none }];
     portedAll().filter((d     ) => !switchesOnly || d.Kind === 'network-switch').forEach((d     ) => {
@@ -1542,7 +1512,6 @@ function mount(sec     , host     ) {
     return out;
   };
 
-  // Real sizes: drawing units per metre on this floor, and the unit system the GUI settings ask for.
   const sys = () => planUnitSystem(state.data?.Gui?.DistanceUnits, (globalThis       ).navigator?.language);
   const scale = () => Math.max(1, Number(floorNow()?.floor.Scale) || 100);
   const len = (unitsLong        ) => planFmtLen(unitsLong / scale(), sys());
@@ -1559,15 +1528,11 @@ function mount(sec     , host     ) {
     return i;
   };
 
-  // --- Undo and redo -------------------------------------------------------------------------------
-  // Snapshots of everything the page edits; restored in place so every other page keeps its reference.
   const restore = (cur     , v     ) => { Object.keys(cur).forEach(k => delete cur[k]); Object.assign(cur, v); };
   const history = planHistory(() => ({ flow: flowIn(), loc: locIn() }), v => { restore(flowIn(), v.flow); restore(locIn(), v.loc); });
   const changed = () => { refreshDirty(); schedule(); };
-  /// The outlines as they were when the change under way began: what was shared then stays shared (#602).
   let before                     = null;
   const outlines = () => JSON.parse(JSON.stringify(solverShapes().map(x => ({ Id: x.Id, Shape: x.Shape }))))               ;
-  /// One undoable change: remember what was, make the change, redraw.
   const act = (fn            ) => { history.push(); before = outlines(); try { fn(); } finally { before = null; } changed(); render(); };
   const undo = () => { if (history.undo()) { cleanSelection(); changed(); render(); } };
   const redo = () => { if (history.redo()) { cleanSelection(); changed(); render(); } };
@@ -1583,7 +1548,6 @@ function mount(sec     , host     ) {
     const ls = (Object.keys(FP_LAYER_KINDS)           ).filter(l => FP_LAYER_KINDS[l].includes(it?.Kind));
     return ls.length ? ls : ['wiring'];
   };
-  /// Whether a mode works on a thing: rooms are laid out under Floor plan and floored under Interior; items and wires by kind.
   const inLayer = (x                        , l        = layer)          =>
     x.type === 'room' ? l === 'plan' || l === 'interior'
     : x.type === 'item' ? itemLayers(itemOf(x.id)).includes(l)
@@ -1592,7 +1556,6 @@ function mount(sec     , host     ) {
   /// Rooms and walls move only under Floor plan.
   const movesIn = (x                        ) => inLayer(x) && (layer === 'plan' || (x.type !== 'room' && x.type !== 'area'));
   const homeLayer = (x                        ) => FP_LAYERS.map(l => l[0]).find(l => inLayer(x, l)) || 'plan';
-  /// The item kind and wire kind kept in step with the mode, so a tool never places what its mode does not hold.
   const fitKinds = () => {
     const kinds = FP_LAYER_KINDS[layer];
     if (kinds && !kinds.includes(itemKind)) { itemKind = kinds[0]; itemPreset = ''; }
@@ -1611,7 +1574,6 @@ function mount(sec     , host     ) {
     if (!layerTools(layer).includes(tool)) tool = 'select';
     fitKinds();
   };
-  /// Something chosen from another mode, by a list, a menu or a tap, takes Edit to that mode.
   const followSelection = () => {
     if (mode !== 'edit' || !selection || inLayer(selection)) return;
     layer = homeLayer(selection); remember('layer', layer);
@@ -1649,7 +1611,6 @@ function mount(sec     , host     ) {
   redoBtn.setAttribute('aria-label', 'Redo');
   redoBtn.onclick = () => redo();
   const status = el('span', { class: 'ld-count fp-status' });
-  // On a phone the floor's own settings fold into one menu, so the bar is one line: the floor, More, undo and redo.
   [addBtn, floorBtn, bgBtn, toolsBtn, exportBtn, printBtn].forEach(b => b.classList.add('fp-wide-only'));
   const moreBtn = btn('More…');
   moreBtn.classList.add('fp-narrow-only');
@@ -1685,7 +1646,6 @@ function mount(sec     , host     ) {
   const subBar = el('div', { class: 'fp-sub' });
   sec.appendChild(el('div', { class: 'fp-modes' }, modeBar, subBar));
 
-  // Edit fills the screen: a bar of its own with the floor, undo and redo, the modes, what the plan shows, and Done.
   const iconBtn = (icon        , label        , title = label) => {
     const b = el('button', { class: 'small fp-icon-btn', type: 'button', title }, fpToolIcon(icon));
     b.setAttribute('aria-label', label);
@@ -1731,7 +1691,6 @@ function mount(sec     , host     ) {
     el('span', { class: 'fp-ed-gap' }), viewMenu, edSnap, edFloorMenu, edSide, edDone);
   sec.appendChild(edBar);
 
-  // The header's past time: Power now and Circuits show that moment, moved along a timeline of each circuit's load.
   let range                                                      = null;
   let at                = null;
   let loads                                                                                                = null;
@@ -1741,7 +1700,6 @@ function mount(sec     , host     ) {
   const strip = host.timelineStrip ? host.timelineStrip((span     ) => { if (span) { at = span.from; load(); } }, undefined, { moment: true }) : null;
   if (strip) { strip.el.classList.add('fp-timeline'); strip.el.hidden = true; sec.appendChild(strip.el); }
   const syncStrip = () => { if (strip) strip.el.hidden = !(range && loads && mode === 'view' && instantView()); };
-  /// The busiest circuits on this floor, each as its share of its breaker through the range.
   const drawStrip = () => {
     const fl = floorNow();
     loadsFor = fl ? fl.floor.Id : '';
@@ -1786,7 +1744,6 @@ function mount(sec     , host     ) {
   const zoomOut = el('button', { class: 'fp-zbtn', text: '−', title: 'Zoom out (−)', type: 'button' });
   const zoomFit = el('button', { class: 'fp-zbtn', text: '⤢', title: 'Fit the floor (0)', type: 'button' });
   const hint = el('div', { class: 'fp-hint' });
-  // The view-mode hint sits over the plan, so it goes once the reader has touched the plan and stays gone.
   let viewHintSeen = remembered('view-hint', '0') === '1';
   svg.addEventListener('pointerdown', () => {
     if (viewHintSeen || mode !== 'view') return;
@@ -1797,7 +1754,6 @@ function mount(sec     , host     ) {
   const fpMenu = makeMenu(() => stage, 'fp-menu');
   const menu = fpMenu.el;
   const compass = el('div', { class: 'fp-compass', title: 'North. Set which way it points in Floor settings.' });
-  // The four points ride round the ring with north; each letter is turned back upright as it goes.
   const points4 = (['N', 'E', 'S', 'W']         ).map((t, i) => {
     const a = i * Math.PI / 2, x = Math.round(Math.sin(a) * 20.5 * 10) / 10, y = Math.round(-Math.cos(a) * 20.5 * 10) / 10;
     return { x, y, el: Object.assign(svgEl('text', { x, y, class: 'fp-compass-text' + (t === 'N' ? ' is-n' : '') }), { textContent: t }) };
@@ -1814,7 +1770,6 @@ function mount(sec     , host     ) {
 
   const pickTool = (t      ) => {
     if (mode !== 'edit') { mode = 'edit'; viewFor = ''; }
-    // A tool from another mode, by its key, takes Edit to that mode.
     if (!layerTools(layer).includes(t)) setLayer((['wiring', 'plan', 'interior', 'network']           ).find(l => layerTools(l).includes(t)) || 'plan');
     tool = t; claimFor = ''; draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; selectedCorner = -1;
     render();
@@ -1822,7 +1777,6 @@ function mount(sec     , host     ) {
 
   // --- Coordinates ---------------------------------------------------------------------------------
   const floorSize = () => { const f = floorNow()?.floor; return { w: Number(f?.Width) || 1000, h: Number(f?.Height) || 700 }; };
-  /// Plan units per screen pixel: what keeps handles, strokes and labels the same size on screen at any zoom.
   const upp = () => {
     const r = svg.getBoundingClientRect?.();
     if (!r || !r.width || !r.height) return vb.w / 1000;
@@ -1836,7 +1790,6 @@ function mount(sec     , host     ) {
   };
   const fit = () => {
     const { w, h } = floorSize();
-    // A phone's plan is narrow: it fits what is drawn rather than the whole plot, so the rooms are big enough to work on.
     const drawn       = window.matchMedia?.('(max-width: 560px)').matches ? [...shapesNow().flatMap(x => x.Shape        ), ...itemsNow().map((it     ) => ({ X: it.X, Y: it.Y }))] : [];
     if (drawn.length >= 3) {
       const b = planBounds(drawn);
@@ -1859,17 +1812,13 @@ function mount(sec     , host     ) {
   zoomFit.onclick = () => { fit(); drawPlan(); };
 
   const outlinesOf = (list       ) => list.filter(s => (s.Shape || []).length >= 3).map(s => s.Shape        );
-  // Standalone walls snap too, each stretch a line of its own: their ends, along them, and level with them.
   const othersFor = (exclude     ) => [...outlinesOf([...roomsNow(), ...areasNow()].filter(s => s !== exclude)),
     ...wallsNow().filter((w     ) => w !== exclude).flatMap((w     ) => (w.Points || []).slice(1).map((q    , i        ) => [w.Points[i], q]))];
   const snapStep = () => planSnapStep(sys()) * scale();
-  /// The floor's wall thicknesses. With either set, rooms are drawn touching, to the middle of the walls between them
-  /// and the inside face of the outside walls, and the walls are drawn at their thickness.
   const interiorWall = () => Math.max(0, Number(floorNow()?.floor.InteriorWall) || 0);
   const exteriorWall = () => Math.max(0, Number(floorNow()?.floor.ExteriorWall) || 0);
   const thickWalls = () => interiorWall() > 0 || exteriorWall() > 0;
   const massNow = () => planWallMass(roomsNow().filter(r => !r.Outdoor));
-  /// A room's inside: each wall it shares moved in by half the interior wall. Its outline when walls are thin lines.
   const insideOf = (room     , mass = massNow())       => {
     const poly       = room.Shape || [];
     if (!thickWalls() || room.Outdoor || poly.length < 3) return poly;
@@ -1880,15 +1829,12 @@ function mount(sec     , host     ) {
       return shared / L > 0.5 ? half : 0;
     }));
   };
-  /// A 2x4 wall with drywall both sides, 4½ in: drawn as gaps between rooms, the far face of a room's wall is a snap
-  /// line too. With the floor's wall thickness set, rooms touch and there is no far face to find.
   const wallFace = () => thickWalls() ? 0 : 0.1143 * scale();
   const clampPt = (p    ) => { const { w, h } = floorSize(); return { X: planRound(Math.max(0, Math.min(w, p.X))), Y: planRound(Math.max(0, Math.min(h, p.Y))) }; };
   const snapped = (p    , exclude      = null) => {
     if (!snapOn) return clampPt(p);
     return clampPt(planSnap(p, othersFor(exclude), 12 * upp(), snapStep(), wallFace()).pt);
   };
-  /// Within a few degrees of level or plumb from the last point, a line is made exactly so.
   const ortho = (prev                       , q    ) => {
     if (!prev || !snapOn) return q;
     const dx = q.X - prev.X, dy = q.Y - prev.Y;
@@ -1897,7 +1843,6 @@ function mount(sec     , host     ) {
     if (Math.abs(a - 90) < 6) return { X: prev.X, Y: q.Y };
     return q;
   };
-  /// A drawn point: onto a wall corner or edge when one is near, else level or plumb from the last point, else the grid.
   const drawSnap = (prev                       , p    , grid = true) => {
     if (!snapOn) return clampPt(p);
     const sn = planSnap(p, othersFor(selection?.type === 'wall' ? standaloneOf(selection.id) : null), 16 * upp() * hs(), grid ? snapStep() : 0, wallFace());
@@ -1908,7 +1853,6 @@ function mount(sec     , host     ) {
   const gridSnapped = (p    ) => { if (!snapOn) return clampPt(p); const g = snapStep(); return clampPt({ X: Math.round(p.X / g) * g, Y: Math.round(p.Y / g) * g }); };
   /// Where an item actually is: its own point.
   const itemPt = (id        )            => { const it = itemOf(id); return it ? { X: Number(it.X) || 0, Y: Number(it.Y) || 0 } : null; };
-  /// A run's whole path: its start item, its bends, and its end item.
   const runPath = (r     )       => {
     const pts       = [];
     const a = r.From ? itemPt(r.From) : null;
@@ -1918,8 +1862,6 @@ function mount(sec     , host     ) {
     if (b) pts.push(b);
     return pts;
   };
-  /// Where a wall is for a door or window: near enough to one, on it and lying along it.
-  /// Every stretch of a standalone wall, as an outline of its own, so a door or outlet finds it as it finds a room's.
   const standaloneStretches = ()         => wallsNow().flatMap((w     ) => (w.Points || []).slice(1).map((b    , i        ) => [w.Points[i], b]));
   const wallAt = (p    ) => {
     const w = planNearestWall(p, [...outlinesOf(roomsNow().filter(r => !r.Outdoor)), ...standaloneStretches()]);
@@ -1932,24 +1874,19 @@ function mount(sec     , host     ) {
       : kind === 'garage-door' ? (imp ? 108 * inch : 2.7) : (imp ? 36 * inch : 0.9);
     return planRound(m * scale());
   };
-  /// The circuit a selection is about, so the plan can bring it forward and fade the rest.
   const focusCircuit = () => selection?.type === 'item' ? itemOf(selection.id)?.Circuit || focused
     : selection?.type === 'run' ? runOf(selection.id)?.Circuit || focused : focused;
-  /// The floor beneath this one on the same site, drawn faintly to line the one above up with it.
   const floorBelow = () => {
     const fl = floorNow();
     if (!fl) return null;
     const lower = ensure(fl.site, 'Floors', []).filter((f     ) => (Number(f.Level) || 0) < (Number(fl.floor.Level) || 0));
     return lower.sort((a     , b     ) => (Number(b.Level) || 0) - (Number(a.Level) || 0))[0] || null;
   };
-  /// Outlets, switches and network jacks live on walls: near enough to one, they sit on it.
   const WALL_KINDS = ['outlet', 'switch', 'jack'];
-  /// Where a wall-mounted item goes: on the wall, facing the side the pointer is on. Away from walls it stands free.
   const onWall = (kind        , q    , side     = q)                                 => {
     if (!snapOn || !WALL_KINDS.includes(kind)) return { ...q, facing: null };
     const w = planNearestWall(q, [...outlinesOf(roomsNow().filter(r => !r.Outdoor)), ...standaloneStretches()]);
     if (!w || w.dist > Math.max(0.3 * scale(), 10 * upp())) return { ...q, facing: null };
-    // The normal toward the pointer's side of the wall; the room it is in when the pointer is on the line itself.
     let toward = { X: side.X - w.pt.X, Y: side.Y - w.pt.Y };
     if (Math.hypot(toward.X, toward.Y) < 1e-6) { const rm = planShapeAt(roomsNow(), side); const c = rm ? planCentroid(rm.Shape) : side; toward = { X: c.X - w.pt.X, Y: c.Y - w.pt.Y }; }
     const a = w.angle * Math.PI / 180;
@@ -1957,7 +1894,6 @@ function mount(sec     , host     ) {
     const facing = (n.X * toward.X + n.Y * toward.Y >= 0 ? w.angle + 90 : w.angle - 90);
     return { X: planRound(w.pt.X), Y: planRound(w.pt.Y), facing: Math.round((((facing % 360) + 360) % 360) * 10) / 10 };
   };
-  /// A sized item near a wall stands with its back to it, facing the room the pointer is in; away from walls it keeps its turn.
   const fitToWall = (it     , q    , side     = q) => {
     const D = Number(it.Depth) || 0;
     const w = snapOn ? planNearestWall(q, [...outlinesOf(roomsNow().filter(r => !r.Outdoor)), ...standaloneStretches()]) : null;
@@ -1972,7 +1908,6 @@ function mount(sec     , host     ) {
     it.X = planRound(w.pt.X + n.X * (D / 2 + 0.5)); it.Y = planRound(w.pt.Y + n.Y * (D / 2 + 0.5));
   };
   const isSized = (it     ) => !!it && Number(it.Width) > 0 && Number(it.Depth) > 0;
-  /// Which appliance a sized item is drawn as: its own record, or, for one placed before that was kept, its name.
   const footprintOf = (it     ) => it?.Footprint || PLAN_FOOTPRINTS.find(f => f[1] === it?.Label)?.[0] || '';
   const placeOnWall = (it     , q                                ) => {
     it.X = q.X; it.Y = q.Y;
@@ -1988,8 +1923,6 @@ function mount(sec     , host     ) {
     ...runsNow().map(r => ({ type: 'run'           , id: r.Id })),
     ...wallsNow().map((w     ) => ({ type: 'wall'           , id: w.Id })),
   ];
-  /// Every point that moves when a set of things moves: outlines, items, doors and windows, wire bends.
-  /// A room carries what is in it, the doors and windows in its walls and the bends of wires to what it holds.
   const movable = (sel                          ) => {
     const shapes = new Set     (), items = new Set     (), openings = new Set     (), runs = new Set     (), walls = new Set     ();
     sel.forEach(x => {
@@ -2025,7 +1958,6 @@ function mount(sec     , host     ) {
     m.openings.forEach(x => { x.o.X = planRound(x.X + dx); x.o.Y = planRound(x.Y + dy); });
     [...m.runs, ...m.walls].forEach(x => { x.r.Points = x.pts.map((q    ) => ({ X: planRound(q.X + dx), Y: planRound(q.Y + dy) })); });
   };
-  /// The box around a set of movable points, or null when there are none.
   const boundsOf = (m                            ) => {
     const pts       = [...m.shapes.flatMap(x => x.pts), ...m.items.map(x => ({ X: x.X, Y: x.Y })), ...m.openings.map(x => ({ X: x.X, Y: x.Y })), ...m.runs.flatMap(x => x.pts), ...m.walls.flatMap(x => x.pts)];
     return pts.length ? planBounds(pts) : null;
@@ -2046,22 +1978,16 @@ function mount(sec     , host     ) {
   const setConstraints = (list                  ) => { const f = floorNow()?.floor; if (f) f.Constraints = list; };
   /// The outlines on this floor, as the solver sees them.
   const shapesNow = () => [...roomsNow(), ...areasNow()].filter(x => (x.Shape || []).length >= 3);
-  /// What the solver holds: the outlines, and each standalone wall as an open line whose points are its corners.
   const solverShapes = ()        => [...shapesNow(), ...wallsNow().filter((w     ) => (w.Points || []).length >= 2).map((w     ) => ({ Id: w.Id, Name: 'Wall', Shape: w.Points, Open: true }))];
   const shapeById = (id        ) => solverShapes().find(x => x.Id === id);
-  /// A corner that must stay put: its room is locked, or a locked wall ends there.
   const cornerLocked = (sh     , i        ) => {
     if (!sh) return false;
     if (sh.Locked) return true;
     const n = (sh.Shape || []).length;
     return (sh.LockedWalls || []).some((e        ) => e === i || ((e + 1) % n) === i);
   };
-  /// A shape that cannot move as a whole: locked, or holding a locked wall.
   const shapeHeld = (sh     ) => !!sh && (sh.Locked || (sh.LockedWalls || []).length > 0);
   let lastSolve                                     = { worst: 0, unmet: [] };
-  /// Bring every constraint on this floor back into line, holding still the corners named. The rooms in `hold` are
-  /// the ones being reshaped, and keep their level and plumb walls so unless `free` (Shift, while dragging); the rest
-  /// follow the corners they share, keeping theirs.
   const solve = (fixed           = [], hold           , free = false) => {
     if (!constraintsNow().length && !hold) { lastSolve = { worst: 0, unmet: [] }; return; }
     lastSolve = planSolve(solverShapes(), constraintsNow(), new Set(fixed), 120, { before: before || gesture?.before || undefined, hold, keep: !free });
@@ -2071,7 +1997,6 @@ function mount(sec     , host     ) {
   let cPicks            = [];
   let consLit = '';
   const sameRef = (a         , b         ) => a.Room === b.Room && (a.Corner ?? null) === (b.Corner ?? null) && (a.Edge ?? null) === (b.Edge ?? null);
-  /// The corner or wall under the pointer: a corner when one is close, else the nearest wall.
   const pickRef = (p    )                 => {
     const reach = 14 * upp() * hs();
     let best                 = null, bestD = reach;
@@ -2097,7 +2022,6 @@ function mount(sec     , host     ) {
   };
   const cornerPt = (r         ) => { const sh = shapeById(r.Room); return sh && r.Corner != null ? sh.Shape[r.Corner] : null; };
   const addConstraint = (kind        , refs           , value         ) => {
-    // The same constraint twice holds nothing more; a length or angle given again replaces the one there.
     const same = constraintsNow().find(c => c.Kind === kind && c.Refs.length === refs.length && c.Refs.every(r => refs.some(q => sameRef(r, q))));
     if (same && (kind === 'length' || kind === 'angle') && value != null) {
       act(() => { same.Value = value; solve([], refs.map(r => r.Room)); cPicks = []; });
@@ -2105,8 +2029,6 @@ function mount(sec     , host     ) {
     }
     if (same) { cPicks = []; drawPlan(); toast('That is already held.', false); return; }
     const id = freshIn(constraintsNow(), kind);
-    // Joining, the room picked first (or the one whose wall it is) stays put; the other comes to it, stretching as a
-    // rectangle would. Anything else reshapes the rooms it names.
     const anchor = kind === 'coincident' ? (refs.find(r => r.Edge != null) || refs[0]).Room : '';
     act(() => {
       constraintsNow().push({ Id: id, Kind: kind, Refs: refs.map(r => ({ ...r })), Value: value ?? null });
@@ -2138,10 +2060,8 @@ function mount(sec     , host     ) {
 
     const defs = svgEl('defs');
     planTextures(s).forEach(p => defs.appendChild(p));
-    // A surface in a colour of its own gets a pattern of its own, drawn in that colour.
     const tints = new Set        (roomsNow().filter(r => r.Surface && r.SurfaceColor).map(r => `${r.Surface}|${r.SurfaceColor}`));
     tints.forEach(k => { const [name, colour] = k.split('|'); defs.appendChild(planTexture(name, s, colour)); });
-    // The grid is in real units: a foot or half a metre, with a heavier line every five feet or metre.
     const minor = planGridStep(sys()) * s, major = minor * (sys() === 'imperial' ? 5 : 2);
     const gp = svgEl('pattern', { id: 'fp-grid', width: major, height: major, patternUnits: 'userSpaceOnUse' });
     if (minor / u >= 7) for (let x = minor; x < major - 1e-6; x += minor) {
@@ -2156,7 +2076,6 @@ function mount(sec     , host     ) {
     legend.innerHTML = '';
     if (!fl) { drawScaleBar(); return; }
 
-    // Ground, then the plan image, then the grid while editing or where there is no image.
     const ground = fl.floor.Ground;
     svg.appendChild(svgEl('rect', { x: 0, y: 0, width: w, height: h, class: 'fp-paper' + (ground ? ' is-textured' : ''), fill: ground ? `url(#fp-tex-${ground})` : null }));
     const image = fl.floor.Image;
@@ -2175,23 +2094,20 @@ function mount(sec     , host     ) {
     const max = planScaleMax(roomsNow().map(r => placeOf(r.Id)?.value));
     const font = 13 * u;
     const focus = focusCircuit();
-    // The Circuits view: every circuit in its own colour, its wires drawn bold, and the rooms left plain to trace them over.
     const trace = mode === 'view' && period === 'circuits';
     const loadOn = trace && showLoad;
-    // The rooms the focused circuit serves: the breaker's own list, and every room something on it is in.
     const focusRooms = new Set        (focus ? [...(circuitOf(focus)?.rooms || []), ...itemsIn().filter((i     ) => i.Circuit === focus).map((i     ) => i.Room).filter(Boolean)] : []);
-    // A selected GFCI shows what it protects, in green, among the rest of its circuit.
     const gfci = selection?.type === 'item' && !extra.length ? itemOf(selection.id) : null;
     const downstream = gfci?.Gfci ? planDownstream(runsIn(), gfci.Id) : null;
     const isGfci = (id        ) => !!itemOf(id)?.Gfci;
-    // The network layer, under Show. A selected patch panel or switch, or a jack or cable on one, brings that device's
-    // jacks and cables forward.
     const netOn = !hidden.has('network');
     const one = extra.length ? null : selection;
     const netFocus = one?.type === 'item' ? netDevOf(itemOf(one.id)) : one?.type === 'run' && runOf(one.id)?.Kind === 'network' ? runDev(runOf(one.id)) : '';
-    // Labels stay the same size on screen, so at a phone's fitted zoom a small room's label spills over its
-    // neighbours'. Fit it to its room: break a long name over two lines, drop the trailing lines, then shrink a
-    // little, and leave a room too small even for that unlabelled until zoomed in (tapping it still gives its detail).
+    const oneItem = one?.type === 'item' ? itemOf(one.id) : null;
+    const legs = (oneItem?.Kind === 'switch' ? gangsOf(oneItem).map((g     , n        ) => ({ sw: oneItem, n, g })) : oneItem ? switchedBy(oneItem.Id) : [])
+      .flatMap((x     ) => (x.g.Controls || []).filter((id        ) => oneItem.Kind === 'switch' || id === oneItem.Id).map((id        ) => ({ sw: x.sw, n: x.n, to: itemOf(id) })))
+      .filter((l     ) => l.to && onFloor(l.to, floorNow() .floor) && onFloor(l.sw, floorNow() .floor));
+    const switched = new Set        (legs.flatMap((l     ) => [l.sw.Id, l.to.Id]));
     const fitsIn = (b                          , lines          , f        ) =>
       Math.max(...lines.map(ln => ln.length)) * f * 0.58 <= b.w * 0.95 && lines.length * f * 1.2 <= b.h * 0.95;
     const broken = (name        ) => {
@@ -2211,7 +2127,6 @@ function mount(sec     , host     ) {
         if (lines) { f = size; break; }
       }
       if (!lines) return null;
-      // The name may take two lines; what follows it is the reading, then any sizes.
       const named = lines[0] === name ? 1 : 2;
       const t = svgEl('text', { x: c.X, y: c.Y - (lines.length - 1) * f * 0.6, class: cls, 'font-size': f });
       lines.forEach((ln, i) => {
@@ -2221,7 +2136,6 @@ function mount(sec     , host     ) {
       return t;
     };
 
-    // Rooms and outdoor zones: surface first, then the live shading over it, then the walls.
     const rooms = roomsNow().filter(r => (r.Shape || []).length >= 3).sort((a, b) => Number(!!b.Outdoor) - Number(!!a.Outdoor));
     rooms.forEach(room => {
       const poly       = room.Shape;
@@ -2257,8 +2171,6 @@ function mount(sec     , host     ) {
       labels.push(lab);
     });
 
-    // The walls at the floor's thickness: between rooms on their middle, outside walls beyond the rooms. The selected
-    // room's outline is drawn again over them.
     if (walls) {
       const iw = interiorWall(), xw = exteriorWall();
       mass.filter(w => w.draw).forEach(w => {
@@ -2280,7 +2192,6 @@ function mount(sec     , host     ) {
       labels.push(label(poly, [area.Name || area.Id], 'fp-label fp-area-label'));
     });
 
-    // Standalone walls, at their thickness; a selected one shows its ends and bends to drag, and dots to add a bend.
     wallsNow().forEach((wl     ) => {
       const pts       = wl.Points || [];
       if (pts.length < 2) return;
@@ -2303,7 +2214,6 @@ function mount(sec     , host     ) {
 
     // Doors and windows cut the walls they sit in.
     openingsNow().forEach(o => {
-      // At the floor's wall thickness, a door cuts the whole wall, and one in an outside wall sits out in it.
       let thick = 0, shift = { X: 0, Y: 0 };
       if (walls) {
         const near = mass.map(w => { const q = planNearestOnSegment(o, w.a, w.b); return { w, d: Math.hypot(q.X - o.X, q.Y - o.Y) }; }).sort((a, b) => a.d - b.d)[0];
@@ -2317,10 +2227,7 @@ function mount(sec     , host     ) {
       svg.appendChild(g);
     });
 
-    // Cable runs, in their circuit's colour. A selected circuit comes forward and the rest fade.
-    // A wire is on the circuit of the outlets at its ends too, even when its own circuit was never set or is stale.
     const onFocus = (r     ) => !!focus && (r.Circuit === focus || [r.From, r.To].some(id => id && itemOf(id)?.Circuit === focus));
-    // While viewing with the wiring hidden, the selected circuit's wires still show. Network cables follow Show instead.
     runsNow().forEach(r => {
       const path = runPath(r);
       if (path.length < 2) return;
@@ -2335,13 +2242,10 @@ function mount(sec     , host     ) {
         : r.Kind === 'service' ? 'var(--series-4)' : 'var(--fg)';
       const g = svgEl('g', { class: `fp-run is-${r.Kind || 'circuit'}${mode === 'edit' && !inLayer({ type: 'run', id: r.Id }) ? ' is-aside' : ''}${sel ? ' is-selected' : ''}${dim ? ' is-dim' : ''}${lit ? (prot ? ' is-protected' : ' is-focus') : ''}${r.Circuit || net ? '' : ' is-unknown'}` });
       const sw = (r.Kind === 'circuit' ? 2.5 : net ? 2 : 4) * u * (sel ? 1.5 : lit ? 2.2 : trace ? 1.8 : 1);
-      // On the circuit being looked at, a wire is cased in the page's colour so it parts from a wall it runs along.
       if (lit || (trace && !dim)) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-case', 'stroke-width': sw + 6 * u }));
       g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-line', stroke: colour, 'stroke-width': sw, 'stroke-dasharray': net ? `${8 * u} ${2.5 * u} ${1.5 * u} ${2.5 * u}` : r.Circuit || r.Kind !== 'circuit' ? null : `${6 * u} ${4 * u}` }));
       // And current is shown flowing along it, supply to load.
       if (lit) g.appendChild(svgEl('polyline', { points: points(path), class: 'fp-run-flow', 'stroke-width': sw * 0.45, 'stroke-dasharray': `${3 * u} ${9 * u}`, style: `--fp-flow:${-12 * u}px` }));
-      // While viewing, a branch circuit's run carries the circuit's reading at its middle.
-      // With the load shown, it is the circuit's amps against its breaker instead.
       const cp = mode === 'view' && r.Circuit ? circuitOf(r.Circuit)?.power : undefined;
       const cl = loadOn && r.Circuit ? loadOf(r.Circuit) : null;
       if (mode === 'view' && r.Circuit && path.length >= 2 && !(loadOn && cl == null)) {
@@ -2350,7 +2254,6 @@ function mount(sec     , host     ) {
         t.textContent = cl != null ? `${circuitOf(r.Circuit) .current .toFixed(1)} A · ${Math.round(cl * 100)}%` : cp == null ? 'no data' : formatMeasure(Math.round(cp), 'W');
         g.appendChild(t);
       }
-      // Which way it runs, supply to load: a chevron on its longest stretch.
       let seg = 0, best = -1;
       for (let i = 0; i + 1 < path.length; i++) { const L = Math.hypot(path[i + 1].X - path[i].X, path[i + 1].Y - path[i].Y); if (L > best) { best = L; seg = i; } }
       if (best / u > 30) {
@@ -2373,25 +2276,10 @@ function mount(sec     , host     ) {
       }
     });
 
-    // Placed items keep their size on screen at any zoom. An item on an unknown circuit is ringed and marked.
     const r = 12 * u;
-    itemsNow().forEach((item     ) => {
-      const sel = isSel('item', item.Id);
-      if (!sel && !shown(item)) return;
-      const supply = PLAN_SUPPLY_KINDS.includes(item.Kind);
-      const net = isNet(item);
-      // A network item is on no circuit; a jack is unknown until it is on a port.
-      const known = supply || (net ? item.Kind !== 'jack' || !!parsePort(item.Port)?.dev : !!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true));
-      const prot = !!downstream?.items.has(item.Id);
-      const lit = net ? !!netFocus && netDevOf(item) === netFocus : prot || (!!focus && item.Circuit === focus);
-      const dim = !!(focus || downstream || netFocus) && !lit && item.Id !== gfci?.Id;
-      const ring = net ? netColor(netDevOf(item)) : planCircuitColor(item.Circuit);
-      // Drawn at its real size when it has one: a washer is as big as a washer, turned as it stands.
+    const wallOffset = (item     ) => {
       const W = Number(item.Width) || 0, D = Number(item.Depth) || 0, sized = W > 0 && D > 0;
-      // A wall-mounted item sits beside its wall on the room's side, joined to it by a short stub, at any zoom.
       const facing = !sized && item.Facing != null && Number.isFinite(Number(item.Facing)) ? Number(item.Facing) * Math.PI / 180 : null;
-      // At the floor's wall thickness it stands out from the face of the wall it is on, whichever side that is: an
-      // outdoor outlet beyond an outside wall, an indoor one off the middle of a wall between rooms.
       let face = 0;
       if (facing != null && walls) {
         const near = mass.map(w => { const q = planNearestOnSegment(item, w.a, w.b); return { w, d: Math.hypot(q.X - item.X, q.Y - item.Y) }; }).sort((a, b) => a.d - b.d)[0];
@@ -2400,6 +2288,33 @@ function mount(sec     , host     ) {
       }
       const fx = facing == null ? 0 : Math.cos(facing) * face, fy = facing == null ? 0 : Math.sin(facing) * face;
       const off = facing == null ? { X: 0, Y: 0 } : { X: fx + Math.cos(facing) * (r + 3 * u), Y: fy + Math.sin(facing) * (r + 3 * u) };
+      return { facing, fx, fy, off };
+    };
+    legs.forEach((l     ) => {
+      const a = wallOffset(l.sw).off, b = wallOffset(l.to).off;
+      const active = !!gangPick && gangPick.sw === l.sw.Id && gangPick.n === l.n;
+      const x1 = l.sw.X + a.X, y1 = l.sw.Y + a.Y, x2 = l.to.X + b.X, y2 = l.to.Y + b.Y;
+      svg.appendChild(svgEl('line', { x1, y1, x2, y2, class: 'fp-switch-leg' + (active ? ' is-active' : ''), 'stroke-width': (active ? 3 : 2) * u, 'stroke-dasharray': `${2 * u} ${5 * u}` }));
+      if (gangsOf(l.sw).length > 1) {
+        const L = Math.hypot(x2 - x1, y2 - y1) || 1, k = Math.min(1, (r * 2.2) / L);
+        const t = svgEl('text', { x: x2 - (x2 - x1) * k, y: y2 - (y2 - y1) * k, class: 'fp-switch-gang', 'font-size': font * 0.75 });
+        t.textContent = String(l.n + 1);
+        svg.appendChild(t);
+      }
+    });
+    itemsNow().forEach((item     ) => {
+      const sel = isSel('item', item.Id);
+      if (!sel && !shown(item)) return;
+      const supply = PLAN_SUPPLY_KINDS.includes(item.Kind);
+      const net = isNet(item);
+      const known = supply || (net ? item.Kind !== 'jack' || !!parsePort(item.Port)?.dev : !!item.Circuit && (live?.placements[item.Id]?.circuitKnown ?? true));
+      const prot = !!downstream?.items.has(item.Id);
+      const lit = net ? !!netFocus && netDevOf(item) === netFocus : prot || (!!focus && item.Circuit === focus);
+      const swLit = !lit && switched.has(item.Id) && item.Id !== oneItem?.Id;
+      const dim = !!(focus || downstream || netFocus || switched.size) && !lit && !switched.has(item.Id) && item.Id !== gfci?.Id;
+      const ring = net ? netColor(netDevOf(item)) : planCircuitColor(item.Circuit);
+      const W = Number(item.Width) || 0, D = Number(item.Depth) || 0, sized = W > 0 && D > 0;
+      const { facing, fx, fy, off } = wallOffset(item);
       if (facing != null) svg.appendChild(svgEl('line', { x1: item.X + fx, y1: item.Y + fy, x2: item.X + off.X, y2: item.Y + off.Y, class: 'fp-item-stub' + (dim ? ' is-dim' : ''), 'stroke-width': 2.5 * u }));
       const aside = mode === 'edit' && !inLayer({ type: 'item', id: item.Id });
       const g = svgEl('g', { class: 'fp-item' + (aside ? ' is-aside' : '') + (sel ? ' is-selected' : '') + (known ? '' : ' is-unknown') + (supply ? ' is-supply' : '') + (dim ? ' is-dim' : '') + (facing != null ? ' is-wall' : '') + (lit ? (prot ? ' is-protected' : ' is-focus') : ''), transform: `translate(${item.X + off.X},${item.Y + off.Y})` });
@@ -2416,17 +2331,14 @@ function mount(sec     , host     ) {
         if (net) { if (netDevOf(item)) shape.style.stroke = ring; }
         else if (item.Circuit && loadOn) { const lc = loadColor(item.Circuit); if (lc) shape.style.stroke = lc; }
         else if (item.Circuit && (showWiring || focus)) shape.style.stroke = planCircuitColor(item.Circuit);
-        // On the circuit being looked at: ringed in its colour, well clear of the outline.
-        if (lit && !sel) {
+        if ((lit || swLit) && !sel) {
           const m = 6 * u;
           const halo = item.Round ? svgEl('ellipse', { rx: W / 2 + m, ry: D / 2 + m, class: 'fp-halo', 'stroke-width': 3 * u })
             : svgEl('rect', { x: -W / 2 - m, y: -D / 2 - m, width: W + 2 * m, height: D + 2 * m, rx: m, class: 'fp-halo', 'stroke-width': 3 * u });
-          halo.style.stroke = prot ? '' : ring;
+          halo.style.stroke = prot || swLit ? '' : ring;
           body.appendChild(halo);
         }
         body.appendChild(shape);
-        // The front, where the door or the controls are.
-        // The appliance itself, seen from above, when it is one we know how to draw.
         const art = planFootprintArt(footprintOf(item), W, D, u);
         if (art) { body.appendChild(art); body.classList.add('has-art'); }
         else if (!item.Round) body.appendChild(svgEl('line', { x1: -W * 0.38, y1: D / 2 - 4 * u, x2: W * 0.38, y2: D / 2 - 4 * u, class: 'fp-body-front', 'stroke-width': 3 * u }));
@@ -2434,30 +2346,29 @@ function mount(sec     , host     ) {
         hasArt = !!art;
         rr = Math.max(6 * u, Math.min(r, Math.min(W, D) * 0.32));
       } else {
-        // A panel, inverter or battery is a box on the wall, not a dot; a patch panel or switch a strip of ports.
         const ported = isPorted(item);
-        const boxy = ported || ['panel', 'inverter', 'battery', 'generator', 'transformer'].includes(item.Kind);
-        const bw = item.Kind === 'panel' ? r * 1.55 : ported ? r * 2.6 : r * 1.9, bh = item.Kind === 'panel' ? r * 2.2 : ported ? r * 1.5 : r * 1.9;
+        const gangs = gangsOf(item).length;
+        const multi = gangs > 1;
+        const boxy = ported || multi || ['panel', 'inverter', 'battery', 'generator', 'transformer'].includes(item.Kind);
+        const bw = item.Kind === 'panel' ? r * 1.55 : ported ? r * 2.6 : multi ? r * 0.5 * (1.1 * gangs + 1.3) : r * 1.9, bh = item.Kind === 'panel' ? r * 2.2 : ported ? r * 1.5 : r * 1.9;
         const disc = boxy ? svgEl('rect', { x: -bw / 2, y: -bh / 2, width: bw, height: bh, rx: r * 0.18, class: 'fp-item-disc is-box', 'stroke-width': (sel ? 3 : trace ? 4 : 2) * u })
           : svgEl('circle', { r, class: 'fp-item-disc', 'stroke-width': (sel ? 3 : trace ? 4 : 2) * u });
         if (net) { if (netDevOf(item)) disc.style.stroke = ring; }
         else if (item.Circuit && loadOn) { const lc = loadColor(item.Circuit); if (lc) disc.style.stroke = lc; }
         else if (item.Circuit && (showWiring || focus || trace)) disc.style.stroke = planCircuitColor(item.Circuit);
-        if (lit && !sel) {
-          const halo = svgEl('circle', { r: (ported ? r * 1.4 : r) + 7 * u, class: 'fp-halo', 'stroke-width': 3 * u });
-          halo.style.stroke = prot ? '' : ring;
+        if ((lit || swLit) && !sel) {
+          const halo = svgEl('circle', { r: (ported ? r * 1.4 : multi ? Math.max(r, bw / 2) : r) + 7 * u, class: 'fp-halo', 'stroke-width': 3 * u });
+          halo.style.stroke = prot || swLit ? '' : ring;
           g.appendChild(halo);
         }
         g.appendChild(disc);
       }
       // An appliance drawn as itself needs no icon on top.
       if (!hasArt) {
-        const glyph = planGlyph(item.Kind || 'outlet', rr);
+        const glyph = item.Kind === 'switch' ? planSwitchGlyph(gangsOf(item).map((x     ) => !!x.Dead), rr) : planGlyph(item.Kind || 'outlet', rr);
         glyph.setAttribute('stroke-width', 1.4 * u);
         g.appendChild(glyph);
       }
-      // A GFCI is plain to see: a green ring round it, a G on it, and GFCI written under it. Anything it protects, when
-      // the wiring or circuits are shown, wears a small green dot.
       if (item.Gfci) {
         g.insertBefore(svgEl('circle', { r: r + 4 * u, class: 'fp-gfci-ring', 'stroke-width': 2.5 * u }), g.firstChild);
         const b = svgEl('g', { class: 'fp-gfci', transform: `translate(${-r * 0.9},${-r * 0.85})` });
@@ -2474,14 +2385,12 @@ function mount(sec     , host     ) {
         badge.textContent = '?';
         g.appendChild(badge);
       }
-      // A metered item shows what it is drawing, right under it, while viewing.
       const reading = mode === 'view' && item.Node ? live?.placements[item.Id]?.value : undefined;
       if (mode === 'view' && item.Node) {
         const t = svgEl('text', { x: 0, y: r + font * 0.95, class: 'fp-item-read' + (reading == null ? ' is-nodata' : ''), 'font-size': font * 0.8 });
         t.textContent = reading == null ? 'no data' : fmt(reading);
         g.appendChild(t);
       } else if (net && !sized) {
-        // Every jack is labelled with its port, so the plan reads like the faceplates; gear with its name.
         const name = item.Kind === 'jack' ? jackLabel(item) : devName(item);
         const t = svgEl('text', { x: 0, y: (isPorted(item) ? r * 0.75 : r) + font, class: 'fp-item-label fp-net-label' + (name ? '' : ' is-unknown'), 'font-size': font * 0.85 });
         t.textContent = name || 'no port';
@@ -2493,14 +2402,13 @@ function mount(sec     , host     ) {
       }
       const title = svgEl('title');
       title.textContent = net ? (item.Kind === 'jack' ? `${jackLabel(item) || 'Network jack'} — ${portText(item.Port) || 'port not known'}${switchPortOf(item) ? ', ' + portText(switchPortOf(item)) : ''}` : `${devName(item)} — ${usedPorts(item)} of ${portCount(item)} ports in use`)
-        : `${itemName(item)}${item.Circuit ? ' — ' + refLabel(item.Circuit) + (loadOn ? ', ' + loadText(item.Circuit) : '') : supply ? '' : ' — circuit unknown'}`;
+        : `${itemName(item)}${item.Circuit ? ' — ' + refLabel(item.Circuit) + (loadOn ? ', ' + loadText(item.Circuit) : '') : supply ? '' : ' — circuit unknown'}${switchedBy(item.Id).length ? '\nSwitched by ' + switchedBy(item.Id).map((x     ) => gangName(x.sw, x.n)).join(', ') : ''}`;
       g.appendChild(title);
       svg.appendChild(g);
     });
 
     labels.forEach(t => { if (t) svg.appendChild(t); });
 
-    // Wall lengths along the selected room's edges, or every room's when sizes are on.
     const dimsFor = rooms.filter(rm => showSizes || (mode === 'edit' && selection?.type === 'room' && selection.id === rm.Id));
     dimsFor.forEach(rm => {
       const poly       = rm.Shape;
@@ -2523,7 +2431,6 @@ function mount(sec     , host     ) {
       });
     });
 
-    // A sized item's handles: a corner to resize it, and a knob above its back to turn it.
     const sizedSel = mode === 'edit' && tool === 'select' && !extra.length && selection?.type === 'item' ? itemOf(selection.id) : null;
     if (isSized(sizedSel)) {
       const it = sizedSel, W = Number(it.Width), D = Number(it.Depth), t = (Number(it.Rotation) || 0) * Math.PI / 180;
@@ -2539,7 +2446,6 @@ function mount(sec     , host     ) {
       svg.appendChild(rs);
     }
 
-    // Editing handles: each corner, and a midpoint on each edge that adds a corner when dragged.
     const target = mode === 'edit' && layer === 'plan' && !extra.length ? shapeOf(selection) : null;
     if (target && (target.Shape || []).length >= 3) {
       const poly       = target.Shape;
@@ -2556,7 +2462,6 @@ function mount(sec     , host     ) {
       });
     }
 
-    // Locked walls, drawn over in the lock colour; a locked room wears a padlock by its name.
     shapesNow().forEach(sh => {
       (sh.LockedWalls || []).forEach((e        ) => {
         const m = edgeMid({ Room: sh.Id, Edge: e });
@@ -2569,8 +2474,6 @@ function mount(sec     , host     ) {
         svg.appendChild(lk);
       }
     });
-    // Constraints: only the selected room's (every one, with the Constrain tool), and any that cannot hold. Each says
-    // in a word what it holds; the walls it pairs are lit and joined.
     if (consShown()) {
       const pill = (at    , text        , unmet         ) => {
         const w = (text.length * 6.2 + 12) * u, hh = 16 * u;
@@ -2581,7 +2484,6 @@ function mount(sec     , host     ) {
       };
       const wall = (m     , unmet         ) => svg.appendChild(svgEl('line', { x1: m.a.X, y1: m.a.Y, x2: m.b.X, y2: m.b.Y, class: 'fp-cons-wall' + (unmet ? ' is-unmet' : ''), 'stroke-width': 4 * u }));
       const inward = (m     , px        ) => { const dx = m.centre.X - m.mid.X, dy = m.centre.Y - m.mid.Y, d = Math.hypot(dx, dy) || 1; return { X: m.mid.X + dx / d * px * u, Y: m.mid.Y + dy / d * px * u }; };
-      /// The square or arc a draughtsman marks a held corner with, drawn along its two walls.
       const cornerMark = (sh     , i        , unmet         ) => {
         const n = sh.Shape.length, B = sh.Shape[i], A = sh.Shape[(i - 1 + n) % n], C = sh.Shape[(i + 1) % n];
         const ua = { X: A.X - B.X, Y: A.Y - B.Y }, uc = { X: C.X - B.X, Y: C.Y - B.Y };
@@ -2603,7 +2505,6 @@ function mount(sec     , host     ) {
           const q = cornerPt(c.Refs[0]); const sh = shapeById(c.Refs[0].Room);
           if (q && sh) {
             cornerMark(sh, c.Refs[0].Corner , unmet);
-            // Where it cannot hold, the pill says what the corner is, beside what it should be.
             const want = Math.round(Math.abs(Number(c.Value) || 0)), now = Math.round(Math.abs(planCornerAngle(sh, c.Refs[0].Corner )));
             const cc = planCentroid(sh.Shape); const dx = cc.X - q.X, dy = cc.Y - q.Y, d = Math.hypot(dx, dy) || 1;
             pill({ X: q.X + dx / d * 26 * u, Y: q.Y + dy / d * 26 * u }, unmet && now !== want ? `${now}° ≠ ${want}°` : `${want}°`, unmet);
@@ -2633,7 +2534,6 @@ function mount(sec     , host     ) {
       else { const m = edgeMid(r); if (m) svg.appendChild(svgEl('line', { x1: m.a.X, y1: m.a.Y, x2: m.b.X, y2: m.b.Y, class: 'fp-pick', 'stroke-width': 7 * u })); }
     });
 
-    // The plot's edges, to drag it bigger or smaller: every side, and the corners.
     if (mode === 'edit' && layer === 'plan' && tool === 'select') {
       const hr = 8 * u * hs();
       ([['l', 0, h / 2], ['r', w, h / 2], ['t', w / 2, 0], ['b', w / 2, h], ['rb', w, h], ['lt', 0, 0]]                              ).forEach(([side, x, y]) => {
@@ -2681,14 +2581,12 @@ function mount(sec     , host     ) {
       [measure.a, ...(measure.b ? [measure.b] : [])].forEach(q => svg.appendChild(svgEl('circle', { cx: q.X, cy: q.Y, r: 5 * u, class: 'fp-measure-pt' })));
     }
 
-    // The scale the shading is on, with what the unshaded rooms mean.
     if (mode === 'view' && !trace && rooms.length) {
       legend.append(
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch fp-grad' }), `0 – ${max > 0 ? fmt(max) : 'no readings yet'}`),
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch is-unmetered' }), 'unmetered'),
         el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch is-unknown' }), 'no data'));
     }
-    // The circuits on this floor, each a way to bring that circuit forward and fade the rest.
     const refs = [...new Set([...itemsNow().map((i     ) => i.Circuit), ...runsNow().map(r => r.Circuit)].filter(Boolean))]            ;
     if (loadOn) legend.append(
       el('span', { class: 'fp-key' }, el('span', { class: 'fp-swatch-dot', style: { background: 'var(--good)' } }), 'under 60% of the breaker'),
@@ -2711,7 +2609,6 @@ function mount(sec     , host     ) {
       if (unknown) box.appendChild(el('span', { class: 'fp-chip is-static' }, el('span', { class: 'fp-swatch-dot is-unknown' }), `${unknown} on an unknown circuit`));
       legend.appendChild(box);
     }
-    // The patch panels and switches this floor's jacks are on, each in its colour with how full it is.
     const jacks = itemsNow().filter((i     ) => i.Kind === 'jack');
     const devs = [...new Set([...itemsNow().filter(isPorted).map((d     ) => d.Id), ...jacks.map(netDevOf).filter(Boolean)])].map(itemOf).filter(Boolean);
     if (netOn && (devs.length || jacks.length)) {
@@ -2747,7 +2644,6 @@ function mount(sec     , host     ) {
   let gesture      = null;
   let pinch                                               = null;
 
-  /// What is under the pointer, found by walking up from the element it landed on.
   const hitOf = (e     ) => {
     for (let n = e.target; n && n !== svg; n = n.parentNode || n.parent) {
       const d = n.dataset || {};
@@ -2766,12 +2662,10 @@ function mount(sec     , host     ) {
     }
     return {}       ;
   };
-  /// While editing, the rooms and walls under another mode are the ground it draws on: pressed there, it is empty floor.
   const layerHit = (hit     ) => {
     const under = mode === 'edit' ? hitSel(hit) : null;
     return under && !inLayer(under) && homeLayer(under) === 'plan' ? {} : hit;
   };
-  /// Select what was hit. With Shift, Ctrl or ⌘ it is added to the selection, or taken out if already in it.
   const selectHit = (hit     , additive = false) => {
     const next            = hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening } : hit.run ? { type: 'run', id: hit.run } : hit.wall ? { type: 'wall', id: hit.wall }
       : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
@@ -2787,10 +2681,7 @@ function mount(sec     , host     ) {
   const hitSel = (hit     )                                => hit.item ? { type: 'item', id: hit.item } : hit.opening ? { type: 'opening', id: hit.opening }
     : hit.run ? { type: 'run', id: hit.run } : hit.wall ? { type: 'wall', id: hit.wall } : hit.room ? { type: 'room', id: hit.room } : hit.area ? { type: 'area', id: hit.area } : null;
 
-  /// The tools a wall or corner can be dragged from without going back to Select: those that act on a tap, not a drag.
   const GRAB_TOOLS = new Set(['select', 'constrain', 'door', 'window', 'item', 'measure']);
-  /// The corner or wall a drag here would take hold of, on any room or area, selected or not: a corner when one is
-  /// close, else a wall. The selected shape wins where they meet, then rooms over areas.
   const grabAt = (p    )                                                                      => {
     if (mode !== 'edit' || layer !== 'plan' || !GRAB_TOOLS.has(tool) || extra.length) return null;
     const sel = shapeOf(selection);
@@ -2814,28 +2705,23 @@ function mount(sec     , host     ) {
   /// Take hold of a corner or a wall of `target` for dragging.
   const holdCorner = (target     , index        , apart         ) => {
     gesture.kind = 'corner'; gesture.index = index; selectedCorner = index;
-    // A corner shared with a neighbour moves in both rooms, unless Alt pulls it apart.
     gesture.linked = apart ? [] : planSharedCorners(shapesNow(), target.Id, index);
     const held = cornerLocked(target, index) || gesture.linked.some((l     ) => cornerLocked(shapeById(l.room), l.corner));
     if (held) { gesture.kind = 'none'; saidLocked(); }
   };
   const holdWall = (target     , edge        , apart         ) => {
-    // Dragging a wall slides the whole wall, keeping its direction; its neighbours stretch to follow.
     const [i, j] = planEdgeCorners(target, edge);
     gesture.kind = 'wall'; gesture.index = edge;
     gesture.ends = [i, j].map(k => ({ k, X: target.Shape[k].X, Y: target.Shape[k].Y, linked: apart ? [] : planSharedCorners(shapesNow(), target.Id, k) }));
     const held = gesture.ends.some((x     ) => cornerLocked(target, x.k) || x.linked.some((l     ) => cornerLocked(shapeById(l.room), l.corner)));
     if (held) { gesture.kind = 'none'; saidLocked(); }
   };
-  /// Grabbed without being selected first: it is selected, then held.
   const holdGrab = (g                                        , apart         ) => {
     const type          = roomsNow().includes(g.sh) ? 'room' : 'area';
     if (!(selection?.type === type && selection.id === g.sh.Id)) { selection = { type, id: g.sh.Id }; extra = []; selectedBend = -1; drawSide(); }
     if (g.corner != null) holdCorner(g.sh, g.corner, apart); else holdWall(g.sh, g.edge , apart);
   };
 
-  /// What a drag from under the pointer would do, before it starts: the cursor says it, and the wall or corner it would
-  /// take hold of is lit.
   let grabLit                                                                      = null;
   const cursorFor = (e     )         => {
     if (mode !== 'edit' || spaceDown) return '';
@@ -2845,7 +2731,6 @@ function mount(sec     , host     ) {
       if (g.corner != null) return 'move';
       const [i, j] = planEdgeCorners(g.sh, g.edge );
       const a = g.sh.Shape[i], b = g.sh.Shape[j];
-      // The wall slides across itself, so the arrows point across it.
       const t = ((Math.atan2(b.Y - a.Y, b.X - a.X) * 180 / Math.PI + 90) % 180 + 180) % 180;
       return t < 22.5 || t >= 157.5 ? 'ew-resize' : t < 67.5 ? 'nwse-resize' : t < 112.5 ? 'ns-resize' : 'nesw-resize';
     }
@@ -2872,7 +2757,6 @@ function mount(sec     , host     ) {
   /// The room whose name was pressed, if it was one.
   const labelOf = (e     )         => { for (let n = e.target; n && n !== svg; n = n.parentNode || n.parent) if (n.dataset?.label) return n.dataset.label          ; return ''; };
   svg.addEventListener('pointerdown', (e     ) => {
-    // The middle button pans in every tool, as it does in drawing programs; the right button is left to the browser.
     if (e.button != null && e.button > 1) return;
     if (e.pointerType) touch = e.pointerType === 'touch' || e.pointerType === 'pen';
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -2898,18 +2782,18 @@ function mount(sec     , host     ) {
       gesture.all = movable(everything());
       gesture.box = boundsOf(gesture.all);
     } else if (mode === 'edit' && tool === 'select' && layer === 'plan' && labelOf(e) && !additive) {
-      // A room's name drags on its own, to wherever in the room reads best.
       const room = roomsNow().find(r => r.Id === labelOf(e));
       if (room?.Locked) { gesture.kind = 'none'; saidLocked(); }
       else if (room) {
         const at = room.LabelX != null && room.LabelY != null ? { X: Number(room.LabelX), Y: Number(room.LabelY) } : planLabelPoint(room.Shape);
         gesture.kind = 'label'; gesture.room = room; gesture.off = { X: at.X - p.X, Y: at.Y - p.Y };
       }
+    } else if (mode === 'edit' && gangPick && hit.item && switchable(itemOf(hit.item))) {
+      gesture.kind = 'none';
     } else if (mode === 'edit' && tool === 'select') {
       const target = extra.length ? null : shapeOf(selection);
       const run = lineSel();
       const under = hitSel(hit);
-      // Near a wall or corner, a drag takes hold of it, selected or not; items, doors and wires on it come first.
       const grab = under && under.type !== 'room' && under.type !== 'area' ? null : grabAt(p);
       if (hit.corner != null && target) holdCorner(target, hit.corner, !!e.altKey);
       else if (hit.mid != null && target) holdWall(target, hit.mid, !!e.altKey);
@@ -2919,10 +2803,8 @@ function mount(sec     , host     ) {
       else if (hit.rotate) { gesture.kind = 'rotate'; }
       else if (grab && !additive) holdGrab(grab, !!e.altKey);
       else if (under && additive) { gesture.kind = 'none'; }
-      // Another mode's item or wire, or a room under Interior, is selected by a tap but not moved: a drag pans.
       else if (under && !movesIn(under)) { gesture.kind = 'none'; }
       else if (under) {
-        // Dragging anything already selected moves the whole selection; anything else is selected first.
         if (!isSel(under.type, under.id)) selectHit(hit);
         gesture.kind = 'group';
         gesture.members = movable(selected());
@@ -2936,7 +2818,6 @@ function mount(sec     , host     ) {
       gesture.kind = 'rect'; rectStart = snapped(p); rectEnd = rectStart;
     } else if (mode === 'edit' && tool !== 'pan') {
       gesture.kind = 'tap';
-      // A tap does what the tool does; a drag from a wall or corner reshapes it, without going back to Select.
       gesture.grab = grabAt(p);
       gesture.apart = !!e.altKey;
     }
@@ -2946,7 +2827,6 @@ function mount(sec     , host     ) {
 
   svg.addEventListener('pointermove', (e     ) => {
     if (!pointers.has(e.pointerId)) {
-      // Hovering: the next corner, bend or measuring point follows the pointer.
       if (draft.length || wireDraft || (measure && !measure.b)) { hover = tool === 'wire' ? drawSnap(wireLast(), toPlan(e)) : tool === 'measure' ? drawSnap(measure?.a, toPlan(e)) : drawSnap(draft[draft.length - 1], toPlan(e)); drawPlan(); }
       else if (e.pointerType !== 'touch') showGrab(e);
       return;
@@ -2985,12 +2865,10 @@ function mount(sec     , host     ) {
       gesture.room.LabelX = planRound(p.X + gesture.off.X); gesture.room.LabelY = planRound(p.Y + gesture.off.Y);
     } else if (k === 'plot') {
       begin();
-      // Growing to the left or top moves everything drawn along with the edge, so the drawing stays put on screen.
       const f = floorNow() .floor;
       const box = gesture.box;
       const g2 = snapStep() || 1;
       const side         = gesture.side;
-      // Measured from the screen, not the plan: the view moves with a left or top edge as it is dragged.
       const rr = svg.getBoundingClientRect();
       const sc = Math.min(rr.width / gesture.vb.w, rr.height / gesture.vb.h) || 1;
       const d = { X: Math.round((e.clientX - gesture.sx) / sc / g2) * g2, Y: Math.round((e.clientY - gesture.sy) / sc / g2) * g2 };
@@ -3008,7 +2886,6 @@ function mount(sec     , host     ) {
       const one = gesture.single;
       const m = gesture.members;
       if (one?.type === 'item' && m.items.length === 1 && !m.shapes.length) {
-        // One item: it snaps to the grid, and an outlet or switch onto a wall.
         const x = m.items[0];
         if (isSized(x.it)) fitToWall(x.it, { X: x.X + dx, Y: x.Y + dy }, p);
         else placeOnWall(x.it, onWall(x.it.Kind, gridSnapped({ X: x.X + dx, Y: x.Y + dy }), p));
@@ -3020,7 +2897,6 @@ function mount(sec     , host     ) {
         x.o.X = planRound(q.X); x.o.Y = planRound(q.Y);
         if (wall) x.o.Angle = Math.round(wall.angle * 10) / 10;
       } else {
-        // A room slides into place against its neighbour: its first corner snaps and everything follows.
         const lead = m.shapes[0];
         if (lead) {
           const first = lead.pts[0];
@@ -3031,7 +2907,6 @@ function mount(sec     , host     ) {
         const box = boundsOf(m);
         if (box) { dx = Math.max(-box.x, Math.min(w - box.x - box.w, dx)); dy = Math.max(-box.y, Math.min(h - box.y - box.h, dy)); }
         shift(m, dx, dy);
-        // Moved, a room leaves the rooms it only touched; those joined to it by a constraint come along.
         if (m.shapes.length || m.walls.length) {
           gesture.before = null;
           const moved = [...m.shapes.map((x     ) => x.sh), ...m.walls.map((x     ) => shapeById(x.r.Id))];
@@ -3092,13 +2967,11 @@ function mount(sec     , host     ) {
       if (r) {
         const pts = ensure(r, 'Points', []);
         if (k === 'runinsert') {
-          // Bends are stored between the ends; a midpoint before the first bend inserts at the front.
           const at = Math.max(0, Math.min(pts.length, gesture.index - (r.From ? 1 : 0) + 1));
           pts.splice(at, 0, drawSnap(null, p));
           if (selection .type === 'wall') planRefsAfterInsert(constraintsNow(), r.Id, at);
           gesture.kind = 'runpt'; gesture.index = at;
         } else pts[gesture.index] = drawSnap(null, p);
-        // A wall's point is a corner the constraints hold, as a room's is.
         if (selection .type === 'wall') solve([`${r.Id}#${gesture.index}`], [r.Id], !!e.shiftKey);
       }
     }
@@ -3142,7 +3015,6 @@ function mount(sec     , host     ) {
       if (s) s.Shape = planClamp(s.Shape, w, h);
     }
     if (g.kind === 'group') {
-      // Where an item lands is where it is: a room, an outdoor zone, or outdoors on this floor.
       const moved        = g.members.items.map((x     ) => x.it);
       const lone = moved.length === 1 && !g.members.shapes.length;
       let said = '';
@@ -3158,14 +3030,12 @@ function mount(sec     , host     ) {
     if (g.pushed) changed();
     render();
   };
-  // A middle-button drag pans; the browser's own middle-click autoscroll would fight it.
   svg.addEventListener('mousedown', (e     ) => { if (e.button === 1) e.preventDefault(); });
   svg.addEventListener('auxclick', (e     ) => { if (e.button === 1) e.preventDefault(); });
   svg.addEventListener('pointerup', endPointer);
   svg.addEventListener('pointercancel', (e     ) => { pointers.delete(e.pointerId); gesture = null; pinch = null; marquee = null; dragging = false; rectStart = null; rectEnd = null; drawPlan(); });
   svg.addEventListener('pointerleave', () => { if (hover) { hover = null; drawPlan(); } });
   svg.addEventListener('dblclick', (e     ) => {
-    // Double-clicking a moved name puts it back where the room would put it.
     const id = mode === 'edit' && tool === 'select' ? labelOf(e) : '';
     const room = id && roomsNow().find(r => r.Id === id);
     if (room && room.LabelX != null && !room.Locked) { act(() => { delete room.LabelX; delete room.LabelY; }); return; }
@@ -3175,10 +3045,7 @@ function mount(sec     , host     ) {
 
   const closeMenu = () => fpMenu.close();
   const openMenu = (e     , entries         ) => fpMenu.open(e, entries);
-  /// What a right-click offers, by what it landed on.
-  /// A menu choice that edits: it turns Edit on first, so nothing in the menu is dead while viewing.
   const onEdit = (fn            ) => { const run = () => { if (mode !== 'edit') { mode = 'edit'; tool = 'select'; } fn(); }; editOnly.add(run); return run; };
-  /// What changes the floor: left out of the menu while viewing, which offers only looking and Edit this floor.
   const editOnly = new WeakSet            ();
   const menuFor = (hit     , p    )          => {
     const editing = mode === 'edit';
@@ -3289,7 +3156,6 @@ function mount(sec     , host     ) {
   });
   stage.addEventListener('pointerdown', (e     ) => { if (!menu.hidden && !menu.contains?.(e.target)) closeMenu(); }, true);
   svg.addEventListener('wheel', (e     ) => {
-    // The wheel zooms about the pointer; with Shift it pans instead.
     e.preventDefault();
     const dy = (Number(e.deltaY) || 0) * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
     if (e.shiftKey) {
@@ -3306,9 +3172,12 @@ function mount(sec     , host     ) {
   /// A tap, by tool.
   const tap = (g     , p    ) => {
     const hit = g.hit;
-    // A corner or a wire bend: tapped once it is selected, tapped twice (or double-clicked) it is removed.
+    if (gangPick && mode === 'edit') {
+      const sw = itemOf(gangPick.sw), it = hit.item ? itemOf(hit.item) : null;
+      if (sw && switchable(it)) { toggleControl(sw, gangPick.n, it.Id); return; }
+      if (!hit.item || hit.item !== gangPick.sw) gangPick = null;
+    }
     if (mode === 'edit' && tool === 'select' && hit.mid != null) {
-      // Double-tapping a wall's middle puts a corner there; a single tap does nothing but keep the room selected.
       const key = `${selection?.type}:${selection?.id}:m${hit.mid}`;
       const now = Date.now();
       const twice = !!lastTap && lastTap.key === key && now - lastTap.at < 450;
@@ -3420,7 +3289,6 @@ function mount(sec     , host     ) {
     }
   };
 
-  /// The empty space enclosed by rooms around a point, as an outline: tapping it with the Room tool makes it a room.
   const gapAt = (p    )              => {
     const rooms = roomsNow().filter(r => (r.Shape || []).length >= 3);
     if (planShapeAt(rooms, p)) return null;
@@ -3429,7 +3297,6 @@ function mount(sec     , host     ) {
     return gaps[0]?.shape || null;
   };
 
-  /// A room grown over a drawn rectangle: the space is cut out of the rooms it covered, and what stood there moves in.
   const claimSpace = (id        , rect      ) => {
     const keep = roomsNow().find(r => r.Id === id);
     claimFor = ''; tool = 'select';
@@ -3472,7 +3339,6 @@ function mount(sec     , host     ) {
     });
   };
 
-  /// A drawn outline becomes the selected room or area when it has none yet, and a new one otherwise.
   const finishOutline = (poly      ) => {
     const { w, h } = floorSize();
     const shape = planClamp(poly, w, h);
@@ -3504,19 +3370,16 @@ function mount(sec     , host     ) {
     setTimeout(() => (side.querySelector?.('.fp-name')       )?.focus?.(), 0);
   };
 
-  /// A standalone wall from the points tapped, selected so its thickness can be set.
   const finishWall = (pts      ) => {
     draft = []; hover = null;
     const clean = pts.filter((q, i) => i === 0 || Math.hypot(q.X - pts[i - 1].X, q.Y - pts[i - 1].Y) > 1e-6);
     if (clean.length < 2) { render(); return; }
     tool = 'select';
-    // Drawn right across a room, wall to wall, it splits the room in two instead of standing in it.
     const cuts = roomsNow().filter(r => (r.Shape || []).length >= 3 && !r.Locked).map(r => ({ r, parts: planSplit(r.Shape, clean) })).filter(x => x.parts.length > 1);
     if (cuts.length) return splitRooms(cuts);
     const id = freshIn(wallsNow(), 'wall');
     act(() => { wallsNow().push({ Id: id, Points: clean.map(q => ({ X: planRound(q.X), Y: planRound(q.Y) })), Thickness: 0 }); selection = { type: 'wall', id }; });
   };
-  /// A wall already standing across a room, drawn before walls split rooms, can still split it.
   const wallSplits = (id        ) => {
     const w = standaloneOf(id);
     const pts       = w?.Points || [];
@@ -3527,8 +3390,6 @@ function mount(sec     , host     ) {
     if (!cuts.length) return;
     splitRooms(cuts, id);
   };
-  /// Each room cut keeps its name and the largest piece; the others become new rooms beside it, taking what stands
-  /// in them, and the areas and breakers that took in the room take them in too.
   const splitRooms = (cuts                             , wall = '') => {
     act(() => {
       const w = wall ? standaloneOf(wall) : null;
@@ -3565,7 +3426,6 @@ function mount(sec     , host     ) {
     toast(cuts.length === 1 ? `Split ${cuts[0].r.Name || cuts[0].r.Id} in two.` : `Split ${cuts.length} rooms.`, true);
   };
 
-  /// A wire drawn between two items, or out to a bare point. Its circuit comes from whichever end knows one.
   const finishWire = (to        ) => {
     const d = wireDraft;
     wireDraft = null; hover = null;
@@ -3573,7 +3433,6 @@ function mount(sec     , host     ) {
     const pathLen = (d.from ? 1 : 0) + d.pts.length + (to ? 1 : 0);
     if (pathLen < 2) { render(); return; }
     const from = d.from ? itemOf(d.from) : null, end = to ? itemOf(to) : null;
-    // A cable between network gear is a network cable, whatever the wire kind picked.
     const ends = [from, end].filter(Boolean);
     const kind = ends.length && ends.every(isNet) ? 'network' : wireKind;
     const circuit = kind === 'circuit' ? from?.Circuit || end?.Circuit || '' : '';
@@ -3581,9 +3440,7 @@ function mount(sec     , host     ) {
     let adopted = '', patched = '';
     act(() => {
       runsIn().push({ Id: id, Kind: kind, Floor: floorNow() .floor.Id, Circuit: circuit, From: d.from, To: to, Points: d.pts, Label: '' });
-      // Wiring an item to one on a known circuit puts it on that circuit — said, and undoable.
       if (circuit) [from, end].forEach(it => { if (it && !it.Circuit && !PLAN_SUPPLY_KINDS.includes(it.Kind) && !isNet(it)) { it.Circuit = circuit; adopted = itemName(it); } });
-      // Cabling a jack on no port to a patch panel or switch puts it on that device's first free port.
       const jack = ends.find((x     ) => x.Kind === 'jack' && !parsePort(x.Port)?.dev), dev = ends.find(isPorted);
       const n = kind === 'network' && jack && dev ? freePort(dev) : 0;
       if (n) { jack.Port = `${dev.Id}/${n}`; patched = `${itemName(jack)} is on ${portText(jack.Port)}, ${portName(dev, n)}`; }
@@ -3616,7 +3473,6 @@ function mount(sec     , host     ) {
     subBar.innerHTML = '';
     viewBody.innerHTML = '';
     const editing = mode === 'edit';
-    // Viewing, what the plan shows sits in a row over it; editing, it folds into the bar's View menu.
     const into = editing ? viewBody : subBar;
     Object.entries(modeBtns).forEach(([m, b]) => { b.classList.toggle('is-on', m === mode); b.setAttribute('aria-selected', String(m === mode)); });
     if (!editing) {
@@ -3647,7 +3503,6 @@ function mount(sec     , host     ) {
       subBar.appendChild(check('Sizes', showSizes, v => { showSizes = v; remember('sizes', v ? '1' : '0'); drawPlan(); }, 'Show every wall’s length and each room’s floor area.'));
     }
 
-    // Edit's own bar: the mode, Snap, the panel, and undo and redo.
     sec.classList.toggle('is-full', editing);
     sec.classList.toggle('is-side-hidden', editing && sideHidden);
     FP_LAYERS.forEach(([l]) => { layerBtns[l].classList.toggle('is-on', l === layer); layerBtns[l].setAttribute('aria-selected', String(l === layer)); });
@@ -3658,14 +3513,12 @@ function mount(sec     , host     ) {
     edSide.setAttribute('aria-pressed', String(!sideHidden));
     edUndo.disabled = !history.canUndo();
     edRedo.disabled = !history.canRedo();
-    // The rail holds this mode's tools in their groups; the others wait, hidden, for their mode.
     const groups = FP_LAYERS.find(l => l[0] === layer) [2];
     const onRail = new Set        (groups.flat());
     groups.forEach((g, gi) => g.forEach((t, ti) => { const b = toolBtns[t]; b.hidden = false; b.classList.toggle('is-gap', gi > 0 && ti === 0); palette.appendChild(b); }));
     FP_TOOLS.forEach(([t]) => { if (!onRail.has(t)) { toolBtns[t].hidden = true; toolBtns[t].classList.remove('is-gap'); palette.appendChild(toolBtns[t]); } });
 
     palette.hidden = mode !== 'edit';
-    // What changes the floor shows only while editing; what takes it away only while viewing.
     [addBtn, floorBtn, bgBtn, toolsBtn].forEach(b => b.classList.toggle('fp-off', mode !== 'edit'));
     [exportBtn, printBtn].forEach(b => b.classList.toggle('fp-off', mode === 'edit'));
     body.classList.toggle('is-editing', mode === 'edit');
@@ -3677,7 +3530,6 @@ function mount(sec     , host     ) {
     opts.innerHTML = '';
     opts.hidden = mode !== 'edit';
     if (mode === 'edit') drawOpts();
-    // In Edit the options bar says what the tool does, so nothing sits over the plan being drawn on.
     const what = FP_TOOL_IN[`${tool}:${layer}`] || FP_TOOLS.find(t => t[0] === tool)?.[3] || '';
     if (mode === 'edit' && what && !opts.querySelector('.fp-opts-note')) opts.appendChild(el('span', { class: 'fp-opts-note', text: what }));
     const how = mode === 'view' ? 'Tap a room or item for its detail. Drag to pan, pinch or Ctrl+wheel to zoom.' : '';
@@ -3739,7 +3591,6 @@ function mount(sec     , host     ) {
           grid.appendChild(b);
         });
       });
-      // Appliances and equipment at their real size: dropped by a wall, they stand with their back to it.
       if (layer === 'interior') grid.appendChild(el('span', { class: 'fp-kinds-group', text: 'At real size' }));
       if (layer === 'interior') PLAN_FOOTPRINTS.forEach(([key, label, kind, w, d, round]) => {
         const size = sys() === 'imperial' ? `${w}″ × ${d}″` : `${Math.round(w * 2.54)} × ${Math.round(d * 2.54)} cm`;
@@ -3899,7 +3750,6 @@ function mount(sec     , host     ) {
     return b;
   };
 
-  /// Every circuit serving a place: breakers that say they serve it, and the circuits of what is placed or metered in it.
   const circuitsFor = (placeId        ) => {
     if (!live) return []             ;
     const inPlace = (loc               ) => !!loc && (loc === placeId || areaTakesIn(placeId, loc));
@@ -3920,13 +3770,10 @@ function mount(sec     , host     ) {
     b.onclick = () => openCircuit(c);
     return b;
   };
-  /// The nodes that are panels or circuits — measuring a breaker, not a single thing plugged in.
   const circuitNodes = () => new Set        ([
     ...(live?.circuits || []).flatMap(c => [c.node, ...c.channels]).filter(Boolean)            ,
     ...ensure(flowIn(), 'Panels', []).map((p     ) => p.Node).filter(Boolean),
   ]);
-  /// Breakers to pick a circuit from, grouped by panel. A branch circuit is never an unused slot, nor a breaker feeding a
-  /// subpanel; those feeders are what a placed panel is fed from.
   const circuitChoices = (feeders         , current = '')           => {
     const panelNodes = new Set(ensure(flowIn(), 'Panels', []).map((p     ) => p.Node).filter(Boolean));
     const list = (live?.circuits || []).filter(c => c.state !== 'unused' && (feeders || !(c.node && panelNodes.has(c.node))));
@@ -3937,7 +3784,6 @@ function mount(sec     , host     ) {
     if (current && !out.some(c => c.value === current)) out.splice(1, 0, { value: current, label: `${current} (not a branch circuit in any panel)` });
     return out;
   };
-  /// What can meter a single item: a smart plug, a PDU outlet, a sensor — never a panel, a breaker's channel, or a supply.
   const meterChoices = (current = '')           => {
     const skip = circuitNodes();
     const kinds                         = { outlet: 'PDU outlets', load: 'Loads', node: 'Other nodes', pdu: 'PDUs', device: 'Devices' };
@@ -3949,8 +3795,6 @@ function mount(sec     , host     ) {
     return out;
   };
 
-  /// On a phone, what is selected in Edit opens in a sheet over the foot of the plan, so the plan stays in sight:
-  /// a peek at first, all of it on a tap of its grip.
   let sheetFull = false;
   const narrow = () => !!window.matchMedia?.('(max-width: 560px)').matches;
   const asSheet = () => mode === 'edit' && !!selection && narrow();
@@ -4023,7 +3867,6 @@ function mount(sec     , host     ) {
         () => { selection = { type: 'item', id: it.Id }; render(); })));
       side.appendChild(ol);
     }
-    // The network on this floor: its jacks, and which are on no port yet.
     const jacks = itemsNow().filter((it     ) => it.Kind === 'jack');
     if (jacks.length || itemsNow().some(isPorted)) {
       side.appendChild(el('h4', { text: 'Network' }));
@@ -4055,8 +3898,6 @@ function mount(sec     , host     ) {
     return c.Kind;
   };
 
-  /// Square up: straightens a nearly square room, once. Nothing is stored; dragging it after keeps its level and plumb
-  /// walls anyway (#601).
   const squareUp = (sh     ) => {
     const poly       = sh.Shape;
     const n = poly.length;
@@ -4090,7 +3931,6 @@ function mount(sec     , host     ) {
     const poly       = s.Shape || [];
     const held = !!s.Locked;
     if (editing) {
-      // Locked, it cannot be moved, reshaped or deleted; the solver holds it still.
       const lock = el('button', { class: 'small fp-lock' + (held ? ' is-on' : ''), type: 'button', title: held ? 'Unlock it, so it can be changed again.' : 'Lock it in place.' }, fpToolIcon('lock'), held ? ' Locked' : ' Lock');
       lock.setAttribute('aria-pressed', String(held));
       lock.onclick = () => act(() => { if (s.Locked) delete s.Locked; else s.Locked = true; });
@@ -4101,7 +3941,6 @@ function mount(sec     , host     ) {
       grow.onclick = () => { pickTool('room'); claimFor = s.Id; render(); };
       side.appendChild(actions(lock, ...(sq ? [sq] : []), grow));
     }
-    /// A length typed for a wall keeps any length it is fixed at in step, then the rest of the plan follows.
     const settle = () => {
       const n = s.Shape.length;
       constraintsNow().forEach(c => {
@@ -4114,11 +3953,9 @@ function mount(sec     , host     ) {
     const lengthFix = (edge        ) => constraintsNow().find(c => c.Kind === 'length' && c.Refs[0]?.Room === s.Id && c.Refs[0].Edge === edge);
     if (poly.length >= 3) {
       side.appendChild(el('h4', { text: 'Size' }));
-      // Sizes read inside the walls when the floor gives them a thickness.
       const inner = type === 'room' ? insideOf(s) : poly;
       side.appendChild(row('Floor area', areaText(inner)));
       if (editing && type === 'room' && planIsBox(poly)) {
-        // A rectangle is sized by its inside measurements; its top-left corner stays put.
         const b = planBounds(poly), ib = planBounds(inner);
         const setBox = (w        , h        ) => { if (held || (s.LockedWalls || []).length) { saidLocked(); render(); return; } act(() => { s.Shape = planClamp(planRect({ X: b.x, Y: b.y }, { X: b.x + w + (b.w - ib.w), Y: b.y + h + (b.h - ib.h) }), floorSize().w, floorSize().h); settle(); }); };
         const wi = lenInput(ib.w, w => setBox(w, ib.h)), di = lenInput(ib.h, h => setBox(ib.w, h));
@@ -4134,7 +3971,6 @@ function mount(sec     , host     ) {
         const inL = inner === poly ? L : Math.hypot(ibp.X - ia.X, ibp.Y - ia.Y);
         const wallLocked = (s.LockedWalls || []).includes(i);
         if (!editing) { walls.appendChild(row(`Wall ${i + 1}`, len(inL) + (wallLocked ? ' · locked' : '') + (lengthFix(i) ? ' · fixed' : ''))); return; }
-        // Typing a wall's length moves the corner at its far end along the wall.
         const inp = lenInput(inL, wantIn => {
           if (held || cornerLocked(s, (i + 1) % poly.length)) { saidLocked(); render(); return; }
           const want = wantIn + (L - inL);
@@ -4168,7 +4004,6 @@ function mount(sec     , host     ) {
       side.appendChild(el('div', { class: 'fp-two' },
         field('Kind', select([['room', 'Room'], ['outdoor', 'Outdoor zone']], s.Outdoor ? 'outdoor' : 'room', v => act(() => { s.Outdoor = v === 'outdoor'; if (s.Outdoor && !s.Surface) s.Surface = 'grass'; }))),
         field('Surface', select(PLAN_SURFACES, s.Surface || '', v => act(() => { s.Surface = v; })))));
-      // The surface's own colour, or one chosen for it: the carpet, the tile, the paint.
       const colour = el('input', { type: 'color', class: 'fp-colour', value: s.SurfaceColor || (PLAN_SURFACE_COLOURS[s.Surface || ''] || ['#c8c8c8'])[0] })                    ;
       colour.title = 'The colour of its surface';
       colour.oninput = () => { s.SurfaceColor = colour.value; drawPlan(); };
@@ -4231,7 +4066,6 @@ function mount(sec     , host     ) {
     metered.forEach(n => il.appendChild(listRow(n.label, fmt(n.value), null)));
     side.appendChild(il.children.length ? il : el('div', { class: 'desc', text: 'Nothing placed or metered here yet.' }));
 
-    // What it has been drawing: the same rollup at every moment in history.
     const trend = el('div', { class: 'fp-trend' });
     const trendBtn = btn('Show the last 24 hours');
     trendBtn.onclick = async () => {
@@ -4275,7 +4109,6 @@ function mount(sec     , host     ) {
   /// Selects an item, on its own floor.
   const goTo = (x     ) => { if (x.Floor && x.Floor !== floorNow()?.floor.Id) { floorId = x.Floor; viewFor = ''; } selection = { type: 'item', id: x.Id }; extra = []; render(); };
 
-  /// A jack, patch panel or switch: its port, or its ports, and the cables to it.
   const drawNet = (it     , editing         ) => {
     const jack = it.Kind === 'jack';
     side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: jack ? jackLabel(it) || itemName(it) : devName(it) }), el('span', { class: 'fp-pill', text: kindName(it.Kind) })));
@@ -4315,7 +4148,6 @@ function mount(sec     , host     ) {
         side.appendChild(field('Ports', ports));
       }
       side.appendChild(row('In use', `${usedPorts(it)} of ${count} ports`));
-      // Port by port: the jack on it and where that is, and the switch port its cord goes to — or, on a switch, what is patched to it.
       side.appendChild(el('h4', { text: 'Ports' }));
       const list = el('div', { class: 'fp-list fp-ports' });
       const top = Math.max(count, ...jacksOnDev(it).map((j     ) => parsePort(j.Port) .n), ...(it.Patches || []).map((x     ) => Number(x.Port) || 0));
@@ -4381,6 +4213,58 @@ function mount(sec     , host     ) {
     if (btns.length) side.appendChild(actions(...btns));
   };
 
+  const goToItem = (x     ) => { if (x.Floor && x.Floor !== floorNow()?.floor.Id) { floorId = x.Floor; viewFor = ''; } selection = { type: 'item', id: x.Id }; extra = []; gangPick = null; render(); };
+
+  const drawGangs = (it     , editing         ) => {
+    const gangs = gangsOf(it);
+    if (gangPick && (gangPick.sw !== it.Id || gangPick.n >= gangs.length || !editing)) gangPick = null;
+    side.appendChild(el('h4', { text: gangs.length > 1 ? 'Gangs' : 'Controls' }));
+    if (editing) {
+      const count = el('input', { type: 'number', class: 'fp-deg', value: String(gangs.length), min: '1', max: '6', step: '1' })                    ;
+      count.onchange = () => {
+        const n = Math.round(Number(count.value));
+        if (!(n >= 1 && n <= 6)) { count.classList.add('is-bad'); return; }
+        act(() => { const list = gangsEdit(it); while (list.length < n) list.push({ Label: '', Controls: [] }); list.length = n; });
+      };
+      side.appendChild(field('Gangs', count));
+    }
+    gangs.forEach((g     , n        ) => {
+      const ctl = (g.Controls || []).map((id        ) => itemOf(id)).filter(Boolean);
+      const head = gangs.length > 1 ? `${n + 1}${g.Label ? ' · ' + g.Label : ''}` : g.Label || '';
+      if (!editing) {
+        const what = g.Dead ? 'nothing' : ctl.length ? ctl.map((x     ) => itemName(x)).join(', ') : 'not set';
+        side.appendChild(row(head || 'Switches', what, g.Dead ? 'is-muted' : ''));
+        return;
+      }
+      const box = el('div', { class: 'fp-gang' + (gangPick?.n === n ? ' is-picking' : '') });
+      if (gangs.length > 1) box.appendChild(el('div', { class: 'fp-gang-head', text: `Gang ${n + 1}` }));
+      const lbl = el('input', { type: 'text', class: 'fp-name', value: g.Label || '', placeholder: 'Label' })                    ;
+      lbl.onchange = () => act(() => { const x = gangsEdit(it)[n]; x.Label = lbl.value.trim(); });
+      box.appendChild(lbl);
+      if (ctl.length) {
+        const list = el('div', { class: 'fp-list' });
+        ctl.forEach((x     ) => {
+          const r = listRow(itemName(x), x.Room ? nameOfPlace(x.Room) : 'Outdoors', null);
+          const rm = btn('×');
+          rm.title = 'Remove';
+          rm.onclick = () => toggleControl(it, n, x.Id);
+          r.appendChild(rm);
+          list.appendChild(r);
+        });
+        box.appendChild(list);
+      }
+      const choices           = [{ value: '', label: '— add —' }, ...itemsNow().filter((x     ) => switchable(x) && !(g.Controls || []).includes(x.Id))
+        .map((x     ) => ({ value: x.Id, label: itemName(x), group: x.Room ? nameOfPlace(x.Room) : 'Outdoors' }))];
+      if (!g.Dead) box.appendChild(field('Add', searchSelect(choices, '', (v        ) => { if (v) toggleControl(it, n, v); }, { placeholder: 'Search items…' })));
+      const picking = gangPick?.sw === it.Id && gangPick.n === n;
+      const pick = btn(picking ? 'Done' : 'Pick on plan', picking ? 'primary' : '');
+      pick.onclick = () => { gangPick = picking ? null : { sw: it.Id, n }; render(); };
+      const dead = check('Controls nothing', !!g.Dead, v => act(() => { const x = gangsEdit(it)[n]; if (v) { x.Dead = true; x.Controls = []; } else delete x.Dead; }));
+      box.appendChild(el('div', { class: 'fp-colour-row' }, ...(g.Dead ? [] : [pick]), dead));
+      side.appendChild(box);
+    });
+  };
+
   const drawItem = (it     , editing         ) => {
     if (!it) { selection = null; return drawSide(); }
     if (isNet(it)) return drawNet(it, editing);
@@ -4409,7 +4293,6 @@ function mount(sec     , host     ) {
         g.onchange = () => act(() => { if (g.checked) it.Gfci = true; else delete it.Gfci; });
         side.appendChild(el('label', { class: 'ld-inst fp-check', title: 'Whatever is wired from its load side is protected by it.' }, g, ' GFCI outlet'));
       }
-      // One or the other: a known circuit is what meters it, and a meter it already had hangs beneath that circuit.
       if (!it.Circuit || supply)
         side.appendChild(field('Metered by', searchSelect(meterChoices(it.Node || ''), it.Node || '', v => { act(() => { it.Node = v; }); placeBeneath(it); }, { placeholder: 'Search meters by name or id…' }),
           'A smart plug, CT, ESPHome sensor, PDU outlet or anything else reading this alone. Pick its circuit instead when it is known.'));
@@ -4418,7 +4301,6 @@ function mount(sec     , host     ) {
         detach.onclick = () => act(() => { it.Node = ''; });
         side.appendChild(field('Metered by', el('div', { class: 'fp-colour-row' }, el('span', { text: nodeLabel(it.Node) }), detach), 'Beneath its circuit in the energy flow.'));
       }
-      // Its real size: width and depth, which way it is turned, and whether it is round.
       const inch = 0.0254 * scale();
       const looks = select([['', isSized(it) ? '— its own size —' : '— an icon —'], ...PLAN_FOOTPRINTS.map(f => [f[0], f[1]]                    )], '', v => {
         const fp = PLAN_FOOTPRINTS.find(f => f[0] === v);
@@ -4464,7 +4346,6 @@ function mount(sec     , host     ) {
       side.appendChild(el('div', { class: 'desc', text: `${on.length} item${on.length === 1 ? '' : 's'} and ${runsIn().filter((r     ) => r.Circuit === c.ref).length} wire${runsIn().filter((r     ) => r.Circuit === c.ref).length === 1 ? '' : 's'} on this circuit${floors.size > 1 ? `, across ${floors.size} floors` : ''} — highlighted on the plan.` }));
     }
 
-    // A GFCI protects what is wired from its load side; anything downstream of one says which.
     if (it.Gfci) {
       const ds = planDownstream(runsIn(), it.Id);
       side.appendChild(el('h4', { text: 'Protects' }));
@@ -4483,6 +4364,17 @@ function mount(sec     , host     ) {
         side.appendChild(el('h4', { text: 'Protected by' }));
         side.appendChild(listRow(`GFCI ${itemName(g)}`, g.Room ? nameOfPlace(g.Room) : 'Outdoors', () => { if (g.Floor && g.Floor !== floorNow()?.floor.Id) { floorId = g.Floor; viewFor = ''; } selection = { type: 'item', id: g.Id }; extra = []; render(); }));
         side.appendChild(el('div', { class: 'desc', text: 'If this outlet is dead, check that GFCI for a trip before the breaker.' }));
+      }
+    }
+
+    if (it.Kind === 'switch') drawGangs(it, editing);
+    else {
+      const by = switchedBy(it.Id);
+      if (by.length) {
+        side.appendChild(el('h4', { text: 'Switched by' }));
+        const sl = el('div', { class: 'fp-list' });
+        by.forEach((x     ) => sl.appendChild(listRow(gangName(x.sw, x.n), x.sw.Room ? nameOfPlace(x.sw.Room) : 'Outdoors', () => goToItem(x.sw))));
+        side.appendChild(sl);
       }
     }
 
@@ -4557,7 +4449,6 @@ function mount(sec     , host     ) {
     side.appendChild(row(net ? 'From' : 'Supply side', from ? endName(from) : 'a loose end'));
     side.appendChild(row(net ? 'To' : 'Load side', to ? endName(to) : 'a loose end'));
     side.appendChild(row('Length on the plan', len(planPathLength(runPath(r)))));
-    // A cable to a jack says the port the jack is on, and the switch port beyond it.
     const jackEnd = [from, to].find((x     ) => x?.Kind === 'jack');
     if (net && jackEnd) side.appendChild(row('Port', jackEnd.Port ? portText(jackEnd.Port) + (switchPortOf(jackEnd) && switchPortOf(jackEnd) !== jackEnd.Port ? ` → ${portText(switchPortOf(jackEnd))}` : '') : 'the jack is on no port'));
     if (editing) {
@@ -4566,7 +4457,6 @@ function mount(sec     , host     ) {
       side.append(field('Kind', select([['circuit', 'Branch circuit'], ['feeder', 'Feeder'], ['service', 'Utility service'], ['network', 'Network cable']], r.Kind || 'circuit', v => act(() => { r.Kind = v; if (v === 'network') r.Circuit = ''; }))));
       if (!net) side.append(field('Circuit', searchSelect(circuitChoices(r.Kind === 'feeder', r.Circuit || ''), r.Circuit || '', v => act(() => {
           r.Circuit = v;
-          // Both ends of a branch circuit are on it, unless one says otherwise already.
           [from, to].forEach(it => { if (v && it && !it.Circuit && !PLAN_SUPPLY_KINDS.includes(it.Kind)) it.Circuit = v; });
         }), { placeholder: 'Search circuits…' }), 'Setting it also puts either end with no circuit of its own on this one.'));
       side.append(field('Note', note));
@@ -4601,7 +4491,6 @@ function mount(sec     , host     ) {
     side.appendChild(el('div', { class: 'desc', text: 'Drag an end or bend to move it, a small dot to add a bend; double-click a point to remove it.' }));
   };
 
-  /// A copy of the selection beside it, selected: an item, a door or window, or a room with nothing in it.
   const duplicate = () => {
     if (!selection) return;
     const off = snapStep() * 4;
@@ -4612,7 +4501,7 @@ function mount(sec     , host     ) {
       const id = freshIn(itemsIn(), String(it.Kind || 'item').replace(/-/g, '_'));
       // A copy is not on its original's port, nor patched like it.
       const net = it.Kind === 'jack' ? { Port: '', Label: '' } : {};
-      act(() => { const copy = { ...JSON.parse(JSON.stringify(it)), ...net, Id: id, X: planRound(it.X + off), Y: planRound(it.Y + off), Node: '' }; delete copy.Patches; itemsIn().push(copy); selection = { type: 'item', id }; });
+      act(() => { const copy = { ...JSON.parse(JSON.stringify(it)), ...net, Id: id, X: planRound(it.X + off), Y: planRound(it.Y + off), Node: '' }; delete copy.Patches; (copy.Gangs || []).forEach((g     ) => { g.Controls = []; delete g.Dead; }); itemsIn().push(copy); selection = { type: 'item', id }; });
     } else if (sel.type === 'opening') {
       const o = openingOf(sel.id);
       if (!o) return;
@@ -4630,7 +4519,6 @@ function mount(sec     , host     ) {
     }
   };
 
-  /// Take out the selected corner of a room or area; an outline keeps at least three.
   const removeCorner = () => {
     const sh = extra.length ? null : shapeOf(selection);
     if (!sh || selectedCorner < 0 || selectedCorner >= (sh.Shape || []).length) return false;
@@ -4645,7 +4533,6 @@ function mount(sec     , host     ) {
     });
     return true;
   };
-  /// A corner in the middle of a wall, so the wall can bend there.
   const insertCorner = (edge        ) => {
     const sh = extra.length ? null : shapeOf(selection);
     if (!sh) return;
@@ -4658,7 +4545,6 @@ function mount(sec     , host     ) {
       selectedCorner = i + 1;
     });
   };
-  /// Take out the selected bend of a wire; its path joins straight across.
   const removeBend = () => {
     const r = lineSel();
     if (!r || selectedBend < 0 || selectedBend >= (r.Points || []).length) return false;
@@ -4668,9 +4554,6 @@ function mount(sec     , host     ) {
     return true;
   };
 
-  /// Remove everything selected in one undoable step. A room's items stay, outdoors; a wire to a removed item keeps its path.
-  /// Rooms that meet along a wall, made one: the first picked keeps its name, and everything in or served by the
-  /// others comes with it.
   const roomsPicked = () => selected().filter(x => x.type === 'room').map(x => shapeOf(x)).filter(Boolean);
   const mergeRooms = () => {
     const rooms = roomsPicked();
@@ -4698,7 +4581,6 @@ function mount(sec     , host     ) {
       merged.forEach(r => roomsNow().splice(roomsNow().indexOf(r), 1));
       itemsIn().forEach((it     ) => { if (ids.has(it.Room)) it.Room = keep.Id; });
       areasNow().forEach(ar => { if ((ar.Rooms || []).some((id        ) => ids.has(id))) ar.Rooms = [...new Set((ar.Rooms            ).map(id => ids.has(id) ? keep.Id : id))]; });
-      // Breakers that serve a merged room, and nodes placed in one, now name the room it became.
       const walk = (o     ) => {
         if (!o || typeof o !== 'object') return;
         const loc = o.Ext?.locations;
@@ -4729,12 +4611,12 @@ function mount(sec     , host     ) {
           const it = itemOf(x.id);
           if (!it) return;
           itemsIn().splice(itemsIn().indexOf(it), 1);
-          // Jacks on a patch panel or switch that is gone are on no port, and cords to a switch that is gone are unplugged.
           if (isPorted(it)) {
             itemsIn().forEach((j     ) => { if (j.Kind === 'jack' && parsePort(j.Port)?.id === it.Id) j.Port = ''; });
             portedAll().forEach((pp     ) => { if (pp.Patches) { pp.Patches = pp.Patches.filter((x     ) => parsePort(x.Switch)?.id !== it.Id); if (!pp.Patches.length) delete pp.Patches; } });
           }
           runsIn().forEach((r     ) => { if (r.From === it.Id) { ensure(r, 'Points', []).unshift({ X: it.X, Y: it.Y }); r.From = ''; } if (r.To === it.Id) { ensure(r, 'Points', []).push({ X: it.X, Y: it.Y }); r.To = ''; } });
+          itemsIn().forEach((sw     ) => (sw.Gangs || []).forEach((g     ) => { if (g.Controls) g.Controls = g.Controls.filter((id        ) => id !== it.Id); }));
         } else if (x.type === 'opening') { const o = openingOf(x.id); if (o) openingsNow().splice(openingsNow().indexOf(o), 1); }
         else if (x.type === 'run') { const r = runOf(x.id); if (r) runsIn().splice(runsIn().indexOf(r), 1); }
         else if (x.type === 'wall') { const w = standaloneOf(x.id); if (w) { setConstraints(planRefsWithout(constraintsNow(), w.Id)); wallsNow().splice(wallsNow().indexOf(w), 1); } }
@@ -4752,7 +4634,6 @@ function mount(sec     , host     ) {
     if (all.length > 1 || rooms.length) toast(`Deleted${all.length > 1 ? ` ${all.length} things` : ''}. Ctrl+Z brings ${all.length > 1 ? 'them' : 'it'} back.`, true);
   };
 
-  /// What a selection of several things says: how many of each, and what can be done to them all at once.
   const drawMany = (editing         ) => {
     const all = selected();
     const count = (t         ) => all.filter(x => x.type === t).length;
@@ -4787,7 +4668,6 @@ function mount(sec     , host     ) {
     side.appendChild(actions(...btns));
   };
 
-  /// A metered device on a known circuit belongs beneath that circuit in the energy flow, so it is moved there.
   const placeBeneath = (it     ) => {
     const c = it.Circuit ? circuitOf(it.Circuit) : null;
     if (!it.Node || !c?.node || it.Node === c.node) return;
@@ -4826,7 +4706,6 @@ function mount(sec     , host     ) {
       const total = [...byFloor.values()].reduce((a, v) => a + v, 0);
       body.appendChild(row('Cable drawn', `${planFmtLen(total, sys())} in ${drawnRuns.length} run${drawnRuns.length > 1 ? 's' : ''}` + (byFloor.size > 1 ? ` (${[...byFloor].map(([n, m]) => `${n} ${planFmtLen(m, sys())}`).join(', ')})` : '')));
     }
-    // From a breaker, everything placed on its circuit, across rooms and floors.
     body.appendChild(el('h4', { text: 'Placed on it' }));
     const placed = itemsIn().filter((it     ) => it.Circuit === c.ref);
     if (!placed.length) body.appendChild(el('div', { class: 'desc', text: 'Nothing placed on the plan is linked to this circuit yet.' }));
@@ -4838,7 +4717,6 @@ function mount(sec     , host     ) {
       b.onclick = () => { closeSheet(); if (fl) { floorId = fl.floor.Id; viewFor = ''; } selection = { type: 'item', id: it.Id }; render(); };
       body.appendChild(b);
     });
-    // Which rooms and areas the circuit serves: how a room finds the circuits serving it.
     if (breaker) {
       body.appendChild(el('h4', { text: 'Serves' }));
       const box = el('div', { class: 'fp-checks' });
@@ -4865,7 +4743,6 @@ function mount(sec     , host     ) {
     const offer = el('div', { class: 'fp-actions' });
     body.append(tap, held, verdict, offer);
 
-    // The same session the Circuit Finder page runs: the server records, a tap is a timestamp.
     const session = circuitSession({ alive: () => document.body.contains(tap), onChange: () => paint() });
     const offered = (id        ) => ['breaker', 'outlet', 'load', 'node'].includes(session.kinds[id] || 'node');
     const paint = () => {
@@ -4941,8 +4818,6 @@ function mount(sec     , host     ) {
   };
   addBtn.onclick = addSheet;
 
-  /// Rooms drawn apart, a wall's thickness between them, brought together on the middle of each wall; what stands on
-  /// a wall that moves moves with it. Gaps up to half again the wall's thickness are taken as walls.
   const closeGaps = () => {
     const f = floorNow()?.floor;
     if (!f) return;
@@ -4958,7 +4833,6 @@ function mount(sec     , host     ) {
         else if (Math.abs(a.Y - b.Y) < 0.01 && Math.abs(a.X - b.X) > 1) sides.push({ r, i, at: a.Y, lo: Math.min(a.X, b.X), hi: Math.max(a.X, b.X), dir: -sign * Math.sign(b.X - a.X), upright: false });
       });
     });
-    // A locked room stays put: the room across the gap comes all the way to it, and two locked rooms are left be.
     const moves = new Map                ();
     const move = (sd      , to        ) => { if (!moves.has(sd)) moves.set(sd, []); moves.get(sd) .push(to); };
     let held = 0;
@@ -5038,7 +4912,6 @@ function mount(sec     , host     ) {
   };
   floorBtn.onclick = floorSheet;
 
-  /// Put the drawing in the middle of its plot, or size the plot to the drawing with a margin.
   const arrange = (how                  ) => {
     const m = movable(everything());
     const box = boundsOf(m);
@@ -5055,7 +4928,6 @@ function mount(sec     , host     ) {
     });
   };
 
-  /// Upload a plan image for the floor on screen. With nothing drawn yet, the plot takes the image's proportions.
   const uploadImage = async (file      , say                     ) => {
     const fl = floorNow();
     if (!fl) { say('Add a floor first.'); return false; }
@@ -5112,7 +4984,6 @@ function mount(sec     , host     ) {
   };
   bgBtn.onclick = backgroundSheet;
 
-  // Dropping an image anywhere on the plan uploads it for this floor.
   stage.addEventListener('dragover', (e     ) => { if (e.dataTransfer?.types?.includes?.('Files')) { e.preventDefault(); stage.classList.add('is-drop'); } });
   stage.addEventListener('dragleave', () => stage.classList.remove('is-drop'));
   stage.addEventListener('drop', (e     ) => {
@@ -5135,7 +5006,6 @@ function mount(sec     , host     ) {
   const asDataUrl = (b      ) => new Promise        ((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = () => rej(r.error); r.readAsDataURL(b); });
   const imageAsDataUrl = async (id        ) => { try { const r = await fetch(`/api/plans/images/${encodeURIComponent(id)}`); return r.ok ? await asDataUrl(await r.blob()) : null; } catch { return null; } };
   const fileStem = () => String(floorNow()?.floor.Name || floorNow()?.floor.Id || 'floor').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'floor';
-  /// The floor as a standalone SVG: the whole plot, no handles, every colour written out and the image embedded.
   const svgMarkup = async () => {
     const keep = { vb: { ...vb }, selection, extra, cPicks, mode };
     selection = null; extra = []; cPicks = []; mode = 'view';
@@ -5178,7 +5048,6 @@ function mount(sec     , host     ) {
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     canvas.toBlob(b => { if (b) download(b, `${fileStem()}.png`); else toast('Could not draw the picture.', false); }, 'image/png');
   };
-  /// Every floor plan as one file: sites, floors, rooms, items and wiring, with the plan images inside it.
   const exportJson = async () => {
     const f = locIn();
     const ids = [...new Set(floorsAll().map(x => x.floor.Image).filter(Boolean))]            ;
@@ -5231,13 +5100,8 @@ function mount(sec     , host     ) {
   };
   exportBtn.onclick = exportSheet;
 
-  // --- Port schedule -------------------------------------------------------------------------------
-  /// One line of the schedule: a port, the jack on it and where that is, and the far side of its cord.
-
   const floorName = (x     ) => { const f = floorById(x?.Floor)?.floor || floorsAll().find(y => ensure(y.floor, 'Rooms', []).some((r     ) => r.Id === x?.Room))?.floor; return f ? f.Name || f.Id : ''; };
   const roomName = (x     ) => x?.Room ? nameOfPlace(x.Room) : x ? 'Outdoors' : '';
-  /// Every patch panel, then every switch, each port on it: like the panel directory, every port is printed, a free
-  /// one left blank to write in. Then the jacks on no port, to be traced.
   const portSchedule = () => {
     const level = (d     ) => Number(floorById(d.Floor)?.floor.Level) || 0;
     const devs = portedAll().sort((a     , b     ) => (a.Kind === b.Kind ? 0 : a.Kind === 'patch-panel' ? -1 : 1) || level(a) - level(b) || devName(a).localeCompare(devName(b), undefined, { numeric: true }));
@@ -5259,7 +5123,6 @@ function mount(sec     , host     ) {
     return { sections, loose };
   };
 
-  /// The schedule as a PDF: Letter, a section a device, its title and header carried onto any page it runs over.
   const portSchedulePdf = ()             => {
     const { page: newPage, document: pdfDoc, wrap } = host.pdf;
     const { sections, loose } = portSchedule();
@@ -5300,7 +5163,6 @@ function mount(sec     , host     ) {
     return pdfDoc(pages, 'Network port schedule');
   };
 
-  /// Print it, as the panel directory prints: the PDF itself, so paper always gets the same layout.
   const printPdf = (bytes            , title        ) => {
     const url = URL.createObjectURL(new Blob([bytes       ], { type: 'application/pdf' }));
     const frame      = el('iframe', { class: 'ps-print-frame', title });
@@ -5459,7 +5321,6 @@ function mount(sec     , host     ) {
     const fl = floorNow();
     empty.innerHTML = '';
     const bare = !!fl && !fl.floor.Image && !roomsNow().some(r => (r.Shape || []).length >= 3) && !itemsNow().length;
-    // In Edit the tools say how to start, and the card would only sit over where you are drawing.
     empty.hidden = !!fl && (!bare || mode === 'edit');
     if (!fl) {
       const start = btn('Add a site and floor', 'primary');
@@ -5492,12 +5353,10 @@ function mount(sec     , host     ) {
     });
     floorBtn.disabled = !fl;
     bgBtn.disabled = !fl;
-    // Refit when the floor changes, or when something asks for it by clearing viewFor; never mid-edit.
     const key = fl ? fl.floor.Id : '';
     if (fl && viewFor !== key) { fit(); viewFor = key; }
     if (fl) stage.style.aspectRatio = `${Number(fl.floor.Width) || 1000} / ${Number(fl.floor.Height) || 700}`;
     stage.classList.toggle('is-empty', !fl);
-    // Whether the constraints hold, read from a copy: opening a floor never moves anything.
     lastSolve = constraintsNow().length ? planSolve(JSON.parse(JSON.stringify(shapesNow())), constraintsNow(), new Set(), 0) : { worst: 0, unmet: [] };
     drawSub();
     drawPlan();
@@ -5526,6 +5385,7 @@ function mount(sec     , host     ) {
     if (ctrl || e.altKey) return;
     if (k === 'Escape') {
       if (!menu.hidden) { closeMenu(); return; }
+      if (gangPick) { gangPick = null; render(); return; }
       if (draft.length || rectStart || wireDraft || measure) { draft = []; rectStart = null; rectEnd = null; wireDraft = null; measure = null; hover = null; render(); }
       else if (selection) { selection = null; extra = []; render(); }
       else if (mode === 'edit' && tool !== 'select') pickTool('select');
@@ -5538,7 +5398,6 @@ function mount(sec     , host     ) {
     if (k === '-' || k === '_') { zoomAt(centre(), 1 / 1.4); return; }
     if (k === '0') { fit(); drawPlan(); return; }
     if (mode !== 'edit') return;
-    // Delete takes out a selected corner or bend first, and the whole thing only when none is picked.
     if ((k === 'Delete' || k === 'Backspace') && selection) { e.preventDefault(); if (!removeCorner() && !removeBend()) deleteSelection(); return; }
     if (k.startsWith('Arrow') && selection) {
       e.preventDefault();
@@ -5555,7 +5414,6 @@ function mount(sec     , host     ) {
     if (byKey) { e.preventDefault(); pickTool(byKey[0]); }
   });
 
-  // Holding Space turns any drag into a pan, as drawing programs do.
   window.addEventListener('keydown', (e     ) => {
     if (e.key !== ' ' || !sec.classList.contains('active') || /INPUT|SELECT|TEXTAREA|BUTTON/.test(e.target?.tagName || '')) return;
     e.preventDefault();
@@ -5576,7 +5434,6 @@ function mount(sec     , host     ) {
   return { show: () => { render(); load(); readStorage(); } };
 }
 
-/// A picked file made ready to upload: a phone photo decoded upright and shrunk, anything else passed through.
 async function fpPrepareImage(file      )                                                                       {
   const isSvg = file.type === 'image/svg+xml' || /\.svg$/i.test(file.name);
   if (isSvg) {
@@ -5590,7 +5447,6 @@ async function fpPrepareImage(file      )                                       
   const MAX = 4000;
   const scale = Math.min(1, MAX / Math.max(bitmap.width, bitmap.height));
   const width = Math.round(bitmap.width * scale), height = Math.round(bitmap.height * scale);
-  // A small PNG is line art worth keeping exact; a photo, or anything large, is re-encoded.
   if (scale === 1 && file.size < 3 * 1024 * 1024 && ['image/png', 'image/jpeg', 'image/webp'].includes(file.type))
     return { blob: file, type: file.type, width, height };
   const canvas = document.createElement('canvas');

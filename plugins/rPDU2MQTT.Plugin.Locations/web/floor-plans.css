@@ -1,4 +1,3 @@
-/* Floor Plans: tools, plan and selection panel; stacked below laptop width. */
 .fp-bar { flex-wrap: wrap; gap: 8px; }
 .fp-undo { display: inline-flex; gap: 4px; }
 .fp-icon-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; }
@@ -144,6 +143,11 @@
 .fp-item.is-supply .fp-item-disc { stroke: var(--series-4); fill: var(--panel2); }
 .fp-glyph { fill: none; stroke: var(--fg); stroke-linecap: round; stroke-linejoin: round; }
 .fp-glyph-text { fill: var(--fg); stroke: none; text-anchor: middle; dominant-baseline: middle; font-weight: 700; }
+.fp-glyph .is-dead { stroke: var(--muted); }
+.fp-glyph-dead { stroke: var(--bad); }
+.fp-switch-leg { stroke: var(--accent); stroke-linecap: round; opacity: .8; pointer-events: none; }
+.fp-switch-leg.is-active { opacity: 1; }
+.fp-switch-gang { fill: var(--accent); text-anchor: middle; dominant-baseline: middle; font-weight: 800; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; pointer-events: none; }
 .fp-item.is-unknown .fp-item-disc { stroke: var(--warn); stroke-dasharray: 3 2; }
 .fp-item-q { fill: var(--warn); font-weight: 800; pointer-events: none; }
 .fp-item-label { fill: var(--fg); text-anchor: middle; font-weight: 600; pointer-events: none; paint-order: stroke; stroke: var(--panel); stroke-width: .3em; }
@@ -257,7 +261,6 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
   .fp-intro { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .section.fp.is-editing .fp-intro { display: none; }
   .fp-stage { max-height: 64vh; border-radius: var(--r); }
-  /* Editing on a phone: every tool in sight, and the plan as tall as the screen allows. */
   .fp-palette { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; padding: 4px; overflow: visible; }
   .fp-palette[hidden] { display: none; }
   .fp-tool { padding: 6px 0 4px; min-height: 48px; }
@@ -278,7 +281,6 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
   .fp-grip { display: block; position: absolute; top: 0; left: 0; right: 0; height: 26px; border: 0; background: none; cursor: pointer; }
   .fp-grip::after { content: ''; position: absolute; left: 50%; top: 10px; width: 44px; height: 5px; margin-left: -22px; border-radius: 3px; background: var(--line); }
   .section.fp.has-sheet .fp-legend { padding-bottom: 220px; }
-  /* The plan shrinks to stay clear of the sheet, and of the save bar when there is one. */
   .section.fp.is-editing.has-sheet .fp-stage { height: max(220px, calc(100dvh - var(--appbar-h) - var(--tabbar-h) - 190px - min(210px, 32vh))); }
   body:has(#savebar:not(.is-hidden)) .section.fp.is-editing .fp-stage { height: max(260px, calc(100dvh - var(--appbar-h) - var(--tabbar-h) - var(--savebar-h) - 190px)); }
   body:has(#savebar:not(.is-hidden)) .section.fp.is-editing.has-sheet .fp-stage { height: max(200px, calc(100dvh - var(--appbar-h) - var(--tabbar-h) - var(--savebar-h) - 190px - min(210px, 32vh))); }
@@ -293,7 +295,6 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
   .fp-mig-row { grid-template-columns: 1fr 1fr; }
 }
 
-/* Floor Plans: the floor below as a faint reference, the circuit legend, and printing just the plan. */
 .fp-below { fill: none; stroke: var(--faint); opacity: .7; pointer-events: none; }
 .fp-circuits { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-basis: 100%; }
 .fp-circuits-k { color: var(--faint); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; margin-right: 2px; }
@@ -308,7 +309,6 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-swatch-dot.is-unknown { background: transparent; border: 1.5px dashed var(--warn); }
 .fp-swatch-dot.is-noload { background: var(--muted); opacity: .5; }
 .fp-chip-load { font-weight: 700; font-variant-numeric: tabular-nums; }
-/* Live load: each item on a circuit tinted by how hard that circuit works against its breaker; unmetered left grey. */
 .fp-item.is-load-easy:not(.is-selected) .fp-item-disc { fill: color-mix(in srgb, var(--good) 18%, var(--panel)); }
 .fp-item.is-load-busy:not(.is-selected) .fp-item-disc { fill: color-mix(in srgb, var(--warn) 24%, var(--panel)); }
 .fp-item.is-load-over:not(.is-selected) .fp-item-disc { fill: color-mix(in srgb, var(--bad) 28%, var(--panel)); }
@@ -326,7 +326,6 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 }
 .fp-item-read.is-nodata, .fp-run-read.is-nodata { fill: var(--warn); font-weight: 600; }
 
-/* Floor Plans: box selection, the plot's edges and wall-mounted items. */
 .fp-marquee { fill: var(--accent-bg); stroke: var(--accent); stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; pointer-events: none; }
 .fp-plot-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; opacity: .85; }
 .fp-plot-handle.is-l, .fp-plot-handle.is-r { cursor: ew-resize; }
@@ -336,14 +335,12 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-item-stub { stroke: var(--fg); stroke-linecap: round; pointer-events: none; }
 .fp-svg.is-panning, .fp-svg.is-panning * { cursor: grab !important; }
 
-/* Floor Plans: a circuit brought forward, what a GFCI protects, and which way a wire runs. */
 .fp-item.is-focus .fp-item-disc { stroke-width: 3.5px; filter: drop-shadow(0 0 4px var(--accent)); }
 .fp-run.is-focus .fp-run-line { filter: none; }
 .fp-run-case { fill: none; stroke: var(--bg); stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 .fp-run-flow { fill: none; stroke: var(--panel); stroke-linecap: round; pointer-events: none; animation: fp-flow .8s linear infinite; }
 @keyframes fp-flow { to { stroke-dashoffset: var(--fp-flow); } }
 @media (prefers-reduced-motion: reduce) { .fp-run-flow { animation: none; } }
-/* A circuit being looked at stands out: what is on it is ringed in its colour, and the rest of the wiring fades. */
 .fp-halo { fill: none; stroke: var(--accent); pointer-events: none; animation: fp-halo 1.4s ease-in-out infinite; }
 .is-protected > .fp-halo { stroke: var(--good); }
 @keyframes fp-halo { 50% { stroke-opacity: .35; } }
@@ -361,7 +358,6 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-gfci text { fill: var(--accent-fg); text-anchor: middle; dominant-baseline: middle; font-weight: 800; pointer-events: none; }
 .fp-protected-dot { fill: var(--good); stroke: var(--panel); pointer-events: none; }
 
-/* Floor Plans: the persistence warning, locks, constraints and their picks, the colour row. */
 .fp-banner { display: grid; gap: 6px; margin: 0 0 var(--sp-3); padding: 12px 16px; border: 1px solid var(--warn); border-radius: var(--r); background: var(--warn-bg); color: var(--fg); font-size: 13.5px; }
 .fp-banner[hidden] { display: none; }
 .fp-banner.is-strong { border-width: 2px; border-color: var(--bad); background: var(--bad-bg); font-size: 14.5px; }
@@ -400,7 +396,6 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-chip-x { border: 0; background: none; color: var(--muted); font-size: 16px; cursor: pointer; padding: 0 4px; }
 .fp-chip-x:hover { color: var(--bad); }
 
-/* Floor Plans: appliances at their real size, and their resize and turn handles. */
 .fp-body { cursor: pointer; }
 .fp-body-shape { fill: var(--panel2); stroke: var(--accent); stroke-linejoin: round; }
 .fp-body.is-selected .fp-body-shape { fill: var(--accent-bg); stroke: var(--accent-hi); }
@@ -412,14 +407,12 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-rot-stem { stroke: var(--accent); pointer-events: none; }
 .fp-rot { cursor: grab; }
 .fp-resize { cursor: nwse-resize; }
-/* Appliances seen from above: their lines in the body's own ink, softer details, solid knobs and handles. */
 .fp-art rect, .fp-art circle, .fp-art line { fill: none; stroke: var(--fg); stroke-linecap: round; pointer-events: none; }
 .fp-art .is-soft { stroke: var(--muted); }
 .fp-art .is-fill { fill: var(--muted); stroke: none; }
 .fp-body.has-art .fp-body-shape { fill: var(--panel3); }
 .fp-kind.is-size .fp-art rect, .fp-kind.is-size .fp-art circle, .fp-kind.is-size .fp-art line { stroke-width: .8px; }
 
-/* Floor Plans: the menu a right-click opens, over whatever it was aimed at. */
 .fp-menu {
   position: absolute; z-index: 20; min-width: 210px; padding: 5px; border: 1px solid var(--line);
   border-radius: var(--r); background: var(--panel); box-shadow: var(--shadow-lg);
@@ -437,7 +430,6 @@ polyline.fp-draft.is-wire { stroke-dasharray: none; stroke: var(--series-2); }
 .fp-standalone.is-selected .fp-standalone-line { stroke: var(--accent); }
 .fp-draft.is-wall { stroke-opacity: .6; }
 
-/* Floor Plans: the network layer — jacks labelled with their port, and a patch panel's or switch's ports. */
 .fp-net-label { font-weight: 700; font-variant-numeric: tabular-nums; }
 .fp-net-label.is-unknown { fill: var(--warn); font-weight: 600; }
 .fp-ports { gap: 2px; max-height: 420px; overflow-y: auto; }
@@ -451,7 +443,6 @@ button.fp-port-who:hover { text-decoration: underline; }
 .fp-port-sw { flex: none; max-width: 42%; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 select.fp-port-sw { min-height: 28px; }
 
-/* Edit fills the screen: its own bar, the tools in a rail, the plan, and the panel beside it. */
 .fp-edbar { display: none; }
 .section.fp.active.is-full {
   position: fixed; inset: 0 0 var(--savebar-h, 0px) 0; z-index: 46; display: flex; flex-direction: column;
@@ -513,7 +504,6 @@ body:has(.section.fp.active.is-full) .savebar { z-index: 47; }
 .section.fp.is-full .fp-side:not(.is-sheet) {
   position: static; max-height: none; height: 100%; box-sizing: border-box; border: 0; border-left: 1px solid var(--line); border-radius: 0; box-shadow: none;
 }
-/* What belongs to another mode stays in sight, faded, and is not moved from here. */
 .fp-item.is-aside, .fp-body.is-aside, .fp-run.is-aside { opacity: .38; }
 .section.fp[data-layer="wiring"] .fp-room, .section.fp[data-layer="network"] .fp-room,
 .section.fp[data-layer="wiring"] .fp-surface, .section.fp[data-layer="network"] .fp-surface,
@@ -526,7 +516,6 @@ body:has(.section.fp.active.is-full) .savebar { z-index: 47; }
   .fp-ed-label { display: none; }
 }
 @media (max-width: 560px) {
-  /* A phone: the modes on a row of their own, the tools along the foot, and what is selected in a sheet over the plan. */
   .section.fp.is-full .fp-edbar { flex-wrap: wrap; gap: 4px; padding: 4px 6px 6px; }
   .section.fp.is-full .fp-edbar .fp-floor { flex: 1 1 0; max-width: none; }
   .fp-edbar .fp-ed-gap, .fp-edbar .fp-ed-side, .fp-edbar .fp-undo .fp-icon-btn[aria-label="Redo"] { display: none; }

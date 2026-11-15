@@ -1,7 +1,4 @@
-// What the floor plans are drawn with (#463, #464): surface textures at their real size, a pictogram per kind of
-// placed item, and doors and windows as an architect draws them.
 
-/// Surfaces a room, outdoor zone or the ground can have, with their names.
 export const PLAN_SURFACES: [string, string][] = [
   ['', 'Plain'], ['wood', 'Wood'], ['tile', 'Tile'], ['carpet', 'Carpet'], ['concrete', 'Concrete'], ['stone', 'Stone'],
   ['grass', 'Grass'], ['gravel', 'Gravel'], ['dirt', 'Dirt'], ['deck', 'Deck'], ['pavers', 'Pavers'], ['water', 'Water'], ['snow', 'Snow'], ['stairs', 'Stairs'],
@@ -10,7 +7,6 @@ export const PLAN_SURFACES: [string, string][] = [
 /// Grounds a floor can sit on.
 export const PLAN_GROUNDS: [string, string][] = [['', 'Plain'], ['grass', 'Grass'], ['concrete', 'Concrete'], ['gravel', 'Gravel'], ['dirt', 'Dirt'], ['pavers', 'Pavers'], ['snow', 'Snow']];
 
-/// Placed item kinds, grouped for the picker: [kind, name, group].
 export const PLAN_KINDS: [string, string, string][] = [
   ['outlet', 'Outlet', 'Inside'], ['switch', 'Switch', 'Inside'], ['fixture', 'Light', 'Inside'], ['fan', 'Fan', 'Inside'],
   ['appliance', 'Appliance', 'Inside'], ['device', 'Device', 'Inside'], ['hvac', 'HVAC', 'Inside'], ['junction', 'Junction box', 'Inside'],
@@ -20,7 +16,6 @@ export const PLAN_KINDS: [string, string, string][] = [
   ['jack', 'Network jack', 'Network'], ['patch-panel', 'Patch panel', 'Network'], ['network-switch', 'Network switch', 'Network'],
 ];
 
-/// Things with a real footprint, in inches: [key, name, kind, width, depth, round]. Placed at their size, backs to the wall.
 export const PLAN_FOOTPRINTS: [string, string, string, number, number, boolean][] = [
   ['washer', 'Washer', 'appliance', 27, 30, false], ['dryer', 'Dryer', 'appliance', 27, 30, false], ['fridge', 'Fridge', 'appliance', 36, 30, false],
   ['freezer', 'Chest freezer', 'appliance', 42, 28, false], ['range', 'Range / oven', 'appliance', 30, 26, false], ['dishwasher', 'Dishwasher', 'appliance', 24, 24, false],
@@ -28,18 +23,14 @@ export const PLAN_FOOTPRINTS: [string, string, string, number, number, boolean][
   ['rack', 'Server rack', 'device', 24, 42, false], ['hot-tub', 'Hot tub', 'appliance', 84, 84, false],
 ];
 
-/// Kinds that supply or carry power rather than use it; they get a ring of their own.
 export const PLAN_SUPPLY_KINDS = ['panel', 'meter', 'pole', 'transformer', 'solar', 'battery', 'inverter', 'generator'];
 
-/// The network layer: wall jacks, and the patch panels and switches their cables land on. None is on a circuit.
 export const PLAN_NETWORK_KINDS = ['jack', 'patch-panel', 'network-switch'];
-/// Network gear with numbered ports, and how many a new one has.
 export const PLAN_PORTED_KINDS = ['patch-panel', 'network-switch'];
 export const PLAN_DEFAULT_PORTS = 24;
 
 export const PLAN_OPENINGS: [string, string][] = [['door', 'Door'], ['double-door', 'Double door'], ['sliding-door', 'Sliding door'], ['garage-door', 'Garage door'], ['window', 'Window'], ['opening', 'Opening']];
 
-/// Each surface's own colours: its base, a darker detail, and a lighter one.
 export const PLAN_SURFACE_COLOURS: Record<string, [string, string, string]> = {
   wood: ['#c99d6b', '#a37649', '#dcb689'], tile: ['#e4ded1', '#bbb3a1', '#f2eee6'], carpet: ['#959cb2', '#848ca4', '#a6adc1'],
   concrete: ['#c4c3bd', '#adaca5', '#d2d1cb'], stone: ['#b4ac9d', '#958d7e', '#c7c0b3'], grass: ['#78ab5d', '#5d9146', '#93c476'],
@@ -48,7 +39,6 @@ export const PLAN_SURFACE_COLOURS: Record<string, [string, string, string]> = {
   stairs: ['#d3cbbd', '#8f8676', '#b7ae9e'],
 };
 
-/// A colour lighter or darker by a fraction: a detail drawn in the same colour as what it sits on.
 export function planShade(hex: string, by: number): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
   if (!m) return hex;
@@ -57,12 +47,10 @@ export function planShade(hex: string, by: number): string {
   return '#' + ch.map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('');
 }
 
-/// The pattern id for a surface, in its own colours or in a chosen one.
 export function planTextureId(name: string, colour = ''): string {
   return 'fp-tex-' + name + (colour ? '-' + colour.replace('#', '').toLowerCase() : '');
 }
 
-/// One surface texture at real size, in its own colours or recoloured from a base colour. `s` is units per metre.
 export function planTexture(name: string, s: number, colour = ''): any {
   const own = PLAN_SURFACE_COLOURS[name];
   const [base, dark, light] = colour ? [colour, planShade(colour, -0.2), planShade(colour, 0.18)] : own || ['#cccccc', '#aaaaaa', '#eeeeee'];
@@ -96,7 +84,6 @@ export function planTextures(s: number): any[] {
   return Object.keys(PLAN_SURFACE_COLOURS).map(name => planTexture(name, s));
 }
 
-/// A pictogram for a placed item, centred on 0,0 inside a disc of radius r.
 export function planGlyph(kind: string, r: number): any {
   const g = svgEl('g', { class: 'fp-glyph' });
   const k = r * 0.5;
@@ -115,19 +102,15 @@ export function planGlyph(kind: string, r: number): any {
     case 'hvac': rect(-0.9, -0.9, 1.8, 1.8, 0.2); circle(0, 0, 0.6); line(-0.42, -0.42, 0.42, 0.42); line(-0.42, 0.42, 0.42, -0.42); break;
     case 'junction': rect(-0.75, -0.75, 1.5, 1.5, 0.1); circle(0, 0, 0.3); break;
     case 'ev-charger': rect(-0.6, -0.9, 1.2, 1.8, 0.25); path('M0.12 -0.6 L-0.25 0.08 L0.05 0.08 L-0.12 0.6 L0.28 -0.12 L-0.02 -0.12 Z'); break;
-    // A breaker panel: the bus down the middle and a row of breakers either side of it.
     case 'panel': line(0, -1.25, 0, 1.25); [-0.95, -0.5, -0.05, 0.4, 0.85].forEach(y => { line(-0.75, y, -0.2, y); line(0.2, y, 0.75, y); }); break;
     case 'meter': circle(0, 0, 0.85); line(0, 0.2, 0.45, -0.35); circle(0, 0.2, 0.08); break;
     case 'pole': line(0, -0.95, 0, 0.95); line(-0.75, -0.55, 0.75, -0.55); circle(-0.6, -0.72, 0.1); circle(0.6, -0.72, 0.1); break;
     case 'transformer': circle(-0.3, 0, 0.5); circle(0.3, 0, 0.5); break;
     case 'solar': rect(-0.95, -0.65, 1.9, 1.3, 0.05); line(-0.95, 0, 0.95, 0); line(-0.32, -0.65, -0.32, 0.65); line(0.32, -0.65, 0.32, 0.65); break;
     case 'battery': rect(-0.8, -0.5, 1.5, 1.0, 0.12); rect(0.7, -0.2, 0.2, 0.4, 0.05); line(-0.45, 0, -0.1, 0); line(-0.275, -0.18, -0.275, 0.18); break;
-    // The drawing symbol: a box cut corner to corner, DC (=) in one half and AC (~) in the other.
     case 'inverter': rect(-0.85, -0.85, 1.7, 1.7, 0.15); line(-0.85, 0.85, 0.85, -0.85); line(-0.62, -0.5, -0.12, -0.5); line(-0.62, -0.26, -0.12, -0.26); path('M0.08 0.42 Q0.22 0.14 0.36 0.42 T0.64 0.42'); break;
     case 'generator': circle(0, 0, 0.85); text('G'); break;
-    // An RJ45 socket face-on: the opening, its latch notch, and the contacts along the top.
     case 'jack': path('M-0.8 -0.6 H0.8 V0.35 H0.35 V0.75 H-0.35 V0.35 H-0.8 Z'); [-0.45, -0.15, 0.15, 0.45].forEach(x => line(x, -0.6, x, -0.25)); break;
-    // A row of ports along a strip, as a patch panel or switch reads from the front.
     case 'patch-panel': rect(-1.05, -0.55, 2.1, 1.1, 0.1); [-0.7, -0.23, 0.23, 0.7].forEach(x => rect(x - 0.17, -0.2, 0.34, 0.4, 0.04)); break;
     case 'network-switch': rect(-1.05, -0.55, 2.1, 1.1, 0.1); path('M-0.6 -0.18 H0.55 M0.35 -0.36 L0.6 -0.18 L0.35 0 M0.6 0.2 H-0.55 M-0.35 0.02 L-0.6 0.2 L-0.35 0.38'); break;
     default: rect(-0.9, -0.65, 1.8, 1.3, 0.2); line(-0.4, 0.9, 0.4, 0.9); break;
@@ -135,10 +118,20 @@ export function planGlyph(kind: string, r: number): any {
   return g;
 }
 
-/// A door, window or opening: the wall cut, and what fills it, lying along the wall at its angle.
-/// `u` is drawing units per screen pixel; the wall is drawn a few pixels thick at any zoom.
-/// `thick`: the wall's thickness when the floor gives one, so the gap cuts it through; `shift` moves the opening out
-/// into an outside wall drawn beyond its room.
+export function planSwitchGlyph(dead: boolean[], r: number): any {
+  if (dead.length <= 1 && !dead[0]) return planGlyph('switch', r);
+  const g = svgEl('g', { class: 'fp-glyph' });
+  const k = r * 0.5, n = Math.max(1, dead.length);
+  const w = n > 1 ? 0.7 : 0.9, h = n > 1 ? 1.5 : 1.8, step = 1.1;
+  dead.forEach((d, i) => {
+    const x = (i - (n - 1) / 2) * step;
+    g.appendChild(svgEl('rect', { x: (x - w / 2) * k, y: -h / 2 * k, width: w * k, height: h * k, rx: 0.15 * k, class: d ? 'is-dead' : null }));
+    g.appendChild(svgEl('line', { x1: x * k, y1: -h * 0.28 * k, x2: x * k, y2: 0.03 * k, class: d ? 'is-dead' : null }));
+    if (d) g.appendChild(svgEl('line', { x1: (x - w / 2) * k, y1: h / 2 * k, x2: (x + w / 2) * k, y2: -h / 2 * k, class: 'fp-glyph-dead' }));
+  });
+  return g;
+}
+
 export function planOpening(o: any, u: number, thick = 0, shift: { X: number; Y: number } = { X: 0, Y: 0 }): any {
   const w = Math.max(1, Number(o.Width) || 90);
   const half = w / 2;
@@ -182,7 +175,6 @@ export function planOpening(o: any, u: number, thick = 0, shift: { X: number; Y:
 
 const PLAN_CIRCUIT_COLOURS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)'];
 
-/// A colour per circuit, stable across reloads: the same breaker is always the same colour.
 export function planCircuitColor(ref: string): string {
   if (!ref) return 'var(--muted)';
   let h = 0;
@@ -190,8 +182,6 @@ export function planCircuitColor(ref: string): string {
   return PLAN_CIRCUIT_COLOURS[h % PLAN_CIRCUIT_COLOURS.length];
 }
 
-/// An appliance seen from above, drawn inside its own footprint of W × D drawing units, its front toward +Y.
-/// `u` is drawing units per screen pixel, so the lines stay a pixel or two wide at any zoom.
 export function planFootprintArt(key: string, W: number, D: number, u: number): any | null {
   const g = svgEl('g', { class: 'fp-art' });
   const sw = 1.4 * u;
@@ -218,7 +208,6 @@ export function planFootprintArt(key: string, W: number, D: number, u: number): 
       break;
     }
     case 'fridge': {
-      // French doors across the front, meeting in the middle, a handle each side of the join; the vent at the back.
       line(-hw * 0.92, hd * 0.5, hw * 0.92, hd * 0.5);
       line(0, hd * 0.5, 0, hd * 0.94);
       rect(-W * 0.07, hd * 0.6, W * 0.025, D * 0.24, W * 0.012, 'is-fill');
