@@ -478,6 +478,14 @@ public class RunConfig
     [Description("A note on the run, for example 'through the attic'.")]
     public string Label { get; set; } = "";
 
+    [Range(1, 6, ErrorMessage = "FromGang must be between 1 and 6.")]
+    [Description("When it starts at a multi-gang switch, the gang it is wired to, from 1. Blank is the whole switch.")]
+    public int? FromGang { get; set; }
+
+    [Range(1, 6, ErrorMessage = "ToGang must be between 1 and 6.")]
+    [Description("When it ends at a multi-gang switch, the gang it is wired to, from 1. Blank is the whole switch.")]
+    public int? ToGang { get; set; }
+
     [DefaultValue(false)]
     [Description("A switch loop or traveler: carries power to a switch and back, not one way to a load.")]
     public bool SwitchLoop { get; set; }

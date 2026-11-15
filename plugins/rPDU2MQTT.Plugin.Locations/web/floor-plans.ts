@@ -265,11 +265,17 @@ export default function mount(sec: any, host: any) {
   const sim = new Map<string, boolean>();
   const simKey = (sw: any, n: number) => `${sw.Id}/${n}`;
   const liveRuns = () => runsIn().filter((r: any) => !r.Disconnected);
-  const switchCut = (sw: any) => { const rs = runsIn().filter((r: any) => r.From === sw.Id || r.To === sw.Id); return rs.length > 0 && rs.every((r: any) => r.Disconnected); };
+  const gangEnd = (r: any, sw: any) => Number(r.From === sw.Id ? r.FromGang : r.To === sw.Id ? r.ToGang : 0) || 0;
+  const gangCut = (sw: any, n: number) => {
+    const rs = runsIn().filter((r: any) => r.From === sw.Id || r.To === sw.Id);
+    const tied = rs.filter((r: any) => gangEnd(r, sw) === n + 1);
+    const use = tied.length ? tied : rs.filter((r: any) => !gangEnd(r, sw));
+    return use.length > 0 && use.every((r: any) => r.Disconnected);
+  };
   const wayText = (g: any) => g?.Way === 3 ? '3-way' : g?.Way === 4 ? '4-way' : '';
   const simLit = (id: string): boolean | null => {
     if (!sim.size) return null;
-    const gs = switchedBy(id).filter((x: any) => !x.g.Dead && !switchCut(x.sw));
+    const gs = switchedBy(id).filter((x: any) => !x.g.Dead && !gangCut(x.sw, x.n));
     if (!gs.length) return null;
     const st = (x: any) => !!sim.get(simKey(x.sw, x.n));
     const multi = gs.filter((x: any) => x.g.Way), single = gs.filter((x: any) => !x.g.Way);
@@ -1046,8 +1052,31 @@ export default function mount(sec: any, host: any) {
     });
 
     const onFocus = (r: any) => !!focus && (r.Circuit === focus || [r.From, r.To].some(id => id && itemOf(id)?.Circuit === focus));
+    const r = 12 * u;
+    const wallOffset = (item: any) => {
+      const W = Number(item.Width) || 0, D = Number(item.Depth) || 0, sized = W > 0 && D > 0;
+      const facing = !sized && item.Facing != null && Number.isFinite(Number(item.Facing)) ? Number(item.Facing) * Math.PI / 180 : null;
+      let face = 0;
+      if (facing != null && walls) {
+        const near = mass.map(w => { const q = planNearestOnSegment(item, w.a, w.b); return { w, d: Math.hypot(q.X - item.X, q.Y - item.Y) }; }).sort((a, b) => a.d - b.d)[0];
+        if (near && near.d <= Math.max(interiorWall(), exteriorWall()) + 1)
+          face = near.w.shared ? interiorWall() / 2 : Math.cos(facing) * near.w.out.X + Math.sin(facing) * near.w.out.Y > 0 ? exteriorWall() : 0;
+      }
+      const fx = facing == null ? 0 : Math.cos(facing) * face, fy = facing == null ? 0 : Math.sin(facing) * face;
+      const off = facing == null ? { X: 0, Y: 0 } : { X: fx + Math.cos(facing) * (r + 3 * u), Y: fy + Math.sin(facing) * (r + 3 * u) };
+      return { facing, fx, fy, off };
+    };
+    const gangAt = (item: any, gang: any) => {
+      const n = Number(gang) - 1, N = gangsOf(item).length;
+      if (!(N > 1 && n >= 0 && n < N)) return null;
+      const o = wallOffset(item).off;
+      return { X: item.X + o.X + (n - (N - 1) / 2) * 1.1 * r * 0.5, Y: item.Y + o.Y };
+    };
     runsNow().forEach(r => {
       const path = runPath(r);
+      const fg = r.From && r.FromGang ? gangAt(itemOf(r.From), r.FromGang) : null, tg = r.To && r.ToGang ? gangAt(itemOf(r.To), r.ToGang) : null;
+      if (fg && path.length) path[0] = fg;
+      if (tg && path.length) path[path.length - 1] = tg;
       if (path.length < 2) return;
       const net = r.Kind === 'network';
       const sel = isSel('run', r.Id);
@@ -1099,20 +1128,6 @@ export default function mount(sec: any, host: any) {
       }
     });
 
-    const r = 12 * u;
-    const wallOffset = (item: any) => {
-      const W = Number(item.Width) || 0, D = Number(item.Depth) || 0, sized = W > 0 && D > 0;
-      const facing = !sized && item.Facing != null && Number.isFinite(Number(item.Facing)) ? Number(item.Facing) * Math.PI / 180 : null;
-      let face = 0;
-      if (facing != null && walls) {
-        const near = mass.map(w => { const q = planNearestOnSegment(item, w.a, w.b); return { w, d: Math.hypot(q.X - item.X, q.Y - item.Y) }; }).sort((a, b) => a.d - b.d)[0];
-        if (near && near.d <= Math.max(interiorWall(), exteriorWall()) + 1)
-          face = near.w.shared ? interiorWall() / 2 : Math.cos(facing) * near.w.out.X + Math.sin(facing) * near.w.out.Y > 0 ? exteriorWall() : 0;
-      }
-      const fx = facing == null ? 0 : Math.cos(facing) * face, fy = facing == null ? 0 : Math.sin(facing) * face;
-      const off = facing == null ? { X: 0, Y: 0 } : { X: fx + Math.cos(facing) * (r + 3 * u), Y: fy + Math.sin(facing) * (r + 3 * u) };
-      return { facing, fx, fy, off };
-    };
     legs.forEach((l: any) => {
       const a = wallOffset(l.sw).off, b = wallOffset(l.to).off;
       const active = !!gangPick && gangPick.sw === l.sw.Id && gangPick.n === l.n;
@@ -1188,7 +1203,7 @@ export default function mount(sec: any, host: any) {
       }
       // An appliance drawn as itself needs no icon on top.
       if (!hasArt) {
-        const glyph = item.Kind === 'switch' ? planSwitchGlyph(gangsOf(item).map((x: any, n: number) => ({ dead: !!x.Dead || switchCut(item), on: sim.has(simKey(item, n)) ? !!sim.get(simKey(item, n)) : null })), rr) : planGlyph(item.Kind || 'outlet', rr);
+        const glyph = item.Kind === 'switch' ? planSwitchGlyph(gangsOf(item).map((x: any, n: number) => ({ dead: !!x.Dead || gangCut(item, n), on: sim.has(simKey(item, n)) ? !!sim.get(simKey(item, n)) : null })), rr) : planGlyph(item.Kind || 'outlet', rr);
         glyph.setAttribute('stroke-width', 1.4 * u);
         g.appendChild(glyph);
       }
@@ -3049,7 +3064,6 @@ export default function mount(sec: any, host: any) {
 
   const drawGangs = (it: any, editing: boolean) => {
     const gangs = gangsOf(it);
-    if (switchCut(it)) side.appendChild(el('div', { class: 'fp-note is-warn', text: 'Disconnected' }));
     if (gangPick && (gangPick.sw !== it.Id || gangPick.n >= gangs.length || !editing)) gangPick = null;
     side.appendChild(el('h4', { text: gangs.length > 1 ? 'Gangs' : 'Controls' }));
     if (sim.size) { const reset = btn('Reset simulation'); reset.onclick = () => { sim.clear(); render(); }; side.appendChild(actions(reset)); }
@@ -3065,6 +3079,7 @@ export default function mount(sec: any, host: any) {
     gangs.forEach((g: any, n: number) => {
       const ctl = (g.Controls || []).map((id: string) => itemOf(id)).filter(Boolean);
       const head = gangs.length > 1 ? `${n + 1}${g.Label ? ' · ' + g.Label : ''}` : g.Label || '';
+      const cut = gangCut(it, n);
       const simBtn = () => {
         const k = simKey(it, n), now = !!sim.get(k);
         const b = btn(now ? 'On' : 'Off', now ? 'primary' : '');
@@ -3073,13 +3088,14 @@ export default function mount(sec: any, host: any) {
         return b;
       };
       if (!editing) {
-        const what = g.Dead ? 'nothing' : ctl.length ? ctl.map((x: any) => itemName(x)).join(', ') : 'not set';
+        const what = g.Dead ? 'nothing' : (cut ? 'disconnected · ' : '') + (ctl.length ? ctl.map((x: any) => itemName(x)).join(', ') : 'not set');
         const label = [head || 'Switches', wayText(g)].filter(Boolean).join(' · ');
         side.appendChild(row(label, g.Dead || !ctl.length ? what : el('span', { class: 'fp-colour-row' }, el('span', { class: 'fp-row-v', text: what }), simBtn()), g.Dead ? 'is-muted' : ''));
         return;
       }
       const box = el('div', { class: 'fp-gang' + (gangPick?.n === n ? ' is-picking' : '') });
       if (gangs.length > 1) box.appendChild(el('div', { class: 'fp-gang-head', text: `Gang ${n + 1}` }));
+      if (cut) box.appendChild(el('div', { class: 'fp-note is-warn', text: 'Disconnected' }));
       const lbl = el('input', { type: 'text', class: 'fp-name', value: g.Label || '', placeholder: 'Label' }) as HTMLInputElement;
       lbl.onchange = () => act(() => { const x = gangsEdit(it)[n]; x.Label = lbl.value.trim(); });
       const way = select([['', 'Single-pole'], ['3', '3-way'], ['4', '4-way']], g.Way ? String(g.Way) : '', v => act(() => { const x = gangsEdit(it)[n]; if (v) x.Way = Number(v); else delete x.Way; }));
@@ -3290,8 +3306,9 @@ export default function mount(sec: any, host: any) {
     const endName = (x: any) => x.Kind === 'jack' ? jackLabel(x) || itemName(x) : isPorted(x) ? devName(x) : itemName(x);
     side.appendChild(el('div', { class: 'fp-side-head' }, el('h3', { text: r.Label || (net ? 'Network cable' : r.SwitchLoop ? 'Switch loop' : `${r.Kind === 'service' ? 'Service' : r.Kind === 'feeder' ? 'Feeder' : 'Circuit'} run`) }), el('span', { class: 'fp-pill', text: r.Kind })));
     if (r.Disconnected) side.appendChild(el('div', { class: 'fp-note is-warn', text: 'Disconnected' }));
-    side.appendChild(row(net ? 'From' : 'Supply side', from ? endName(from) : 'a loose end'));
-    side.appendChild(row(net ? 'To' : 'Load side', to ? endName(to) : 'a loose end'));
+    const endText = (x: any, g: any) => !x ? 'a loose end' : endName(x) + (g && gangsOf(x)[Number(g) - 1] ? ` · ${gangsOf(x)[Number(g) - 1].Label || 'gang ' + g}` : '');
+    side.appendChild(row(net ? 'From' : 'Supply side', endText(from, r.FromGang)));
+    side.appendChild(row(net ? 'To' : 'Load side', endText(to, r.ToGang)));
     side.appendChild(row('Length on the plan', len(planPathLength(runPath(r)))));
     const jackEnd = [from, to].find((x: any) => x?.Kind === 'jack');
     if (net && jackEnd) side.appendChild(row('Port', jackEnd.Port ? portText(jackEnd.Port) + (switchPortOf(jackEnd) && switchPortOf(jackEnd) !== jackEnd.Port ? ` → ${portText(switchPortOf(jackEnd))}` : '') : 'the jack is on no port'));
@@ -3304,6 +3321,12 @@ export default function mount(sec: any, host: any) {
           [from, to].forEach(it => { if (v && it && !it.Circuit && !PLAN_SUPPLY_KINDS.includes(it.Kind)) it.Circuit = v; });
         }), { placeholder: 'Search circuits…' }), 'Setting it also puts either end with no circuit of its own on this one.'));
       side.append(field('Note', note));
+      ([[from, 'FromGang'], [to, 'ToGang']] as [any, string][]).forEach(([x, key]) => {
+        const N = gangsOf(x).length;
+        if (net || N < 2) return;
+        const choices: [string, string][] = [['', 'Whole switch'], ...gangsOf(x).map((g: any, n: number) => [String(n + 1), `${n + 1}${g.Label ? ' · ' + g.Label : ''}`] as [string, string])];
+        side.append(field(`Gang at ${endName(x)}`, select(choices, r[key] ? String(r[key]) : '', v => act(() => { if (v) r[key] = Number(v); else delete r[key]; }))));
+      });
       if (!net) side.appendChild(el('div', { class: 'fp-colour-row' },
         check('Switch loop', !!r.SwitchLoop, v => act(() => { if (v) r.SwitchLoop = true; else delete r.SwitchLoop; })),
         check('Disconnected', !!r.Disconnected, v => act(() => { if (v) r.Disconnected = true; else delete r.Disconnected; }))));

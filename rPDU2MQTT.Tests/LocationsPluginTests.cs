@@ -195,6 +195,7 @@ public class LocationsPluginTests
                   - Id: run_1
                     From: fixture_1
                     To: switch_1
+                    ToGang: 2
                     SwitchLoop: true
                     Disconnected: true
             """);
@@ -210,6 +211,8 @@ public class LocationsPluginTests
         var run = LocationSettings.Of(cfg).Runs.Single();
         Assert.True(run.SwitchLoop);
         Assert.True(run.Disconnected);
+        Assert.Equal(2, run.ToGang);
+        Assert.Null(run.FromGang);
         Assert.True(System.ComponentModel.DataAnnotations.Validator.TryValidateObject(sw.Gangs[0], new(sw.Gangs[0]), null, validateAllProperties: true));
     }
 
