@@ -175,6 +175,49 @@ public class LocationsPluginTests
         Assert.True(System.ComponentModel.DataAnnotations.Validator.TryValidateObject(places.Runs[0], new(places.Runs[0]), null, validateAllProperties: true));
     }
 
+    [Fact]
+    public void SwitchGangs_AreRead()
+    {
+        var cfg = YamlConfigLoader.DeserializeString("""
+            Plugins:
+              locations:
+                Placements:
+                  - Id: switch_1
+                    Kind: switch
+                    Gangs:
+                      - Label: Lights
+                        Controls: [ fixture_1 ]
+                        Way: 3
+                      - Dead: true
+                  - Id: fixture_1
+                    Kind: fixture
+                Runs:
+                  - Id: run_1
+                    From: fixture_1
+                    To: switch_1
+                    ToGang: 2
+                    SwitchLoop: true
+                    Traveler: true
+                    Disconnected: true
+            """);
+
+        var sw = LocationSettings.Of(cfg).Placements.Single(p => p.Id == "switch_1");
+        Assert.Equal(2, sw.Gangs.Count);
+        Assert.Equal("fixture_1", Assert.Single(sw.Gangs[0].Controls));
+        Assert.False(sw.Gangs[0].Dead);
+        Assert.True(sw.Gangs[1].Dead);
+        Assert.Empty(sw.Gangs[1].Controls);
+        Assert.Equal(3, sw.Gangs[0].Way);
+        Assert.Null(sw.Gangs[1].Way);
+        var run = LocationSettings.Of(cfg).Runs.Single();
+        Assert.True(run.SwitchLoop);
+        Assert.True(run.Disconnected);
+        Assert.True(run.Traveler);
+        Assert.Equal(2, run.ToGang);
+        Assert.Null(run.FromGang);
+        Assert.True(System.ComponentModel.DataAnnotations.Validator.TryValidateObject(sw.Gangs[0], new(sw.Gangs[0]), null, validateAllProperties: true));
+    }
+
     private sealed class PastHost(Config cfg, IMeasurementHistory? history) : IPluginHost
     {
         public Config Config => cfg;
@@ -186,7 +229,6 @@ public class LocationsPluginTests
         public IMeasurementHistory? History => history;
     }
 
-    /// <summary>The kitchen circuit's clamp read 6 A before noon and 18 A from noon on.</summary>
     private sealed class PastCurrent : IMeasurementHistory
     {
         public static readonly DateTime Noon = new(2026, 8, 3, 12, 0, 0, DateTimeKind.Utc);

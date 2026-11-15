@@ -74,6 +74,9 @@ On a phone, every tool shows in two rows, the plan fills the screen and fits wha
 - **At real size**: washer, dryer, fridge, freezer, range, dishwasher, water heater, furnace, condenser, rack, hot tub.
 - Wall items (outlets, switches, network jacks) snap to the nearest wall and face the room.
 - **GFCI outlet**: everything wired from its load side is protected.
+- **Switch**: **Gangs** sets how many. Each gang lists what it switches (**Add**, or **Pick on plan** and tap the items), or **Controls nothing**. Selecting a switch, or something it switches, highlights the wires between them, through junction boxes and travelers. Where no wires join them, a dotted link is drawn.
+- **3-way / 4-way**: set per gang. Gangs of these that switch the same light flip it together.
+- **Simulate**: **On** / **Off** on each gang lights or darkens what it switches. **Reset simulation** clears it.
 - **Circuit** or **Metered by**: the breaker feeding it, or, when its circuit is not known, the node measuring it. A meter it already had is placed beneath its circuit in the energy flow.
 - **Trace its circuit**: switch a load on the item on and off; the matching channel is offered.
 
@@ -85,6 +88,10 @@ On a phone, every tool shows in two rows, the plan fills the screen and fits wha
 | `feeder` | Panel to subpanel |
 | `service` | Pole or transformer to meter and main panel |
 | `network` | Patch panel or switch to a wall jack |
+
+- **Supply side gang / Load side gang**: a wire to a multi-gang switch can be tied to one gang. Blank is the whole switch.
+- **Carries**: power to the load (arrow), switch loop (dashed, no arrow) or travelers (double line, no arrow). A wire drawn from switch to switch is travelers.
+- **Disconnected**: drawn faded and capped at both ends. A gang whose wires are all disconnected is dead.
 
 Wiring an item with no circuit to one on a known circuit puts it on that circuit. A wire between network items is always a `network` cable.
 
@@ -171,6 +178,8 @@ Plugins:
       - { Id: p_panel, Kind: panel, Label: Main Panel, Room: garage, Floor: ground, X: 48, Y: 200, Facing: 0, Panel: main }
       - { Id: p_fridge, Kind: appliance, Label: Fridge, Room: kitchen, Floor: ground, X: 430, Y: 82, Width: 85, Depth: 75, Footprint: fridge, Circuit: main/12, Node: fridge }
       - { Id: p_ko1, Kind: outlet, Label: Counter left, Room: kitchen, Floor: ground, X: 388, Y: 180, Facing: 0, Gfci: true, Circuit: main/2 }
+      - { Id: p_light1, Kind: fixture, Room: garage, Floor: ground, X: 200, Y: 200 }
+      - { Id: p_sw1, Kind: switch, Room: garage, Floor: ground, X: 300, Y: 44, Facing: 90, Gangs: [ { Label: Lights, Controls: [ p_light1 ], Way: 3 }, { Dead: true } ] }
       - { Id: patch_panel_1, Kind: patch-panel, Room: garage, Floor: ground, X: 60, Y: 300, Ports: 24, Patches: [ { Port: 7, Switch: network_switch_1/7 } ] }
       - { Id: network_switch_1, Kind: network-switch, Label: Core, Room: garage, Floor: ground, X: 60, Y: 330, Ports: 24 }
       - { Id: jack_1, Kind: jack, Room: kitchen, Floor: ground, X: 388, Y: 240, Facing: 0, Port: patch_panel_1/7 }
