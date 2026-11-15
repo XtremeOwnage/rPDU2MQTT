@@ -172,6 +172,7 @@ Plugins:
       - { Id: p_panel, Kind: panel, Label: Main Panel, Room: garage, Floor: ground, X: 48, Y: 200, Facing: 0, Panel: main }
       - { Id: p_fridge, Kind: appliance, Label: Fridge, Room: kitchen, Floor: ground, X: 430, Y: 82, Width: 85, Depth: 75, Footprint: fridge, Circuit: main/12, Node: fridge }
       - { Id: p_ko1, Kind: outlet, Label: Counter left, Room: kitchen, Floor: ground, X: 388, Y: 180, Facing: 0, Gfci: true, Circuit: main/2 }
+      - { Id: p_light1, Kind: fixture, Room: garage, Floor: ground, X: 200, Y: 200 }
       - { Id: p_sw1, Kind: switch, Room: garage, Floor: ground, X: 300, Y: 44, Facing: 90, Gangs: [ { Label: Lights, Controls: [ p_light1 ] }, { Dead: true } ] }
       - { Id: patch_panel_1, Kind: patch-panel, Room: garage, Floor: ground, X: 60, Y: 300, Ports: 24, Patches: [ { Port: 7, Switch: network_switch_1/7 } ] }
       - { Id: network_switch_1, Kind: network-switch, Label: Core, Room: garage, Floor: ground, X: 60, Y: 330, Ports: 24 }
