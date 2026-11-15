@@ -29,7 +29,7 @@ title: Nodes
 | Counts toward | `Balance` list: Solar, Grid, Battery, Home or nothing |
 | Mode | `Mode`. See [How a node gets its value](index.md#how-a-node-gets-its-value) |
 | Gauge max | `Max`, in the metric's unit |
-| Live value bindings | `Sources[]`, one per metric |
+| Live value bindings | `Sources[]` |
 | Fed by / Feeds | `Links` |
 | Hidden | `Hidden`: left off the flow diagrams, with any feeders that only feed it |
 
@@ -66,6 +66,7 @@ Fields on every binding:
 - **Direction** `split`: one signed value. Positive is out, negative is in. Grid: out = import, in = export. Battery: out = discharge, in = charge.
 - **Accumulation**: check the topic across midnight. A daily counter drops at midnight; a lifetime counter does not.
 - A live reading replaces the node's fixed **Value**. Negative readings count as `0`.
+- Several MQTT bindings on one metric are summed, after **Scale**. The sum is held until every binding has a fresh reading. Example: two 240 V-referenced leg CTs at `Scale: 0.5`.
 - EmonCMS bindings need `EmonCMS.Url` and a read API key. `EmonCMS.Enabled` is not required.
 - Home Assistant bindings use `HomeAssistant.Url` and its token.
 - `unavailable` or non-numeric values supply nothing.

@@ -6,13 +6,10 @@ using Xunit;
 
 namespace rPDU2MQTT.Tests;
 
-/// <summary>
-/// Energy-flow nodes fed from MQTT (#205) — payload parsing, and the builder preferring a live reading
-/// over the node's static Value.
-/// </summary>
+/// <summary>Energy-flow nodes fed from MQTT — payload parsing, and the builder preferring a live reading over the node's static Value.</summary>
 public class EnergyFlowMqttSourceTests
 {
-    /// <summary>A stand-in for the live MQTT cache: whatever the test says is currently reported.</summary>
+    /// <summary>A stand-in for the live MQTT cache.</summary>
     private sealed class FakeLive : IFlowValueSource
     {
         private readonly Dictionary<(string, string), double> values = new();
@@ -37,10 +34,8 @@ public class EnergyFlowMqttSourceTests
         return data;
     }
 
-    // --- Payload parsing ---------------------------------------------------------------------------
 
     [Theory]
-    // Solar Assistant's /state topics publish the bare number.
     [InlineData("1234", 1234d)]
     [InlineData("1234.5", 1234.5d)]
     [InlineData("  42 ", 42d)]
@@ -82,10 +77,10 @@ public class EnergyFlowMqttSourceTests
     }
 
     [Theory]
-    [InlineData("""{"power":1}""", "missing")]          // field absent
-    [InlineData("""{"power":{"a":1}}""", "power")]      // field isn't a number
-    [InlineData("not json", "power")]                   // payload isn't JSON
-    [InlineData("""{"power":1}""", "power.deeper")]     // path runs past a leaf
+    [InlineData("""{"power":1}""", "missing")]
+    [InlineData("""{"power":{"a":1}}""", "power")]
+    [InlineData("not json", "power")]
+    [InlineData("""{"power":1}""", "power.deeper")]
     public void TryParse_RejectsAJsonPayloadItCannotRead(string payload, string field)
         => Assert.False(EnergyFlowMqttSourceService.TryParse(payload, field, out _));
 
@@ -93,7 +88,6 @@ public class EnergyFlowMqttSourceTests
     public void TryParse_WithoutAFieldDoesNotAcceptAJsonObject()
         => Assert.False(EnergyFlowMqttSourceService.TryParse("""{"power":1}""", null, out _));
 
-    // --- Staleness (FlowValueCache) ----------------------------------------------------------------
 
     [Fact]
     public void Cache_ReturnsAFreshReading()
@@ -109,7 +103,6 @@ public class EnergyFlowMqttSourceTests
     [Fact]
     public void Cache_ExpiresAReadingOnceThePublisherGoesQuiet()
     {
-        // The point of the whole staleness rule: a dead Solar Assistant must stop propping up the flow.
         var now = new DateTime(2026, 7, 17, 12, 0, 0, DateTimeKind.Utc);
         var cache = new FlowValueCache();
         cache.Set("solar", "realpower", 750, staleAfterSeconds: 900, now);
@@ -132,8 +125,6 @@ public class EnergyFlowMqttSourceTests
     [Fact]
     public void Cache_AnExpiredNodeDropsOutOfTheGraphRatherThanExportingAStaleValue()
     {
-        // The builder resolves freshness against the real clock (no seam for "now"), so seed timestamps
-        // relative to DateTime.UtcNow rather than a fixed instant, or the "fresh" reading is already stale.
         var cache = new FlowValueCache();
 
         var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
@@ -141,13 +132,9 @@ public class EnergyFlowMqttSourceTests
         flow.Nodes.Add(new EnergyFlowNode { Id = "solar", Label = "Solar" });
         flow.Links.Add(new EnergyFlowLink { From = "solar", To = "outlet:pdu1:0" });
 
-        // Fresh: just published, so solar supplies its reading.
         cache.Set("solar", "realpower", 750, staleAfterSeconds: 60, DateTime.UtcNow);
         Assert.Equal(750, Assert.Single(FlowGraphBuilder.Build(data, flow, "realpower", cache).Links, l => l.Source == "solar").Value);
 
-        // Stale: last published a day ago, past the 60s window. The reading is gone, so the node has no
-        // value of its own and falls back to carrying the outlet's demand rather than reporting a
-        // generation figure that stopped being true.
         cache.Set("solar", "realpower", 750, staleAfterSeconds: 60, DateTime.UtcNow.AddDays(-1));
         Assert.Equal(100, Assert.Single(FlowGraphBuilder.Build(data, flow, "realpower", cache).Links, l => l.Source == "solar").Value);
     }
@@ -175,7 +162,6 @@ public class EnergyFlowMqttSourceTests
         Assert.False(cache.TryGetValue("solar", "realpower", now, out _));
     }
 
-    // --- Subscribe → parse → cache glue (BuildBindings + Apply) ------------------------------------
 
     private static EnergyFlowNode NodeWith(string id, params EnergyFlowSource[] sources)
     {
@@ -200,12 +186,10 @@ public class EnergyFlowMqttSourceTests
     [Fact]
     public void Apply_KeepsInAndOutDirectionsSeparate()
     {
-        // A battery binds discharge (out, default) and charge (in) on the same node/metric. Before the
-        // direction key they collided on (node, "energy") and one silently overwrote the other.
         var nodes = new[]
         {
             NodeWith("battery",
-                new EnergyFlowSource { Topic = "sa/discharge", Metric = "energy" },                      // out (default)
+                new EnergyFlowSource { Topic = "sa/discharge", Metric = "energy" },
                 new EnergyFlowSource { Topic = "sa/charge", Metric = "energy", Direction = "in" }),
         };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
@@ -214,7 +198,7 @@ public class EnergyFlowMqttSourceTests
         EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/discharge", "12.5", DateTime.UtcNow);
         EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/charge", "4.0", DateTime.UtcNow);
 
-        Assert.True(cache.TryGetValue("battery", "energy", out var discharge));     // the supply value the roll-up reads
+        Assert.True(cache.TryGetValue("battery", "energy", out var discharge));
         Assert.Equal(12.5, discharge);
         Assert.True(cache.TryGetValue("battery", FlowMetricKey.For("energy", "in"), out var charge));
         Assert.Equal(4.0, charge);
@@ -223,25 +207,23 @@ public class EnergyFlowMqttSourceTests
     [Theory]
     [InlineData("energy", "out", "energy")]
     [InlineData("energy", "in", "energy#in")]
-    [InlineData("energy", null, "energy")]        // default is out
-    [InlineData("energy", "IN", "energy#in")]     // case-insensitive
+    [InlineData("energy", null, "energy")]
+    [InlineData("energy", "IN", "energy#in")]
     public void FlowMetricKey_SuffixesOnlyTheInDirection(string metric, string? direction, string expected)
         => Assert.Equal(expected, FlowMetricKey.For(metric, direction));
 
     [Fact]
     public void Apply_SplitDirection_FansOneSignedValueIntoBothOutAndIn()
     {
-        // A single battery-power topic swings ±: positive = discharging (out), negative = charging (in). One
-        // 'split' binding drives both, so the user needn't invent two topics they don't have.
         var nodes = new[] { NodeWith("battery", new EnergyFlowSource { Topic = "sa/batt_power", Metric = "realpower", Direction = "split" }) };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
 
-        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/batt_power", "1500", DateTime.UtcNow);   // discharging
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/batt_power", "1500", DateTime.UtcNow);
         Assert.True(cache.TryGetValue("battery", "realpower", out var outV) && outV == 1500);
         Assert.True(cache.TryGetValue("battery", FlowMetricKey.For("realpower", "in"), out var inV) && inV == 0);
 
-        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/batt_power", "-800", DateTime.UtcNow);   // charging
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/batt_power", "-800", DateTime.UtcNow);
         Assert.True(cache.TryGetValue("battery", "realpower", out outV) && outV == 0);
         Assert.True(cache.TryGetValue("battery", FlowMetricKey.For("realpower", "in"), out inV) && inV == 800);
     }
@@ -251,17 +233,17 @@ public class EnergyFlowMqttSourceTests
     {
         Assert.Equal(new[] { ("p", 5.0), ("p#in", 0.0) }, FlowMetricKey.Fan("p", "split", 5).ToArray());
         Assert.Equal(new[] { ("p", 0.0), ("p#in", 3.0) }, FlowMetricKey.Fan("p", "split", -3).ToArray());
-        Assert.Equal(new[] { ("p", -3.0) }, FlowMetricKey.Fan("p", "out", -3).ToArray());   // no split: as-is
+        Assert.Equal(new[] { ("p", -3.0) }, FlowMetricKey.Fan("p", "out", -3).ToArray());
         Assert.Equal(new[] { ("p#in", 4.0) }, FlowMetricKey.Fan("p", "in", 4).ToArray());
     }
 
     [Theory]
-    [InlineData("realpower", "kW", 1000)]        // 1 kW -> 1000 W
-    [InlineData("energy", "Wh", 0.001)]          // 1 Wh -> 0.001 kWh
-    [InlineData("voltage", "mV", 0.001)]         // 1 mV -> 0.001 V
-    [InlineData("realpower", "W", 1)]            // already canonical
-    [InlineData("realpower", null, 1)]           // no unit -> assumed canonical
-    [InlineData("realpower", "bogus", 1)]        // unknown unit -> no-op, never scales wildly
+    [InlineData("realpower", "kW", 1000)]
+    [InlineData("energy", "Wh", 0.001)]
+    [InlineData("voltage", "mV", 0.001)]
+    [InlineData("realpower", "W", 1)]
+    [InlineData("realpower", null, 1)]
+    [InlineData("realpower", "bogus", 1)]
     public void FlowUnits_ConvertsToTheCanonicalUnit(string metric, string? unit, double factor)
         => Assert.Equal(factor, FlowUnits.ToCanonicalFactor(metric, unit));
 
@@ -277,36 +259,28 @@ public class EnergyFlowMqttSourceTests
     public void FlowUnits_Soc_IsAPercentageWithFractionScaling()
     {
         Assert.Equal("%", FlowUnits.Canonical("soc"));
-        Assert.Equal(1, FlowUnits.ToCanonicalFactor("soc", "%"));      // already a percentage
-        Assert.Equal(100, FlowUnits.ToCanonicalFactor("soc", "fraction")); // 0.82 -> 82%
+        Assert.Equal(1, FlowUnits.ToCanonicalFactor("soc", "%"));
+        Assert.Equal(100, FlowUnits.ToCanonicalFactor("soc", "fraction"));
     }
 
     [Fact]
     public void Apply_WithholdsAPeriodCounterThatNeverResets()
     {
-        // The live failure (#292-era): a cumulative PV counter declared as a daily one was published verbatim
-        // as "today", reading 129.9 kWh at 00:20 with the sun down. The pure rule is covered in
-        // PeriodCounterAuditTests; this pins that the ingest actually acts on the verdict, because a rule
-        // nothing consults changes nothing.
         var nodes = new[] { NodeWith("solar", new EnergyFlowSource { Topic = "sa/pv_energy", Metric = "energy", Accumulation = "period" }) };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
         var owner = new FakeAuditor();
         var now = DateTime.UtcNow;
 
-        // Day one: no evidence yet, so it is trusted and published as the day's total.
         EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "129.9", now, null, owner.Allow, "2026-08-04");
         Assert.True(cache.TryGetValue("solar", EnergyPeriod.Metric, out var dayOne) && dayOne == 129.9);
 
-        // The rollover, with the counter carrying straight on. That is not today's total, and it must not be
-        // stated as one — the cache keeps no new value, so the node reports no data rather than 129.9 kWh.
         EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "130.4", now, null, owner.Allow, "2026-08-05");
         Assert.True(cache.TryGetValue("solar", EnergyPeriod.Metric, out var afterRoll) && afterRoll == 129.9,
             "the stale reading was overwritten with a value that is not today's total");
         Assert.Single(owner.Warnings);
         Assert.Contains("did not reset", owner.Warnings[0]);
 
-        // Still withheld on every later sample, and the operator is told once, not once per message.
         EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_energy", "131.0", now, null, owner.Allow, "2026-08-05");
         Assert.Single(owner.Warnings);
     }
@@ -339,9 +313,6 @@ public class EnergyFlowMqttSourceTests
     [Fact]
     public void Apply_NeverWithholdsALifetimeCounter()
     {
-        // The audit exists to check a claim only 'period' sources make. A lifetime counter is *supposed* to
-        // keep climbing across midnight, and the daily figure is derived from it — auditing it would break
-        // every correctly configured install.
         var nodes = new[] { NodeWith("grid", new EnergyFlowSource { Topic = "sa/grid_energy", Metric = "energy", Accumulation = "lifetime" }) };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
@@ -358,7 +329,6 @@ public class EnergyFlowMqttSourceTests
     [Fact]
     public void Apply_ConvertsTheSourceUnitToCanonicalBeforeCaching()
     {
-        // Solar Assistant publishing kW must land in the cache as W, so it lines up with the PDU's watts.
         var nodes = new[] { NodeWith("solar", new EnergyFlowSource { Topic = "sa/pv_power", Metric = "realpower", Unit = "kW" }) };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
@@ -366,13 +336,12 @@ public class EnergyFlowMqttSourceTests
         EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/pv_power", "6", DateTime.UtcNow);
 
         Assert.True(cache.TryGetValue("solar", "realpower", out var v));
-        Assert.Equal(6000, v);   // 6 kW -> 6000 W
+        Assert.Equal(6000, v);
     }
 
     [Fact]
     public void Apply_UnitConversionAndScaleCompose()
     {
-        // Unit normalises (kW -> W), then Scale flips the sign convention on top.
         var nodes = new[] { NodeWith("batt", new EnergyFlowSource { Topic = "sa/batt", Metric = "realpower", Unit = "kW", Scale = -1 }) };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
         var cache = new FlowValueCache();
@@ -380,7 +349,7 @@ public class EnergyFlowMqttSourceTests
         EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/batt", "2", DateTime.UtcNow);
 
         Assert.True(cache.TryGetValue("batt", "realpower", out var v));
-        Assert.Equal(-2000, v);   // 2 kW -> 2000 W, then * -1
+        Assert.Equal(-2000, v);
     }
 
     [Fact]
@@ -393,7 +362,7 @@ public class EnergyFlowMqttSourceTests
         EnergyFlowMqttSourceService.Apply(bindings, cache, "sa/energy", """{"wh":1500}""", DateTime.UtcNow);
 
         Assert.True(cache.TryGetValue("meter", "energy", out var v));
-        Assert.Equal(1.5, v);   // 1500 Wh * 0.001 = 1.5 kWh
+        Assert.Equal(1.5, v);
     }
 
     [Fact]
@@ -423,7 +392,6 @@ public class EnergyFlowMqttSourceTests
     [Fact]
     public void Apply_FansOneTopicOutToEveryNodeBoundToIt()
     {
-        // A shared bus topic can legitimately feed more than one node.
         var nodes = new[]
         {
             NodeWith("a", new EnergyFlowSource { Topic = "shared/power", Metric = "realpower" }),
@@ -439,13 +407,57 @@ public class EnergyFlowMqttSourceTests
     }
 
     [Fact]
+    public void Apply_SumsSeveralSourcesOnOneMetric()
+    {
+        var nodes = new[]
+        {
+            NodeWith("main",
+                new EnergyFlowSource { Topic = "n30/l1_power", Metric = "realpower", Scale = 0.5 },
+                new EnergyFlowSource { Topic = "n30/l2_power", Metric = "realpower", Scale = 0.5 }),
+        };
+        var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
+        var cache = new FlowValueCache();
+        var now = DateTime.UtcNow;
+
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "n30/l1_power", "1650", now);
+        Assert.False(cache.TryGetValue("main", "realpower", now, out _));
+
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "n30/l2_power", "1730", now);
+        Assert.True(cache.TryGetValue("main", "realpower", now, out var v)); Assert.Equal(1690, v);
+
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "n30/l1_power", "1850", now);
+        Assert.True(cache.TryGetValue("main", "realpower", now, out v)); Assert.Equal(1790, v);
+    }
+
+    [Fact]
+    public void Apply_WithholdsTheSumWhileAPartIsStale()
+    {
+        var nodes = new[]
+        {
+            NodeWith("main",
+                new EnergyFlowSource { Topic = "a", Metric = "energy", StaleAfterSeconds = 60 },
+                new EnergyFlowSource { Topic = "b", Metric = "energy", StaleAfterSeconds = 60 }),
+        };
+        var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
+        var cache = new FlowValueCache();
+        var t0 = DateTime.UtcNow;
+
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "a", "10", t0);
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "b", "20", t0);
+        Assert.True(cache.TryGetValue("main", "energy", t0, out var v)); Assert.Equal(30, v);
+
+        EnergyFlowMqttSourceService.Apply(bindings, cache, "a", "11", t0.AddSeconds(120));
+        Assert.True(cache.TryGetValue("main", "energy", t0, out v)); Assert.Equal(30, v);
+    }
+
+    [Fact]
     public void BuildBindings_SkipsNodesWithNoTopicOrId()
     {
         var nodes = new[]
         {
-            NodeWith("", new EnergyFlowSource { Topic = "t1", Metric = "realpower" }),         // no id
-            NodeWith("ok", new EnergyFlowSource { Topic = "", Metric = "realpower" }),          // no topic
-            NodeWith("solar", new EnergyFlowSource { Topic = "  sa/pv  ", Metric = "realpower" }), // trimmed
+            NodeWith("", new EnergyFlowSource { Topic = "t1", Metric = "realpower" }),
+            NodeWith("ok", new EnergyFlowSource { Topic = "", Metric = "realpower" }),
+            NodeWith("solar", new EnergyFlowSource { Topic = "  sa/pv  ", Metric = "realpower" }),
         };
         var bindings = EnergyFlowMqttSourceService.BuildBindings(nodes);
 
@@ -453,7 +465,6 @@ public class EnergyFlowMqttSourceTests
         Assert.Single(bindings);
     }
 
-    // --- Builder integration -----------------------------------------------------------------------
 
     [Fact]
     public void Build_UsesTheLiveValueForAnMqttBoundNode()
@@ -467,7 +478,6 @@ public class EnergyFlowMqttSourceTests
 
         var graph = FlowGraphBuilder.Build(data, flow, "realpower", new FakeLive().Set("solar", "realpower", 750));
 
-        // Solar is a producer: it supplies its measured generation into the panel.
         var link = Assert.Single(graph.Links, l => l.Source == "solar" && l.Target == "panel");
         Assert.Equal(750, link.Value);
     }
@@ -497,7 +507,6 @@ public class EnergyFlowMqttSourceTests
         flow.Links.Add(new EnergyFlowLink { From = "solar", To = "panel" });
         flow.Links.Add(new EnergyFlowLink { From = "panel", To = "outlet:pdu1:0" });
 
-        // A live source exists but has only reported energy — the power graph must still use Value.
         var graph = FlowGraphBuilder.Build(data, flow, "realpower", new FakeLive().Set("solar", "energy", 9));
 
         Assert.Equal(50, Assert.Single(graph.Links, l => l.Source == "solar").Value);
@@ -521,8 +530,6 @@ public class EnergyFlowMqttSourceTests
     [Fact]
     public void Build_LiveZeroMeansZeroAndDoesNotFallBackToValue()
     {
-        // Solar at night reports 0. That's a real reading, not "no reading" — the static Value must not
-        // resurrect a phantom 50W, so the producer link drops out entirely.
         var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
         var flow = new EnergyFlowConfig();
         flow.Nodes.Add(new EnergyFlowNode { Id = "solar", Label = "Solar", Value = 50 });
@@ -538,9 +545,6 @@ public class EnergyFlowMqttSourceTests
     [Fact]
     public void Build_ClampsANegativeLiveReadingRatherThanSubtractingFromTheRollUp()
     {
-        // Battery power is negative under some sign conventions (Solar Assistant included). A directed DAG
-        // can't carry a negative flow, and letting it through would subtract from the parent's roll-up, so
-        // it clamps to 0 — Scale: -1 is the way to flip the convention.
         var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
         var flow = new EnergyFlowConfig();
         flow.Nodes.Add(new EnergyFlowNode { Id = "battery", Label = "Battery" });
@@ -554,16 +558,12 @@ public class EnergyFlowMqttSourceTests
         var graph = FlowGraphBuilder.Build(data, flow, "realpower", live);
 
         Assert.DoesNotContain(graph.Links, l => l.Source == "battery");
-        // Solar's contribution is untouched by the battery's negative reading.
         Assert.Equal(600, Assert.Single(graph.Links, l => l.Source == "solar").Value);
     }
 
     [Fact]
     public void Build_MidChainNodeReadingZero_KeepsTheWiredLink_SoDownstreamStaysConnected()
     {
-        // A real setup: Solar (PV) → inverter → GridBoss, a live source bound to each. The inverter's "load
-        // output" register reads 0 (its PV feeds straight through to the grid), which used to zero the
-        // inverter→gridboss link and drop it — detaching GridBoss into a root and breaking the wired chain.
         var data = OnePdu(Outlet(0, "Load", "realpower", "100"));
         var flow = new EnergyFlowConfig();
         flow.Nodes.Add(new EnergyFlowNode { Id = "solar", Label = "Solar" });
@@ -576,12 +576,9 @@ public class EnergyFlowMqttSourceTests
         var live = new FakeLive().Set("solar", "realpower", 4916).Set("inverter", "realpower", 0).Set("gridboss", "realpower", 3322);
         var graph = FlowGraphBuilder.Build(data, flow, "realpower", live);
 
-        // The wired inverter→gridboss link survives (a hairline 0), so GridBoss keeps its feeder and the chain
-        // renders solar → inverter → gridboss instead of GridBoss floating off as a root.
         var link = Assert.Single(graph.Links, l => l.Source == "inverter" && l.Target == "gridboss");
         Assert.Equal(0, link.Value);
         Assert.True(link.Known);
-        // Contrast: a *pure* zero-producing source (no inflow) still drops — solar reading 0 has no link.
         var night = FlowGraphBuilder.Build(data, flow, "realpower",
             new FakeLive().Set("solar", "realpower", 0).Set("inverter", "realpower", 0).Set("gridboss", "realpower", 3322));
         Assert.DoesNotContain(night.Links, l => l.Source == "solar");
@@ -604,9 +601,6 @@ public class EnergyFlowMqttSourceTests
 [Fact]
     public void Cache_ReportsAnExpiredReading_RatherThanHidingIt()
     {
-        // TryGetValue must hide a stale reading — the roll-up and exports must never carry one. But a UI
-        // needs to tell "this publisher died an hour ago" apart from "nothing was ever bound here", and
-        // those look identical if the expired value is simply dropped. TryDescribe returns it, flagged.
         var cache = new FlowValueCache();
         var t0 = new DateTime(2026, 7, 30, 12, 0, 0, DateTimeKind.Utc);
         cache.Set("battery", "soc", 87, staleAfterSeconds: 60, nowUtc: t0);
@@ -619,7 +613,6 @@ public class EnergyFlowMqttSourceTests
         Assert.False(reading.Fresh);
         Assert.Equal(t0, reading.AtUtc);
 
-        // And nothing at all is still nothing — the two states stay distinct.
         Assert.False(cache.TryDescribe("battery", "temperature", later, out _));
     }
 }
