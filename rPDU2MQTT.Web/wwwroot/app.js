@@ -743,15 +743,6 @@ function holdWhileBusy(sec     , handler                     , maxHoldMs = 60_00
 
 // ── dirty.ts ────────────────────────────────────────────────────
 // Unsaved-change tracking.
-//
-// The form binds straight to `state.data`, so editing was invisible: the Save button looked identical
-// whether you'd changed nothing or rewritten half the config, there was no way to see what a save would
-// write, and no way back short of a reload. This module keeps a baseline of the config as loaded, diffs
-// the live document against it, and lets the shell say exactly what is pending — per field, per page,
-// and as a reviewable list.
-//
-// The diff runs over the *pruned* document (the same shape that gets POSTed), so the empty objects the
-// renderer creates on the way past — ensure(obj, key, {}) — never register as edits.
 
 let dirtyBaseline      = {};
 let dirtyChanges        = [];
@@ -761,16 +752,30 @@ const dirtyFields = new Map             ();
 // Paths whose values must never be shown in the review list.
 const dirtySecrets = new Set        ();
 
+let renames                     = [];
+
 function pathKey(path          ) { return path.join('.'); }
+
+// Node renames since the last save, chained so a→b then b→c is a→c.
+function noteRename(from        , to        ) {
+  const prior = renames.find(r => r[1] === from);
+  if (prior) prior[1] = to; else renames.push([from, to]);
+  renames = renames.filter(([a, b]) => a !== b);
+}
+
+// The save URL, carrying pending renames so the server moves their history.
+function configSaveUrl() {
+  return renames.length ? `/api/config?renames=${encodeURIComponent(JSON.stringify(renames))}` : '/api/config';
+}
 
 // Take the current document as "saved" — on load, and again after a successful save.
 function setBaseline(data      ) {
   dirtyBaseline = JSON.parse(JSON.stringify(data ?? exportData()));
+  renames = [];
   refreshDirty();
 }
 
 // Register a rendered scalar field so it can be marked when its value differs from the baseline.
-// Called by the form renderer; the map is cleared on every rebuild.
 function registerField(path          , fieldEl     , secret          ) {
   dirtyFields.set(pathKey(path), fieldEl);
   if (secret) dirtySecrets.add(pathKey(path));
@@ -803,10 +808,11 @@ function refreshDirty() {
 // Throw the edits away and go back to the last saved document. The caller rebuilds the form from it.
 function discardChanges() {
   state.data = JSON.parse(JSON.stringify(dirtyBaseline));
+  renames = [];
   return state.data;
 }
 
-// Pending edits under a nav entry's paths ("EnergyFlow.Groups,EnergyFlow.Nodes"). "X.*" takes what no other entry claims under X.
+// Pending edits under a nav entry's paths ("EnergyFlow.Groups,EnergyFlow.Nodes").
 function changeCountFor(spec        , claimed           = []) {
   const under = (path          , p        ) => p.split('.').every((k, i) => path[i] === k);
   const prefixes = spec.split(',').map(s => s.trim()).filter(Boolean);
@@ -820,8 +826,7 @@ function changeCountFor(spec        , claimed           = []) {
 
 function isPlainObject(v     ) { return v != null && typeof v === 'object' && !Array.isArray(v); }
 
-// Empty is empty however it's spelled: an absent key, null, '', {} and [] all mean "not set", and the
-// renderer produces all of them. Without this, opening a tab would look like an edit.
+// Empty is empty however it's spelled.
 function prune(v     )      {
   if (v === null || v === undefined || v === '') return undefined;
   if (Array.isArray(v)) {
@@ -854,8 +859,7 @@ function entryName(entry     , index        ) {
 function walk(a     , b     , path          , label          , out       ) {
   if (same(a, b)) return;
 
-  // Recurse while both sides are object-shaped (or absent), so a whole new section still reports one
-  // row per setting rather than a wall of JSON.
+  // Recurse while both sides are object-shaped (or absent).
   const objectish = (v     ) => v === undefined || isPlainObject(v);
   if ((isPlainObject(a) || isPlainObject(b)) && objectish(a) && objectish(b)) {
     const keys = [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])];
@@ -5724,7 +5728,7 @@ function migrateEnergyFlow(flow     ) {
 // Save the whole config (both tabs edit the shared EnergyFlow object; either Save persists everything).
 async function saveConfig(onSaved            ) {
   const payload = exportData();
-  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const r = await api(configSaveUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const ok = r.ok && r.body.ok;
   toast(r.body.message || (ok ? 'Saved.' : 'Save failed.'), ok);
   // This writes the same document the shell's save bar tracks, so re-baseline here too.
@@ -5736,8 +5740,7 @@ const CONTRADICTION_SHARE = 0.25;
 function addFlowSection(nav     , sections     ) {
   const link = navLink(nav, "Flow", "⇄");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  // One line over the diagram: title, what is drawn, and two buttons for everything else. The paragraph, the
-  // period row, the date row and two rows of view switches put the diagram half way down the screen.
+  // One line over the diagram: title, what is drawn, and two buttons for everything else.
   const head = el('div', { class: 'flow-head' });
   head.appendChild(el('h2', { text: 'Flow' }));
   sec.appendChild(head);
@@ -5796,8 +5799,7 @@ function addFlowSection(nav     , sections     ) {
   metricSel.onchange = () => { load(); showDayNote(); };
   // Filled by draw(), which knows which nodes can be drilled into.
   const drillSlot = el('span', { class: 'flow-drill-slot' });
-  // Three ways to look at the same flow: which way it goes (Sankey), or what is using it — as rings
-  // (sunburst) or as boxes sized to their share (treemap).
+  // Three ways to look at the same flow: which way it goes (Sankey), or what is using it.
   const modeSel = el('select', { title: 'How the flow is drawn.' })                     ;
   const MODES = [['sankey', 'Sankey'], ['sunburst', 'Sunburst'], ['treemap', 'Treemap']];
   MODES.forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
@@ -5814,8 +5816,7 @@ function addFlowSection(nav     , sections     ) {
     // Only on the way out of live: a metric chosen while in the past stays chosen.
     const leftLive = !hist.day();
     hist.set(span ? span.day : '', span ? span.days : 1, span ? span.time : '');
-    // A whole day, or a run of them, asks an energy question — power at 23:59:59 of a day gone by says almost
-    // nothing — and only the daily total can be added across days.
+    // A whole day, or a run of them, asks an energy question.
     if (span && ((leftLive && !span.time) || span.days > 1) && measured() !== 'energy_d') { metricSel.value = 'energy_d'; showDayNote(); }
     syncPanels();
     load();
@@ -5927,13 +5928,9 @@ function addFlowSection(nav     , sections     ) {
   };
 
   // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
-  // The menu is the section's, not the drawing's: a redraw that rebuilt it took it out from under the pointer.
-  // A live reading arriving while it is open is held, and drawn when it closes — the diagram holds still while
-  // someone is reading a menu over it.
   let stage      = null;
   let heldGraph      = null;
-  // The zoom and where the pane is scrolled to belong to the reader, not to the drawing: a live reading
-  // arriving must not throw away the view they are reading from (#492).
+  // The zoom and where the pane is scrolled to belong to the reader, not to the drawing.
   let zoom      = null;
   // The sunburst/treemap panes' zooms, one per chart, kept across live repaints the same way.
   let treeZooms        = [];
@@ -6004,10 +6001,7 @@ function addFlowSection(nav     , sections     ) {
   }, 0));
 
   const draw = (graph     ) => {
-    // A refresh rebuilds the whole diagram, and emptying a container as tall as this one collapses the
-    // page. Any layout read while it is empty — and the pane measurement below is one — makes the browser
-    // clamp the scroll position to the shrunken height, so a refresh threw the reader back to the top.
-    // Holding the height across the rebuild means the page never shrinks and nothing is clamped.
+    // A refresh rebuilds the whole diagram, and emptying a container as tall as this one collapses the page.
     const held = (wrap       ).offsetHeight || 0;
     if (held) wrap.style.minHeight = held + 'px';
     // Read off the pane that is about to be replaced: once it is detached it measures nothing.
@@ -6040,7 +6034,6 @@ function addFlowSection(nav     , sections     ) {
     const folded = applyHideNoDataPref(emptied.nodes, emptied.links);
     syncPanels();
     // The view panel is rebuilt with the diagram: its switches and chips reflect what is drawn.
-    // Which part of the hierarchy is drawn: everything, or one node and what is beneath it.
     const drillSel = el('select', { class: 'flow-drill', title: 'Draw one node and everything beneath it.' })                     ;
     drillSel.appendChild(el('option', { value: '', text: 'The whole diagram' }));
     drillable(whole).forEach((n     ) => drillSel.appendChild(el('option', { value: n.id, text: `${n.label || n.id} and below` })));
@@ -6164,15 +6157,9 @@ function addFlowSection(nav     , sections     ) {
     const cols        = [];
     nodes.forEach((n     ) => { const c = colMemo[n.id]; (cols[c] = cols[c] || []).push(n); });
 
-    // The vertical gap between two rows in a column. Text is kept apart by each row being at least a label
-    // line tall (`labelRow`), so this only separates bars; at 14 it doubled every small node's height, and a
-    // column of thirty circuits was mostly empty space.
+    // The vertical gap between two rows in a column.
     const gap = 6;
-    // The diagram used to be a fixed 960px, so on a wide pane it sat in the left two-thirds with the rest
-    // empty. The zoom's fit only ever shrinks — growing by zoom would scale the 11px labels along with it,
-    // which is not more information, only bigger. Laying out to the pane spreads the columns and leaves the
-    // text where it is. Where the width cannot be measured (the DOM stub the checks run against) it falls
-    // back to 960, so the geometry those checks pin is unchanged.
+    // Fill the pane, 960 to 2400px.
     const W = Math.max(960, Math.min(paneW ? paneW - 8 : 960, 2400));
     const shownIds = new Set        (nodes.map((n     ) => n.id));
     const outlined = (d     ) => !collapsedGroups.has(d.Id) && !foldedInto(d) && expandMode(d) === 'replace' && !shownIds.has(d.Id) && drawnMembers(d, shownIds).length > 0;
@@ -6201,10 +6188,6 @@ function addFlowSection(nav     , sections     ) {
     const labelRow = 14;
 
     /// Where a node's name is drawn: the middle of the ribbons it sends.
-    ///
-    /// Usually that is the middle of the bar. It is not for a node that passes on much less than it
-    /// receives — a panel whose unmetered load is switched off — and the label sits to the right of the
-    /// bar among those outgoing ribbons, so it follows them rather than the bar.
     const labelY = (id        , p     ) => {
       const out = stackTotal(id, 'out');
       return out > 0 ? p.y + stackStart(id) + out / 2 : p.y + p.h / 2;
@@ -6230,32 +6213,16 @@ function addFlowSection(nav     , sections     ) {
       return y;
     };
 
-    // The unmetered remainder sits below its measured SIBLINGS (#366) — the ones fed by the same node, not
-    // every measured node in the column. Sorting it below the whole column is what put PDU-1's remainder
-    // underneath PDU-2's devices, so its ribbon had to cross every one of them to get there. The feeder
-    // barycenter therefore leads: it groups each parent's children together, and the remainder settles at
-    // the bottom of its own group.
+    // The unmetered remainder sits below its measured SIBLINGS (#366).
     const remainder = (id        ) => (id || '').includes('#unmeasured') ? 1 : 0;
 
-    // Both barycenters are Infinity for a node with nothing on that side, and `Infinity - Infinity` is NaN
-    // — a falsy comparator result, so the whole column fell through to "biggest first" and lost the
-    // grouping the other pass had just established. Two unknowns have to TIE, not compare as nonsense:
-    // that is what put a sub-panel's minisplit in the middle of the main panel's circuits, and left a
-    // panel's own remainder at the far bottom of the chart with a ribbon crossing everything to reach it.
+    // Both barycenters are Infinity for a node with nothing on that side, and `Infinity - Infinity` is NaN.
     const cmp = (x        , y        ) => x === y ? 0 : x - y;
 
-    // Ties break the same way wherever the barycenters agree: a remainder below its siblings, then biggest
-    // first. Spelled once so the two directions cannot drift apart.
+    // Ties break the same way wherever the barycenters agree: a remainder below its siblings, then biggest first.
     const tieBreak = (a     , b     ) => (remainder(a.id) - remainder(b.id)) || (nodeValue(b.id) - nodeValue(a.id));
 
     // Sweep both ways until the order settles.
-    //
-    // One pass each way is not enough, because a column is ordered against its neighbour's CURRENT
-    // positions and the neighbour may still move. Live: the circuits were ordered while the sub-panel sat
-    // above the main panel, then the panels swapped — leaving each panel's circuits split around the
-    // other's, with ribbons crossing the whole chart to reach them. Sweeping lets both settle against each
-    // other. Four is well past the point these hierarchies stop changing, and it stops early when nothing
-    // moved.
     const orderOf = () => cols.map(cn => (cn || []).map((n     ) => n.id).join(',')).join('|');
     for (let sweep = 0; sweep < 4; sweep++) {
       const before = orderOf();
@@ -6265,14 +6232,7 @@ function addFlowSection(nav     , sections     ) {
         else cn.sort((a     , b     ) => cmp(bary(a.id), bary(b.id)) || tieBreak(a, b));
         placeColumn(cn, c);
       });
-      // Backward: right-to-left, ordering each column by what it feeds — but WITHIN its family, never
-      // across families. Which parent a node hangs off decides where it sits; what it feeds only decides
-      // the order among its own siblings.
-      //
-      // Leading with what a node feeds is what tore each panel's circuits apart: the two circuits that go
-      // on to feed rack PDUs were pulled to the top of the column by them, while their four siblings —
-      // having nothing downstream to be pulled by — fell to the bottom, with the other panel's circuits
-      // stacked in between and ribbons crossing the whole chart. Siblings first, then their order.
+      // Backward: right-to-left, ordering each column by what it feeds — but WITHIN its family, never across families.
       for (let c = cols.length - 2; c >= 0; c--) {
         if (!cols[c]) continue;
         cols[c].sort((a     , b     ) => cmp(bary(a.id), bary(b.id)) || cmp(obary(a.id), obary(b.id)) || tieBreak(a, b));
@@ -6285,38 +6245,20 @@ function addFlowSection(nav     , sections     ) {
     cols.forEach((cn, c) => { bottom = Math.max(bottom, placeColumn(cn, c)); });
 
     // Then slide each column bodily down to meet what it feeds.
-    /// Where each ribbon actually meets each bar, in the order they are drawn.
-    ///
-    /// How thick a ribbon is drawn: its value, or a hairline where there is nothing to scale.
     const ribbonH = (l     ) => (l.known === false || l.value * pxPerUnit < 1.5) ? 1.5 : l.value * pxPerUnit;
 
     /// Where a node's ribbons begin stacking on its bar.
-    ///
-    /// They used to stack from the TOP. A bar is as tall as what passes THROUGH the node, so a node that
-    /// carries more than it hands on keeps every one of its ribbons in the top slice of its own bar: an
-    /// inverter reading 12.1 kW but sending 3.3 kW to two panels attached all of it in the top quarter of a
-    /// 520px bar. Everything downstream is then pulled up there with it — which is how a sub-panel ended up
-    /// sitting in the middle of the other panel's fan, with all of its own ribbons crossing that fan to
-    /// reach its circuits. Centred, the ribbons sit where the bar is.
     const stackTotal = (id        , side              ) =>
       (((side === 'out' ? outgoing[id] : incoming[id]) || [])         )
         .reduce((sum        , l     ) => sum + ribbonH(l), 0);
 
     const stackStart = (id        ) => {
       // ONE offset for both sides, from whichever side carries more.
-      //
-      // Centring each side on the bar independently lines up their CENTRES, not their tops — so a node
-      // passing on a little less than it receives had its outgoing stack start a few pixels lower than its
-      // incoming one, and the top edge of a chain stepped down at every node. Sharing the offset lines up
-      // the tops, which is what makes a run of ribbons carrying the same power read as one flat band.
       const larger = Math.max(stackTotal(id, 'out'), stackTotal(id, 'in'));
       return Math.max(0, ((pos[id]?.h ?? 0) - larger) / 2);
     };
 
-    /// A ribbon leaves a bar at `y + outOff` and arrives at `y + inOff`, both accumulating from the TOP of
-    /// the bar. Relaxing a column toward its neighbours' bar CENTRES therefore aims at a point no ribbon
-    /// touches: a 3,012 W panel whose drawn children total 875 W carries all of them in the top sixth of
-    /// its bar, and its children get pulled to the middle of a bar they never reach.
+    /// A ribbon leaves a bar at `y + outOff` and arrives at `y + inOff`, both accumulating from the TOP of the bar.
     const attachments = () => {
       const at = new Map                                   ();
       const outOff                         = {}, inOff                         = {};
@@ -6341,10 +6283,6 @@ function addFlowSection(nav     , sections     ) {
     const rowOf = (id        ) => Math.max(pos[id].h, labelRow);
 
     /// Push a column apart until no two rows are closer than `gap`, keeping the settled order.
-    ///
-    /// Moving nodes individually is what makes crossings avoidable, and it is also what lets two of them
-    /// land on top of each other — so every move is followed by this. Order is never changed here: the
-    /// ordering passes decided it, and re-sorting by position would undo the grouping they established.
     const separate = (cn       ) => {
       let y = padTop;
       cn.forEach((n     ) => {
@@ -6369,35 +6307,18 @@ function addFlowSection(nav     , sections     ) {
     };
 
     /// Slide each node in a column onto the centre of the ribbons it exchanges with its neighbour.
-    ///
-    /// Whole columns used to move as one, which cannot fix a mismatch INSIDE a column — and that is where
-    /// the crossings were: a sub-panel's bar sat above some of the main panel's own circuits, so every
-    /// ribbon it sent had to cut across them to reach its children. Each bar now settles against the
-    /// ribbons it actually carries.
     const relaxColumn = (c        , side              ) => {
       const cn = cols[c];
       if (!cn || !cn.length) return;
       const at = attachments();
       cn.forEach((n     ) => {
         // A node that feeds something is placed by WHAT IT FEEDS; one that feeds nothing, by its feeder.
-        // Letting both sides pull every node makes them fight and neither wins: an inverter's two ribbons
-        // are contiguous on its bar, while the panels they land on have to sit far enough apart for their
-        // own circuits — so a panel dragged back towards the inverter ends up in the middle of the other
-        // panel's fan. Ribbons are allowed to diverge; bars are not allowed to overlap someone else's.
         const feeds = ((outgoing[n.id] || [])         ).length > 0;
         if (side === 'out' ? !feeds : feeds) return;
         const links = ((side === 'out' ? outgoing[n.id] : incoming[n.id]) || [])
           .map((l     ) => at.get(l)).filter(Boolean);
         if (!links.length) return;
-        // The TOP of the band its ribbons reach, against the top of the band they leave from — not their
-        // flow-weighted centre, and not the middle of either band. Weighting by flow lets one dominant
-        // ribbon pin the node in place while its small siblings sprawl: a 2 kW panel whose seven circuits
-        // span 190px never moved, because its 612 W ribbon was already straight, and the sub-panel below
-        // it ended up sitting in the middle of that fan with every one of its own ribbons cutting through
-        // it. Aiming at the middles fixed that and tilted the whole diagram instead: a node's own ribbons
-        // stack by flow, while the nodes they reach are spread by the row minimum and the gap, so the far
-        // band is the taller of the two and its middle sits lower. Every column absorbed one more step of
-        // that. The tops are the two points that carry the same quantity, so they are what line up.
+        // The TOP of the band its ribbons reach, against the top of the band they leave from.
         const theirs = links.map((a     ) => side === 'out' ? a.to : a.from);
         const mine = links.map((a     ) => side === 'out' ? a.from : a.to);
         const head = (xs          ) => Math.min(...xs);
@@ -6406,8 +6327,7 @@ function addFlowSection(nav     , sections     ) {
       separate(cn);
     };
 
-    // Sweep both ways a few times: a column settles against neighbours that are themselves still settling,
-    // so one pass is never enough. This converges quickly and the separation step keeps every pass legal.
+    // Sweep both ways a few times.
     for (let pass = 0; pass < 6; pass++) {
       for (let c = cols.length - 2; c >= 0; c--) relaxColumn(c, 'out');
       for (let c = 1; c < cols.length; c++) relaxColumn(c, 'in');
@@ -6456,8 +6376,7 @@ function addFlowSection(nav     , sections     ) {
       });
     };
 
-    /// What a right-click offers over a node: what it has been drawing, where its supply comes from, and
-    /// the node itself. A history is only worth offering for something the bridge actually reads.
+    /// What a right-click offers over a node: what it has been drawing, where its supply comes from, and the node itself.
     const nodeMenu = (e     , n     ) => {
       e.preventDefault?.();
       e.stopPropagation?.();
@@ -6491,9 +6410,7 @@ function addFlowSection(nav     , sections     ) {
       ]);
     };
 
-    // The right-angle routings draw wires, each source with one trunk in the corridor (see wirePath). The
-    // trunks of the sources sharing a corridor are spread across its middle, top source nearest the left,
-    // so a source's wires never run along another's trunk.
+    // The right-angle routings draw wires, each source with one trunk in the corridor (see wirePath).
     const wires = ribbonStyle !== 'curved';
     const trunkOf = new Map                ();
     if (wires) {
@@ -6807,23 +6724,19 @@ function addFlowSection(nav     , sections     ) {
     if (withheldSources.length) wrap.appendChild(withheldBanner(withheldSources));
     if (contradicted.length) wrap.appendChild(contradictionBanner(contradicted, (id) => focusPath(svg, incoming, id)));
 
-    // No height cap: the diagram is the whole page, so it grows to its own height and the page scrolls once
-    // — a pane capped at 74vh put a scrollbar inside a scrollbar and made the graph feel like an iframe.
+    // No height cap: the diagram is the whole page, so it grows to its own height and the page scrolls once.
     const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg);
     stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
     wrap.appendChild(stage);
 
-    // On a phone, fitting the whole Sankey shrinks its 11px labels to unreadable; open at a scale that keeps
-    // them near 9px and let the reader pan. Fit still shows the whole of it.
+    // On a phone, fitting the whole Sankey shrinks its 11px labels to unreadable.
     zoom = attachZoom(scroll, svg, W, totalH, true, undefined, 0.8);  // container is replaced on each draw(), so no leak.
-    // Back to where the reader was, at the zoom they set, rather than fitted again from scratch — unless the
-    // diagram itself changed, when the old view is of something that is no longer drawn.
+    // Back to where the reader was, at the zoom they set, rather than fitted again from scratch.
     if (keptView && !refit) zoom.setView(keptView);
     refit = false;
 
-    // Zoom where the diagram is, not in a toolbar under it: on a graph this size the reader's attention is
-    // already inside the pane.
+    // Zoom where the diagram is, not in a toolbar under it.
     const zoomBtn = (label        , title        , act            ) => {
       const b = btn(label);
       b.title = title;
@@ -6835,8 +6748,7 @@ function addFlowSection(nav     , sections     ) {
       zoomBtn('−', 'Zoom out', () => (zoom       ).zoomBy(1 / 1.2)),
       zoomBtn('⤢', 'Fit the diagram to the page', () => (zoom       ).fit())));
 
-    // The gesture line names what the device can actually do — a phone has neither a wheel nor a Ctrl key,
-    // and being told to use them while the diagram sits three screens wide is its own kind of broken.
+    // The gesture line names what the device can actually do.
     const hints = el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } });
     const fitBtn = btn('Fit');
     fitBtn.onclick = () => (zoom       ).fit();
@@ -7010,9 +6922,7 @@ function addFlowSection(nav     , sections     ) {
     const colX      = {};
     [...cand.keys()].sort((a, b) => colMemo[b] - colMemo[a]).forEach(id => {
       const outs = outgoing[id] || [];
-      // Only children already placed count. A cycle (a config wired by hand, or an older build) leaves one
-      // unplaced, and a NaN column put the node in no column at all — every later lookup of its position
-      // was undefined and the page threw instead of drawing.
+      // Only children already placed count.
       const placed = outs.map((e     ) => colX[e.to]).filter((c     ) => typeof c === 'number');
       colX[id] = placed.length ? Math.max(0, Math.min(...placed) - 1) : colMemo[id];
     });
@@ -7092,8 +7002,6 @@ function addFlowSection(nav     , sections     ) {
     });
 
     // Interactions: drag a node's output port onto another node to add a directed feed.
-    // Screen → diagram coordinates. Falls back to the screen point where the browser cannot say (no CTM),
-    // which only costs the rubber-band line its exact anchor.
     const toUser = (cx        , cy        ) => {
       try { return new DOMPoint(cx, cy).matrixTransform(svg.getScreenCTM().inverse()); } catch { return { x: cx, y: cy }; }
     };
@@ -7112,9 +7020,6 @@ function addFlowSection(nav     , sections     ) {
     const targetUnder = (cx        , cy        , self      ) => { const hit      = document.elementFromPoint(cx, cy); const gn = hit && hit.closest && hit.closest('g[data-id]'); return gn && gn.dataset.id !== (self ?? linkFrom) ? gn.dataset.id : null; };
 
     /// Make `parent` what feeds `child`, in place of whatever fed it before.
-    ///
-    /// Dropping a node on another says "this is where it comes from", so it replaces rather than adds —
-    /// an extra feeder is the ● drag. Replacing is destructive, so existing wiring is named and confirmed.
     const setParent = (child        , parent        ) => {
       if (child === parent) return;
       if (feedsNothing((cand.get(parent) || {}).kind)) {
@@ -7143,8 +7048,7 @@ function addFlowSection(nav     , sections     ) {
       const rmId = e.target.getAttribute && e.target.getAttribute('data-rm');
       if (rmId) { const i = customNodes.findIndex((n     ) => n.Id === rmId); if (i >= 0) customNodes.splice(i, 1); for (let j = links.length - 1; j >= 0; j--) if (links[j].From === rmId || links[j].To === rmId) links.splice(j, 1); renderEditor(); return; }
       if (portId) { linkFrom = portId; tempLine = svgEl('path', { d: '', fill: 'none', stroke: '#5ab0ff', 'stroke-width': 2, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }); edgeLayer.appendChild(tempLine); e.preventDefault(); return; }
-      // The node body: dragging it asks what feeds it. Engaged past a threshold below, so a click still
-      // clicks and a double-click still renames.
+      // The node body: dragging it asks what feeds it.
       const onNode = e.target.closest ? e.target.closest('g[data-id]') : null;
       if (onNode && onNode.dataset && onNode.dataset.id) {
         dragNode = onNode.dataset.id;
@@ -7250,11 +7154,9 @@ function addFlowSection(nav     , sections     ) {
     (live     ) => {
       if (hist.day() || !live || !live.ok) return;
       const body = priced(live);
-      // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes, or as soon as
-      // the control someone is using is let go — a redraw rebuilds the controls, closing an open dropdown.
+      // Held rather than dropped.
       if (menu.isOpen() || busyInSection(sec)) { heldGraph = body; return; }
-      // …and while the reader is moving the diagram: a redraw mid-swipe or mid-pinch replaces the pane under
-      // their finger. It is drawn once they have let go and it has stopped coasting.
+      // Held while zooming or panning.
       if (zoom?.busy?.()) { heldGraph = body; drawWhenStill(); return; }
       lastGraph = body;
       draw(body);
@@ -7288,12 +7190,6 @@ let pickerSeq = 0;
 /// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
 function overlay(title        , onClose             , opts                                                     = {})                                   {
   const back = el('div', { class: 'sheet-backdrop' });
-  // The node editor's widest row is a table of eleven columns, which wants about 1,640px. At 75vw that
-  // overflowed a 2,039px screen by ~110px and the Remove button rendered as "Re…", so the sheet takes what
-  // the screen actually has. Vertical scrolling only: the table below manages its own width.
-  // overflowX was hidden, on the reasoning that the table below manages its own width. Nothing did: the
-  // widest row wants ~1,640px, so on a phone the panel clipped it at ~340px with no way to reach the rest.
-  // Both axes scroll; the sizing is in .sheet-panel so a phone can be given different numbers.
   const panel = el('div', { class: 'sheet-panel' + (opts.className ? ' ' + opts.className : '') });
   // Header and footer stay put while the body scrolls under them: Close and Save are always in reach.
   const head = el('div', { class: 'sheet-head' });
@@ -7305,15 +7201,6 @@ function overlay(title        , onClose             , opts                      
   head.appendChild(x);
   const body = el('div');
   // Every edit inside a sheet reports itself, once, here.
-  //
-  // The controls in this file write straight into the config object and most of them returned without
-  // telling the dirty tracker, so the save bar stayed silent until something else happened to refresh it —
-  // closing the sheet, or a control that did remember. Editing a topic and looking at the save bar said
-  // nothing had changed. Adding refreshDirty() to two dozen handlers fixes today's controls and not
-  // tomorrow's; `change` bubbles, so one listener on the sheet covers every control it will ever contain.
-  //
-  // refreshDirty() diffs the whole document, so it does not matter which control fired: what changed is
-  // read off the document rather than reported by the handler.
   body.addEventListener('change', () => refreshDirty());
   panel.append(head, body);
   if (opts.footer) panel.appendChild(el('div', { class: 'sheet-foot sheet-sticky-foot' }, opts.footer));
@@ -7458,9 +7345,6 @@ function openTopicPicker(current        , onPick                         ) {
 }
 
 /// Every feed on the EmonCMS server, fetched once per page and shared by every binding's picker.
-///
-/// One request rather than one per row: a node with eight bindings would otherwise ask the server for the
-/// same list eight times the moment its editor opened.
 let emonFeeds                        = null;
 function emonCmsFeeds(force = false)                 {
   if (force || !emonFeeds) {
@@ -7494,8 +7378,7 @@ function openEmonCmsPicker(current        , onPick                     ) {
   const draw = (feeds       ) => {
     const q = search.value.trim().toLowerCase();
     const shown = feeds.filter(f => !q || (f.name || '').toLowerCase().includes(q) || (f.tag || '').toLowerCase().includes(q));
-    // A name that exists under several tags cannot be stored as a bare name, so the row that offers it
-    // stores the id instead — the ambiguity is settled here rather than reported later as a missing value.
+    // Names repeated across tags are stored by id.
     const counts = new Map                ();
     feeds.forEach(f => counts.set(f.name, (counts.get(f.name) || 0) + 1));
 
@@ -7531,8 +7414,7 @@ function emonCmsSourceEditor(src     , onChange            )             {
   const browse = btn('Browse…');
   browse.title = 'List the feeds on the EmonCMS server and pick one.';
   browse.onclick = () => openEmonCmsPicker(feedIn.value.trim(), f => {
-    // Stored by name where the name identifies it, so the binding survives a re-provision that renumbers
-    // the feed; by id only where a name would be ambiguous.
+    // Stored by name where the name identifies it, so the binding survives a re-provision that renumbers the feed.
     emonCmsFeeds().then(all => {
       const dupes = all.filter(o => o.name === f.name).length > 1;
       feedIn.value = dupes ? String(f.id) : f.name;
@@ -7643,23 +7525,55 @@ function openModbusExplorer(src     , onPick            ) {
   read.onclick(null);
 }
 
-/// Rename a node and carry its wiring with it; the id is the node's identity everywhere.
-function openRenameDialog(node     , flow     , existingIds             , onRenamed                      ) {
+/// Every config slot holding a node id, except the legacy Parents map.
+function eachNodeRef(data     , visit                                                   ) {
+  const flow = data?.EnergyFlow || {};
+  const field = (o     , k        ) => { if (o && typeof o[k] === 'string') visit(o[k], v => { o[k] = v; }); };
+  const list = (a     ) => { if (Array.isArray(a)) a.forEach((x, i) => { if (typeof x === 'string') visit(x, v => { a[i] = v; }); }); };
+  (flow.Links || []).forEach((l     ) => { field(l, 'From'); field(l, 'To'); });
+  (flow.Groups || []).forEach((g     ) => list(g.Members));
+  BALANCE_ROLES.forEach(([, key]) => list(flow.Balance?.[key]));
+  (flow.Panels || []).forEach((p     ) => { field(p, 'Node'); (p.Breakers || []).forEach((b     ) => field(b, 'Node')); });
+  (flow.Clamps || []).forEach((c     ) => field(c, 'Channel'));
+  (flow.AutoTags || []).forEach((r     ) => field(r, 'Match'));
+  const loc = data?.Plugins?.locations || {};
+  (loc.Placements || []).forEach((p     ) => field(p, 'Node'));
+  (loc.AutoLocations || []).forEach((r     ) => field(r, 'Match'));
+  const climate = (c     ) => { if (c) { list(c.Temperature); list(c.Humidity); } };
+  (loc.Sites || []).forEach((s     ) => (s.Floors || []).forEach((f     ) => {
+    (f.Rooms || []).forEach((r     ) => climate(r.Climate));
+    (f.Areas || []).forEach((a     ) => climate(a.Climate));
+  }));
+}
+
+function countNodeRefs(data     , id        ) {
+  let n = 0;
+  eachNodeRef(data, v => { if (v === id) n++; });
+  const parents = data?.EnergyFlow?.Parents || {};
+  return n + Object.entries(parents).filter(([c, p]) => c === id || p === id).length;
+}
+
+function renameNodeRefs(data     , from        , to        ) {
+  eachNodeRef(data, (v, set) => { if (v === from) set(to); });
+  const parents = data?.EnergyFlow?.Parents;
+  if (parents) Object.keys(parents).forEach(child => {
+    if (parents[child] === from) parents[child] = to;
+    if (child === from) { parents[to] = parents[child]; delete parents[child]; }
+  });
+}
+
+function openRenameDialog(node     , existingIds             , onRenamed                      ) {
   const { body, close } = overlay(`Rename ${node.Label || node.Id}`);
-  const links        = ensure(flow, 'Links', []);
-  const parents      = ensure(flow, 'Parents', {});
-  const wired = links.filter(l => l.From === node.Id || l.To === node.Id).length
-    + Object.entries(parents).filter(([c, p]) => c === node.Id || p === node.Id).length;
+  const refs = countNodeRefs(state.data, node.Id);
 
-  body.appendChild(el('div', { class: 'desc', text: `Its ${wired} wiring reference(s) move with it automatically.` }));
+  body.appendChild(el('div', { class: 'desc', text: `${refs} reference(s) and the local history move with it.` }));
 
-  // The id is what every integration keys off, so a rename is a rename downstream too.
   const warn = el('div', {
     class: 'desc',
     style: { border: '1px solid var(--bad)', borderRadius: '6px', padding: '8px', margin: '8px 0', color: 'var(--fg)' },
   });
-  warn.appendChild(el('b', { text: 'This changes how the node appears downstream.' }));
-  warn.appendChild(el('div', { text: 'The MQTT topic, the Home Assistant entity/unique id, the Prometheus series and the EmonCMS feed are all derived from the id. Anything already recording under the old name — HA history, an energy dashboard entry, a Grafana query, an emonCMS feed — will see this as a new thing and stop following the old one. Rename deliberately, and fix those up afterwards.' }));
+  warn.appendChild(el('b', { text: 'Not moved: Home Assistant, Prometheus, EmonCMS.' }));
+  warn.appendChild(el('div', { text: 'The MQTT topic, HA entity, Prometheus series and EmonCMS feed follow the id. Their history stays under the old id.' }));
   body.appendChild(warn);
 
   const row = el('div', { class: 'ld-toolbar' });
@@ -7677,17 +7591,10 @@ function openRenameDialog(node     , flow     , existingIds             , onRena
 
     const from = node.Id;
     node.Id = next;
-    links.forEach(l => { if (l.From === from) l.From = next; if (l.To === from) l.To = next; });
-    // It keeps its place in the energy balance and in any group that holds it.
-    renameInBalance(flow, from, next);
-    (flow.Groups || []).forEach((g     ) => { g.Members = (g.Members || []).map((m        ) => m === from ? next : m); });
-    // The legacy Parents map keys by child id and stores the parent id, so both sides can name this node.
-    Object.keys(parents).forEach(child => {
-      if (parents[child] === from) parents[child] = next;
-      if (child === from) { parents[next] = parents[child]; delete parents[child]; }
-    });
+    renameNodeRefs(state.data, from, next);
+    noteRename(from, next);
 
-    toast(`Renamed ${from} → ${next}; ${wired} reference(s) updated. Save to apply.`, true);
+    toast(`Renamed ${from} → ${next}; ${refs} reference(s) updated. Save to apply.`, true);
     close();
     onRenamed(next);
   };
@@ -7704,10 +7611,6 @@ function field(labelText        , control             , hint         ) {
 }
 
 // Per-node editor (#129): what the node is, where its readings come from, and how it is wired.
-//
-// Laid out as sections a phone can stack: the basics, then one card per live binding, then the wiring,
-// then the filing details (tags, place, EmonCMS) folded away until wanted. The bindings were a table of
-// up to eleven columns — about 1,640px — which a phone could only show by scrolling it sideways.
 function renderNodeEditor(node     , links       , cand                  , rerender                           ) {
   const meta = kindMeta(node.Kind);
   const allowed = meta[2];
@@ -7734,8 +7637,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
   kindSel.onchange = () => { node.Kind = kindSel.value === 'node' ? undefined : kindSel.value; rerender(); };
   grid.appendChild(field('Kind', kindSel));
 
-  // What it counts toward is not what it is: stored in EnergyFlow.Balance, so the Balance page and this
-  // field are one setting and a node sits under one total at most.
+  // What it counts toward is not what it is.
   const flowCfg = ensure(state.data, 'EnergyFlow', {});
   const roleSel = el('select')                     ;
   roleSel.appendChild(el('option', { value: '', text: 'Nothing' }));
@@ -7848,8 +7750,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
     // Body: where it reads from, then how the reading is taken.
     const bodyRow = el('div', { class: 'ne-bind-body' });
     if (type === 'derived') {
-      // Nothing to point at: the value comes from this node's other bindings. Which sum it will actually
-      // do, and what it still needs to do any of them, are the useful things to say.
+      // Nothing to point at: the value comes from this node's other bindings.
       const m = metric.toLowerCase();
       const rule = (state.derivations || []).find((d     ) => d.metric === m);
       const bound = (x        ) => sources.some((o     ) => o !== src
@@ -7863,13 +7764,11 @@ function renderNodeEditor(node     , links       , cand                  , reren
         const r = (state.derivations || []).find((d     ) => d.metric === x);
         return (r?.from || []).some((f     ) => have(f.a, seen) && have(f.b, seen));
       };
-      // Seeded with the metric being worked out, or it can be "reached" through a relation that needs
-      // itself — which would offer a sum the backend will not do.
+      // Seeded with the metric being worked out, or it can be "reached" through a relation that needs itself.
       const reach = (x        ) => have(x, new Set([m]));
       const usable = (rule?.from || []).find((f     ) => reach(f.a) && reach(f.b));
       const what = el('div', { class: 'ne-derived' });
-      // A backend that does not serve the relations (an older one, mid-rollout) leaves us unable to say
-      // which sum this is — but "cannot be calculated" would be a claim, and we do not have it to make.
+      // No relations from the backend.
       if (!(state.derivations || []).length) {
         what.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'calculated from this node’s other readings' }));
       } else if (!rule) {
@@ -8073,8 +7972,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
   const addLink = (from        , to        ) => {
     if (from === to || links.some(l => l.From === from && l.To === to)) return;
     if (wouldLoop(links, from, to)) { toast('That would create a feeder loop.', false); return; }
-    // A panel is fed from one place. Two feeders split its power across both on the diagram and count a
-    // supply that is not there, so the second one is refused rather than quietly wired.
+    // A panel is fed from one place.
     const already = (cand.get(to) || {}).kind === 'panel' ? links.find(l => l.To === to) : null;
     if (already) { toast(`${nm(to)} is a panel, and a panel is fed from one place — it is already fed by ${nm(already.From)}. Drop that first.`, false); return; }
     links.push({ From: from, To: to });
@@ -8139,8 +8037,7 @@ function renderNodeEditor(node     , links       , cand                  , reren
     el('span', { class: 'ne-count', text: filed ? `${filed} set` : '' })));
   const moreGrid = el('div', { class: 'node-editor-fields' });
 
-  // Tags (#342). Every kind can be tagged — a panel or a plain node is exactly the sort of thing an
-  // export filter names.
+  // Tags (#342).
   const tags = ensure(node, 'Tags', []);
   moreGrid.appendChild(field('Tags', tagInput(tags, {
     placeholder: 'critical, rack-1',
@@ -8396,7 +8293,6 @@ function syncNodeModal(node     , links       , cand                  , editing 
 }
 
 /// The node editor on its own, over whatever is open (a breaker's editor, say) rather than on the Nodes page.
-/// `graph` is what the bridge reads, for the editor's pickers; `onClose` runs once it is put away.
 function openNodeSheet(id        , graph                                               , onClose             ) {
   const flow = ensure(state.data, 'EnergyFlow', {});
   const customNodes = ensure(flow, 'Nodes', []);
@@ -8523,7 +8419,7 @@ function renderNodeManager(flow     , customNodes       , links       , cand    
     rename.onclick = () => {
       const taken = new Set        ([...cand.keys(), ...customNodes.map((x     ) => x.Id)]);
       taken.delete(n.Id);
-      openRenameDialog(n, flow, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
+      openRenameDialog(n, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
     };
 
     const copy = btn('Copy');
@@ -16107,7 +16003,7 @@ async function saveConfigChanges() {
   saving = true; renderSaveBar();
   if (save) save.textContent = 'Saving…';
 
-  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const r = await api(configSaveUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   saving = false;
   if (save) { save.innerHTML = ''; save.append('Save', el('kbd', { text: 'Ctrl' }), el('kbd', { text: 'S' })); }
 

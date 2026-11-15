@@ -736,6 +736,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             if (!configSource.CanWrite)
                 return Results.Json(new { ok = false, message = "Configuration is read-only (e.g. a ConfigMap or ':ro' mount); cannot save. Use a writable source to edit from the GUI." }, statusCode: 409);
 
+            List<(string From, string To)> renames;
+            try { renames = ParseRenames(ctx.Request.Query["renames"].ToString()); }
+            catch (Exception ex) { return Results.BadRequest(new { ok = false, message = $"Invalid renames: {ex.Message}" }); }
+
             try
             {
                 // Config this process is running, before replacement.
@@ -759,6 +763,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 foreach (var p in (integrations?.All ?? []).OfType<Core.Integrations.IGuiPageProvider>().Where(p => p.PageSettings.Count > 0))
                     ConfigApply.CopyPluginKeys(config, reloaded, ((Core.Integrations.IIntegration)p).Id, p.PageSettings);
 
+                var renamed = historyCopy?.RenameNodes(renames);
+
                 // Apply PDU instance add/remove live.
                 var instanceMessage = "";
                 try
@@ -776,7 +782,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
                 var message = (configSource.IsGitOpsManaged
                     ? "Saved to the Kubernetes resource (remember to update your GitOps source so it doesn't drift). Credentials are stored in the companion Secret. Press 'Republish discovery' to apply override/name/template changes; restart for primary connection/credential changes (incl. OIDC)."
-                    : "Saved. Press 'Republish discovery' to apply override/name/template changes; restart the service for primary connection changes (host/port).") + instanceMessage;
+                    : "Saved. Press 'Republish discovery' to apply override/name/template changes; restart the service for primary connection changes (host/port).") + instanceMessage
+                    + (renamed is null ? "" : " " + renamed);
                 return Results.Json(new
                 {
                     ok = true,
@@ -1708,7 +1715,6 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             catch (Exception ex) { return Results.Json(new { ok = false, message = ex.Message }, ConfigSchema.Json); }
         });
 
-        // Does the history backend answer?
         // Data directories this process writes to, and free space on each.
         app.MapGet("/api/diagnostics/storage", (HttpContext ctx) =>
         {
@@ -2578,6 +2584,15 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
     /// <summary>Body of POST /api/modbus/probe.</summary>
     private sealed record ModbusProbeRequest(string Host, int Port, int UnitId, string? Framing, int TimeoutMs, List<EnergyFlowSource>? Items);
+
+    /// <summary>The renames query of POST /api/config: a JSON array of [from, to] pairs.</summary>
+    internal static List<(string From, string To)> ParseRenames(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        var pairs = System.Text.Json.JsonSerializer.Deserialize<List<List<string>>>(json) ?? [];
+        return pairs.Where(p => p.Count == 2 && !string.IsNullOrWhiteSpace(p[0]) && !string.IsNullOrWhiteSpace(p[1]))
+                    .Select(p => (p[0], p[1])).ToList();
+    }
 
     /// <summary>Body of POST /api/config/import.</summary>
     private sealed record ConfigImportRequest(string? Yaml, string? Mode, string? Current);

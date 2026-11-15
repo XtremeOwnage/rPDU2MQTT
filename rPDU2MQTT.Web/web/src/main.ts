@@ -3,7 +3,7 @@ import { api, toast, slug, navMatches, el, openSheet, closeSheet, sheetIsOpen } 
 import { state } from './state.js';
 import { build } from './config-form.js';
 import { exportData } from './overrides.js';
-import { setBaseline, refreshDirty, discardChanges, isDirty, changes, formatValue, onDirty } from './dirty.js';
+import { configSaveUrl, setBaseline, refreshDirty, discardChanges, isDirty, changes, formatValue, onDirty } from './dirty.js';
 import { subscribeLive, onRealtimeState, expectedRestart, restartFinished, expectRestart, onExpectRestart } from './realtime.js';
 import { initTheme } from './theme.js';
 import { initPalette } from './palette.js';
@@ -349,7 +349,7 @@ async function saveConfigChanges() {
   saving = true; renderSaveBar();
   if (save) save.textContent = 'Saving…';
 
-  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const r = await api(configSaveUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   saving = false;
   if (save) { save.innerHTML = ''; save.append('Save', el('kbd', { text: 'Ctrl' }), el('kbd', { text: 'S' })); }
 

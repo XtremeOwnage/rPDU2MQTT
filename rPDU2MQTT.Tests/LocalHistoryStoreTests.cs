@@ -3,10 +3,7 @@ using Xunit;
 
 namespace rPDU2MQTT.Tests;
 
-/// <summary>
-/// The bridge's own history (#502): fixed-interval files, a slot found by arithmetic, and "no reading"
-/// stored as no reading rather than a zero.
-/// </summary>
+/// <summary>The bridge's own history (#502).</summary>
 public class LocalHistoryStoreTests : IDisposable
 {
     private readonly string root = Path.Combine(Path.GetTempPath(), "rpdu-history-" + Guid.NewGuid().ToString("N")[..8]);
@@ -218,5 +215,46 @@ public class LocalHistoryStoreTests : IDisposable
         Assert.Equal(1, store.ValueAt("a", "realpower", At(10), At(11)));
         Assert.Equal(2, store.ValueAt("b", "realpower", At(10), At(11)));
         Assert.Equal(3, store.ValueAt("a", "energy", At(10), At(11)));
+    }
+
+    [Fact]
+    public void ARenameMovesTheSeriesToTheNewId()
+    {
+        var store = Store();
+        store.Write("n30_3_4", "realpower", At(10), 340);
+        store.Write("n30_3_4", "energy", At(10), 12);
+
+        Assert.Equal(2, store.Rename([("n30_3_4", "n31_3_6")], ["realpower", "energy", "current"]));
+
+        Assert.Equal(340, store.ValueAt("n31_3_6", "realpower", At(10), At(11)));
+        Assert.Equal(12, store.ValueAt("n31_3_6", "energy", At(10), At(11)));
+        Assert.True(double.IsNaN(store.ValueAt("n30_3_4", "realpower", At(10), At(11))));
+    }
+
+    [Fact]
+    public void ARenameKeepsWhatTheNewIdAlreadyHolds()
+    {
+        var store = Store();
+        store.Write("old", "realpower", At(10), 1);
+        store.Write("old", "realpower", At(10, 0, 10), 2);
+        store.Write("new", "realpower", At(10, 0, 10), 9);
+
+        store.Rename([("old", "new")], ["realpower"]);
+
+        Assert.Equal(1, store.ValueAt("new", "realpower", At(10), At(11)));
+        Assert.Equal(9, store.ValueAt("new", "realpower", At(10, 0, 10), At(11)));
+    }
+
+    [Fact]
+    public void SwappedIdsSwapTheirSeries()
+    {
+        var store = Store();
+        store.Write("a", "realpower", At(10), 1);
+        store.Write("b", "realpower", At(10), 2);
+
+        store.Rename([("a", "b"), ("b", "a")], ["realpower"]);
+
+        Assert.Equal(1, store.ValueAt("b", "realpower", At(10), At(11)));
+        Assert.Equal(2, store.ValueAt("a", "realpower", At(10), At(11)));
     }
 }

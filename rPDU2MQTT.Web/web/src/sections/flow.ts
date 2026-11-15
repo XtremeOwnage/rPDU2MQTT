@@ -1,7 +1,7 @@
 // The Sankey: the energy hierarchy drawn as ribbons for one metric at one moment.
 import { activate, api, attachZoom, btn, el, ensure, formatMeasure, formatNum, instanceSelector, navLink, svgEl, toast, withInstance } from '../helpers.js';
 import { busyInSection, liveWhileActive, realtimeLive } from '../realtime.js';
-import { setBaseline, refreshDirty } from '../dirty.js';
+import { configSaveUrl, setBaseline, refreshDirty } from '../dirty.js';
 import { state } from '../state.js';
 import { exportData } from '../overrides.js';
 import { isAdditiveMetric, metricLabel, feedsNothing } from '../flow-vocabulary.js';
@@ -42,7 +42,7 @@ export function migrateEnergyFlow(flow: any) {
 // Save the whole config (both tabs edit the shared EnergyFlow object; either Save persists everything).
 export async function saveConfig(onSaved: () => void) {
   const payload = exportData();
-  const r = await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const r = await api(configSaveUrl(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   const ok = r.ok && r.body.ok;
   toast(r.body.message || (ok ? 'Saved.' : 'Save failed.'), ok);
   // This writes the same document the shell's save bar tracks, so re-baseline here too.
@@ -54,8 +54,7 @@ const CONTRADICTION_SHARE = 0.25;
 export function addFlowSection(nav: any, sections: any) {
   const link = navLink(nav, "Flow", "⇄");
   const sec = document.createElement('div'); sec.className = 'section'; sections.appendChild(sec);
-  // One line over the diagram: title, what is drawn, and two buttons for everything else. The paragraph, the
-  // period row, the date row and two rows of view switches put the diagram half way down the screen.
+  // One line over the diagram: title, what is drawn, and two buttons for everything else.
   const head = el('div', { class: 'flow-head' });
   head.appendChild(el('h2', { text: 'Flow' }));
   sec.appendChild(head);
@@ -114,8 +113,7 @@ export function addFlowSection(nav: any, sections: any) {
   metricSel.onchange = () => { load(); showDayNote(); };
   // Filled by draw(), which knows which nodes can be drilled into.
   const drillSlot = el('span', { class: 'flow-drill-slot' });
-  // Three ways to look at the same flow: which way it goes (Sankey), or what is using it — as rings
-  // (sunburst) or as boxes sized to their share (treemap).
+  // Three ways to look at the same flow: which way it goes (Sankey), or what is using it.
   const modeSel = el('select', { title: 'How the flow is drawn.' }) as HTMLSelectElement;
   const MODES = [['sankey', 'Sankey'], ['sunburst', 'Sunburst'], ['treemap', 'Treemap']];
   MODES.forEach(([v, t]) => modeSel.appendChild(el('option', { value: v, text: t })));
@@ -132,8 +130,7 @@ export function addFlowSection(nav: any, sections: any) {
     // Only on the way out of live: a metric chosen while in the past stays chosen.
     const leftLive = !hist.day();
     hist.set(span ? span.day : '', span ? span.days : 1, span ? span.time : '');
-    // A whole day, or a run of them, asks an energy question — power at 23:59:59 of a day gone by says almost
-    // nothing — and only the daily total can be added across days.
+    // A whole day, or a run of them, asks an energy question.
     if (span && ((leftLive && !span.time) || span.days > 1) && measured() !== 'energy_d') { metricSel.value = 'energy_d'; showDayNote(); }
     syncPanels();
     load();
@@ -245,13 +242,9 @@ export function addFlowSection(nav: any, sections: any) {
   };
 
   // Layered Sankey: columns = longest path from a root (energy flows left->right, parent->child).
-  // The menu is the section's, not the drawing's: a redraw that rebuilt it took it out from under the pointer.
-  // A live reading arriving while it is open is held, and drawn when it closes — the diagram holds still while
-  // someone is reading a menu over it.
   let stage: any = null;
   let heldGraph: any = null;
-  // The zoom and where the pane is scrolled to belong to the reader, not to the drawing: a live reading
-  // arriving must not throw away the view they are reading from (#492).
+  // The zoom and where the pane is scrolled to belong to the reader, not to the drawing.
   let zoom: any = null;
   // The sunburst/treemap panes' zooms, one per chart, kept across live repaints the same way.
   let treeZooms: any[] = [];
@@ -322,10 +315,7 @@ export function addFlowSection(nav: any, sections: any) {
   }, 0));
 
   const draw = (graph: any) => {
-    // A refresh rebuilds the whole diagram, and emptying a container as tall as this one collapses the
-    // page. Any layout read while it is empty — and the pane measurement below is one — makes the browser
-    // clamp the scroll position to the shrunken height, so a refresh threw the reader back to the top.
-    // Holding the height across the rebuild means the page never shrinks and nothing is clamped.
+    // A refresh rebuilds the whole diagram, and emptying a container as tall as this one collapses the page.
     const held = (wrap as any).offsetHeight || 0;
     if (held) wrap.style.minHeight = held + 'px';
     // Read off the pane that is about to be replaced: once it is detached it measures nothing.
@@ -358,7 +348,6 @@ export function addFlowSection(nav: any, sections: any) {
     const folded = applyHideNoDataPref(emptied.nodes, emptied.links);
     syncPanels();
     // The view panel is rebuilt with the diagram: its switches and chips reflect what is drawn.
-    // Which part of the hierarchy is drawn: everything, or one node and what is beneath it.
     const drillSel = el('select', { class: 'flow-drill', title: 'Draw one node and everything beneath it.' }) as HTMLSelectElement;
     drillSel.appendChild(el('option', { value: '', text: 'The whole diagram' }));
     drillable(whole).forEach((n: any) => drillSel.appendChild(el('option', { value: n.id, text: `${n.label || n.id} and below` })));
@@ -483,15 +472,9 @@ export function addFlowSection(nav: any, sections: any) {
     nodes.forEach((n: any) => { const c = colMemo[n.id]; (cols[c] = cols[c] || []).push(n); });
 
 
-    // The vertical gap between two rows in a column. Text is kept apart by each row being at least a label
-    // line tall (`labelRow`), so this only separates bars; at 14 it doubled every small node's height, and a
-    // column of thirty circuits was mostly empty space.
+    // The vertical gap between two rows in a column.
     const gap = 6;
-    // The diagram used to be a fixed 960px, so on a wide pane it sat in the left two-thirds with the rest
-    // empty. The zoom's fit only ever shrinks — growing by zoom would scale the 11px labels along with it,
-    // which is not more information, only bigger. Laying out to the pane spreads the columns and leaves the
-    // text where it is. Where the width cannot be measured (the DOM stub the checks run against) it falls
-    // back to 960, so the geometry those checks pin is unchanged.
+    // Fill the pane, 960 to 2400px.
     const W = Math.max(960, Math.min(paneW ? paneW - 8 : 960, 2400));
     const shownIds = new Set<string>(nodes.map((n: any) => n.id));
     const outlined = (d: any) => !collapsedGroups.has(d.Id) && !foldedInto(d) && expandMode(d) === 'replace' && !shownIds.has(d.Id) && drawnMembers(d, shownIds).length > 0;
@@ -520,10 +503,6 @@ export function addFlowSection(nav: any, sections: any) {
     const labelRow = 14;
 
     /// Where a node's name is drawn: the middle of the ribbons it sends.
-    ///
-    /// Usually that is the middle of the bar. It is not for a node that passes on much less than it
-    /// receives — a panel whose unmetered load is switched off — and the label sits to the right of the
-    /// bar among those outgoing ribbons, so it follows them rather than the bar.
     const labelY = (id: string, p: any) => {
       const out = stackTotal(id, 'out');
       return out > 0 ? p.y + stackStart(id) + out / 2 : p.y + p.h / 2;
@@ -549,32 +528,16 @@ export function addFlowSection(nav: any, sections: any) {
       return y;
     };
 
-    // The unmetered remainder sits below its measured SIBLINGS (#366) — the ones fed by the same node, not
-    // every measured node in the column. Sorting it below the whole column is what put PDU-1's remainder
-    // underneath PDU-2's devices, so its ribbon had to cross every one of them to get there. The feeder
-    // barycenter therefore leads: it groups each parent's children together, and the remainder settles at
-    // the bottom of its own group.
+    // The unmetered remainder sits below its measured SIBLINGS (#366).
     const remainder = (id: string) => (id || '').includes('#unmeasured') ? 1 : 0;
 
-    // Both barycenters are Infinity for a node with nothing on that side, and `Infinity - Infinity` is NaN
-    // — a falsy comparator result, so the whole column fell through to "biggest first" and lost the
-    // grouping the other pass had just established. Two unknowns have to TIE, not compare as nonsense:
-    // that is what put a sub-panel's minisplit in the middle of the main panel's circuits, and left a
-    // panel's own remainder at the far bottom of the chart with a ribbon crossing everything to reach it.
+    // Both barycenters are Infinity for a node with nothing on that side, and `Infinity - Infinity` is NaN.
     const cmp = (x: number, y: number) => x === y ? 0 : x - y;
 
-    // Ties break the same way wherever the barycenters agree: a remainder below its siblings, then biggest
-    // first. Spelled once so the two directions cannot drift apart.
+    // Ties break the same way wherever the barycenters agree: a remainder below its siblings, then biggest first.
     const tieBreak = (a: any, b: any) => (remainder(a.id) - remainder(b.id)) || (nodeValue(b.id) - nodeValue(a.id));
 
     // Sweep both ways until the order settles.
-    //
-    // One pass each way is not enough, because a column is ordered against its neighbour's CURRENT
-    // positions and the neighbour may still move. Live: the circuits were ordered while the sub-panel sat
-    // above the main panel, then the panels swapped — leaving each panel's circuits split around the
-    // other's, with ribbons crossing the whole chart to reach them. Sweeping lets both settle against each
-    // other. Four is well past the point these hierarchies stop changing, and it stops early when nothing
-    // moved.
     const orderOf = () => cols.map(cn => (cn || []).map((n: any) => n.id).join(',')).join('|');
     for (let sweep = 0; sweep < 4; sweep++) {
       const before = orderOf();
@@ -584,14 +547,7 @@ export function addFlowSection(nav: any, sections: any) {
         else cn.sort((a: any, b: any) => cmp(bary(a.id), bary(b.id)) || tieBreak(a, b));
         placeColumn(cn, c);
       });
-      // Backward: right-to-left, ordering each column by what it feeds — but WITHIN its family, never
-      // across families. Which parent a node hangs off decides where it sits; what it feeds only decides
-      // the order among its own siblings.
-      //
-      // Leading with what a node feeds is what tore each panel's circuits apart: the two circuits that go
-      // on to feed rack PDUs were pulled to the top of the column by them, while their four siblings —
-      // having nothing downstream to be pulled by — fell to the bottom, with the other panel's circuits
-      // stacked in between and ribbons crossing the whole chart. Siblings first, then their order.
+      // Backward: right-to-left, ordering each column by what it feeds — but WITHIN its family, never across families.
       for (let c = cols.length - 2; c >= 0; c--) {
         if (!cols[c]) continue;
         cols[c].sort((a: any, b: any) => cmp(bary(a.id), bary(b.id)) || cmp(obary(a.id), obary(b.id)) || tieBreak(a, b));
@@ -604,38 +560,20 @@ export function addFlowSection(nav: any, sections: any) {
     cols.forEach((cn, c) => { bottom = Math.max(bottom, placeColumn(cn, c)); });
 
     // Then slide each column bodily down to meet what it feeds.
-    /// Where each ribbon actually meets each bar, in the order they are drawn.
-    ///
-    /// How thick a ribbon is drawn: its value, or a hairline where there is nothing to scale.
     const ribbonH = (l: any) => (l.known === false || l.value * pxPerUnit < 1.5) ? 1.5 : l.value * pxPerUnit;
 
     /// Where a node's ribbons begin stacking on its bar.
-    ///
-    /// They used to stack from the TOP. A bar is as tall as what passes THROUGH the node, so a node that
-    /// carries more than it hands on keeps every one of its ribbons in the top slice of its own bar: an
-    /// inverter reading 12.1 kW but sending 3.3 kW to two panels attached all of it in the top quarter of a
-    /// 520px bar. Everything downstream is then pulled up there with it — which is how a sub-panel ended up
-    /// sitting in the middle of the other panel's fan, with all of its own ribbons crossing that fan to
-    /// reach its circuits. Centred, the ribbons sit where the bar is.
     const stackTotal = (id: string, side: 'out' | 'in') =>
       (((side === 'out' ? outgoing[id] : incoming[id]) || []) as any[])
         .reduce((sum: number, l: any) => sum + ribbonH(l), 0);
 
     const stackStart = (id: string) => {
       // ONE offset for both sides, from whichever side carries more.
-      //
-      // Centring each side on the bar independently lines up their CENTRES, not their tops — so a node
-      // passing on a little less than it receives had its outgoing stack start a few pixels lower than its
-      // incoming one, and the top edge of a chain stepped down at every node. Sharing the offset lines up
-      // the tops, which is what makes a run of ribbons carrying the same power read as one flat band.
       const larger = Math.max(stackTotal(id, 'out'), stackTotal(id, 'in'));
       return Math.max(0, ((pos[id]?.h ?? 0) - larger) / 2);
     };
 
-    /// A ribbon leaves a bar at `y + outOff` and arrives at `y + inOff`, both accumulating from the TOP of
-    /// the bar. Relaxing a column toward its neighbours' bar CENTRES therefore aims at a point no ribbon
-    /// touches: a 3,012 W panel whose drawn children total 875 W carries all of them in the top sixth of
-    /// its bar, and its children get pulled to the middle of a bar they never reach.
+    /// A ribbon leaves a bar at `y + outOff` and arrives at `y + inOff`, both accumulating from the TOP of the bar.
     const attachments = () => {
       const at = new Map<any, { from: number; to: number }>();
       const outOff: Record<string, number> = {}, inOff: Record<string, number> = {};
@@ -660,10 +598,6 @@ export function addFlowSection(nav: any, sections: any) {
     const rowOf = (id: string) => Math.max(pos[id].h, labelRow);
 
     /// Push a column apart until no two rows are closer than `gap`, keeping the settled order.
-    ///
-    /// Moving nodes individually is what makes crossings avoidable, and it is also what lets two of them
-    /// land on top of each other — so every move is followed by this. Order is never changed here: the
-    /// ordering passes decided it, and re-sorting by position would undo the grouping they established.
     const separate = (cn: any[]) => {
       let y = padTop;
       cn.forEach((n: any) => {
@@ -688,35 +622,18 @@ export function addFlowSection(nav: any, sections: any) {
     };
 
     /// Slide each node in a column onto the centre of the ribbons it exchanges with its neighbour.
-    ///
-    /// Whole columns used to move as one, which cannot fix a mismatch INSIDE a column — and that is where
-    /// the crossings were: a sub-panel's bar sat above some of the main panel's own circuits, so every
-    /// ribbon it sent had to cut across them to reach its children. Each bar now settles against the
-    /// ribbons it actually carries.
     const relaxColumn = (c: number, side: 'out' | 'in') => {
       const cn = cols[c];
       if (!cn || !cn.length) return;
       const at = attachments();
       cn.forEach((n: any) => {
         // A node that feeds something is placed by WHAT IT FEEDS; one that feeds nothing, by its feeder.
-        // Letting both sides pull every node makes them fight and neither wins: an inverter's two ribbons
-        // are contiguous on its bar, while the panels they land on have to sit far enough apart for their
-        // own circuits — so a panel dragged back towards the inverter ends up in the middle of the other
-        // panel's fan. Ribbons are allowed to diverge; bars are not allowed to overlap someone else's.
         const feeds = ((outgoing[n.id] || []) as any[]).length > 0;
         if (side === 'out' ? !feeds : feeds) return;
         const links = ((side === 'out' ? outgoing[n.id] : incoming[n.id]) || [])
           .map((l: any) => at.get(l)).filter(Boolean);
         if (!links.length) return;
-        // The TOP of the band its ribbons reach, against the top of the band they leave from — not their
-        // flow-weighted centre, and not the middle of either band. Weighting by flow lets one dominant
-        // ribbon pin the node in place while its small siblings sprawl: a 2 kW panel whose seven circuits
-        // span 190px never moved, because its 612 W ribbon was already straight, and the sub-panel below
-        // it ended up sitting in the middle of that fan with every one of its own ribbons cutting through
-        // it. Aiming at the middles fixed that and tilted the whole diagram instead: a node's own ribbons
-        // stack by flow, while the nodes they reach are spread by the row minimum and the gap, so the far
-        // band is the taller of the two and its middle sits lower. Every column absorbed one more step of
-        // that. The tops are the two points that carry the same quantity, so they are what line up.
+        // The TOP of the band its ribbons reach, against the top of the band they leave from.
         const theirs = links.map((a: any) => side === 'out' ? a.to : a.from);
         const mine = links.map((a: any) => side === 'out' ? a.from : a.to);
         const head = (xs: number[]) => Math.min(...xs);
@@ -725,8 +642,7 @@ export function addFlowSection(nav: any, sections: any) {
       separate(cn);
     };
 
-    // Sweep both ways a few times: a column settles against neighbours that are themselves still settling,
-    // so one pass is never enough. This converges quickly and the separation step keeps every pass legal.
+    // Sweep both ways a few times.
     for (let pass = 0; pass < 6; pass++) {
       for (let c = cols.length - 2; c >= 0; c--) relaxColumn(c, 'out');
       for (let c = 1; c < cols.length; c++) relaxColumn(c, 'in');
@@ -775,8 +691,7 @@ export function addFlowSection(nav: any, sections: any) {
       });
     };
 
-    /// What a right-click offers over a node: what it has been drawing, where its supply comes from, and
-    /// the node itself. A history is only worth offering for something the bridge actually reads.
+    /// What a right-click offers over a node: what it has been drawing, where its supply comes from, and the node itself.
     const nodeMenu = (e: any, n: any) => {
       e.preventDefault?.();
       e.stopPropagation?.();
@@ -810,9 +725,7 @@ export function addFlowSection(nav: any, sections: any) {
       ]);
     };
 
-    // The right-angle routings draw wires, each source with one trunk in the corridor (see wirePath). The
-    // trunks of the sources sharing a corridor are spread across its middle, top source nearest the left,
-    // so a source's wires never run along another's trunk.
+    // The right-angle routings draw wires, each source with one trunk in the corridor (see wirePath).
     const wires = ribbonStyle !== 'curved';
     const trunkOf = new Map<string, number>();
     if (wires) {
@@ -1126,23 +1039,19 @@ export function addFlowSection(nav: any, sections: any) {
     if (withheldSources.length) wrap.appendChild(withheldBanner(withheldSources));
     if (contradicted.length) wrap.appendChild(contradictionBanner(contradicted, (id) => focusPath(svg, incoming, id)));
 
-    // No height cap: the diagram is the whole page, so it grows to its own height and the page scrolls once
-    // — a pane capped at 74vh put a scrollbar inside a scrollbar and made the graph feel like an iframe.
+    // No height cap: the diagram is the whole page, so it grows to its own height and the page scrolls once.
     const scroll = el('div', { style: { overflow: 'auto', border: '1px solid var(--line)', borderRadius: '6px' } });
     scroll.appendChild(svg);
     stage = el('div', { class: 'flow-stage' }, scroll, menu.el);
     wrap.appendChild(stage);
 
-    // On a phone, fitting the whole Sankey shrinks its 11px labels to unreadable; open at a scale that keeps
-    // them near 9px and let the reader pan. Fit still shows the whole of it.
+    // On a phone, fitting the whole Sankey shrinks its 11px labels to unreadable.
     zoom = attachZoom(scroll, svg, W, totalH, true, undefined, 0.8);  // container is replaced on each draw(), so no leak.
-    // Back to where the reader was, at the zoom they set, rather than fitted again from scratch — unless the
-    // diagram itself changed, when the old view is of something that is no longer drawn.
+    // Back to where the reader was, at the zoom they set, rather than fitted again from scratch.
     if (keptView && !refit) zoom.setView(keptView);
     refit = false;
 
-    // Zoom where the diagram is, not in a toolbar under it: on a graph this size the reader's attention is
-    // already inside the pane.
+    // Zoom where the diagram is, not in a toolbar under it.
     const zoomBtn = (label: string, title: string, act: () => void) => {
       const b = btn(label);
       b.title = title;
@@ -1154,8 +1063,7 @@ export function addFlowSection(nav: any, sections: any) {
       zoomBtn('−', 'Zoom out', () => (zoom as any).zoomBy(1 / 1.2)),
       zoomBtn('⤢', 'Fit the diagram to the page', () => (zoom as any).fit())));
 
-    // The gesture line names what the device can actually do — a phone has neither a wheel nor a Ctrl key,
-    // and being told to use them while the diagram sits three screens wide is its own kind of broken.
+    // The gesture line names what the device can actually do.
     const hints = el('div', { class: 'desc flow-gestures', style: { margin: '4px 2px 0', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' } });
     const fitBtn = btn('Fit');
     fitBtn.onclick = () => (zoom as any).fit();
@@ -1329,9 +1237,7 @@ export function addFlowSection(nav: any, sections: any) {
     const colX: any = {};
     [...cand.keys()].sort((a, b) => colMemo[b] - colMemo[a]).forEach(id => {
       const outs = outgoing[id] || [];
-      // Only children already placed count. A cycle (a config wired by hand, or an older build) leaves one
-      // unplaced, and a NaN column put the node in no column at all — every later lookup of its position
-      // was undefined and the page threw instead of drawing.
+      // Only children already placed count.
       const placed = outs.map((e: any) => colX[e.to]).filter((c: any) => typeof c === 'number');
       colX[id] = placed.length ? Math.max(0, Math.min(...placed) - 1) : colMemo[id];
     });
@@ -1411,8 +1317,6 @@ export function addFlowSection(nav: any, sections: any) {
     });
 
     // Interactions: drag a node's output port onto another node to add a directed feed.
-    // Screen → diagram coordinates. Falls back to the screen point where the browser cannot say (no CTM),
-    // which only costs the rubber-band line its exact anchor.
     const toUser = (cx: number, cy: number) => {
       try { return new DOMPoint(cx, cy).matrixTransform(svg.getScreenCTM().inverse()); } catch { return { x: cx, y: cy }; }
     };
@@ -1431,9 +1335,6 @@ export function addFlowSection(nav: any, sections: any) {
     const targetUnder = (cx: number, cy: number, self?: any) => { const hit: any = document.elementFromPoint(cx, cy); const gn = hit && hit.closest && hit.closest('g[data-id]'); return gn && gn.dataset.id !== (self ?? linkFrom) ? gn.dataset.id : null; };
 
     /// Make `parent` what feeds `child`, in place of whatever fed it before.
-    ///
-    /// Dropping a node on another says "this is where it comes from", so it replaces rather than adds —
-    /// an extra feeder is the ● drag. Replacing is destructive, so existing wiring is named and confirmed.
     const setParent = (child: string, parent: string) => {
       if (child === parent) return;
       if (feedsNothing((cand.get(parent) || {}).kind)) {
@@ -1462,8 +1363,7 @@ export function addFlowSection(nav: any, sections: any) {
       const rmId = e.target.getAttribute && e.target.getAttribute('data-rm');
       if (rmId) { const i = customNodes.findIndex((n: any) => n.Id === rmId); if (i >= 0) customNodes.splice(i, 1); for (let j = links.length - 1; j >= 0; j--) if (links[j].From === rmId || links[j].To === rmId) links.splice(j, 1); renderEditor(); return; }
       if (portId) { linkFrom = portId; tempLine = svgEl('path', { d: '', fill: 'none', stroke: '#5ab0ff', 'stroke-width': 2, 'stroke-dasharray': '4 3', 'pointer-events': 'none' }); edgeLayer.appendChild(tempLine); e.preventDefault(); return; }
-      // The node body: dragging it asks what feeds it. Engaged past a threshold below, so a click still
-      // clicks and a double-click still renames.
+      // The node body: dragging it asks what feeds it.
       const onNode = e.target.closest ? e.target.closest('g[data-id]') : null;
       if (onNode && onNode.dataset && onNode.dataset.id) {
         dragNode = onNode.dataset.id;
@@ -1569,11 +1469,9 @@ export function addFlowSection(nav: any, sections: any) {
     (live: any) => {
       if (hist.day() || !live || !live.ok) return;
       const body = priced(live);
-      // Held rather than dropped: whatever arrived last is drawn as soon as the menu closes, or as soon as
-      // the control someone is using is let go — a redraw rebuilds the controls, closing an open dropdown.
+      // Held rather than dropped.
       if (menu.isOpen() || busyInSection(sec)) { heldGraph = body; return; }
-      // …and while the reader is moving the diagram: a redraw mid-swipe or mid-pinch replaces the pane under
-      // their finger. It is drawn once they have let go and it has stopped coasting.
+      // Held while zooming or panning.
       if (zoom?.busy?.()) { heldGraph = body; drawWhenStill(); return; }
       lastGraph = body;
       draw(body);

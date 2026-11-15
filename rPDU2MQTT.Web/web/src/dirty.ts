@@ -1,13 +1,4 @@
 // Unsaved-change tracking.
-//
-// The form binds straight to `state.data`, so editing was invisible: the Save button looked identical
-// whether you'd changed nothing or rewritten half the config, there was no way to see what a save would
-// write, and no way back short of a reload. This module keeps a baseline of the config as loaded, diffs
-// the live document against it, and lets the shell say exactly what is pending — per field, per page,
-// and as a reviewable list.
-//
-// The diff runs over the *pruned* document (the same shape that gets POSTed), so the empty objects the
-// renderer creates on the way past — ensure(obj, key, {}) — never register as edits.
 
 import { state } from './state.js';
 import { exportData } from './overrides.js';
@@ -20,16 +11,30 @@ const dirtyFields = new Map<string, any>();
 // Paths whose values must never be shown in the review list.
 const dirtySecrets = new Set<string>();
 
+let renames: [string, string][] = [];
+
 export function pathKey(path: string[]) { return path.join('.'); }
+
+// Node renames since the last save, chained so a→b then b→c is a→c.
+export function noteRename(from: string, to: string) {
+  const prior = renames.find(r => r[1] === from);
+  if (prior) prior[1] = to; else renames.push([from, to]);
+  renames = renames.filter(([a, b]) => a !== b);
+}
+
+// The save URL, carrying pending renames so the server moves their history.
+export function configSaveUrl() {
+  return renames.length ? `/api/config?renames=${encodeURIComponent(JSON.stringify(renames))}` : '/api/config';
+}
 
 // Take the current document as "saved" — on load, and again after a successful save.
 export function setBaseline(data?: any) {
   dirtyBaseline = JSON.parse(JSON.stringify(data ?? exportData()));
+  renames = [];
   refreshDirty();
 }
 
 // Register a rendered scalar field so it can be marked when its value differs from the baseline.
-// Called by the form renderer; the map is cleared on every rebuild.
 export function registerField(path: string[], fieldEl: any, secret?: boolean) {
   dirtyFields.set(pathKey(path), fieldEl);
   if (secret) dirtySecrets.add(pathKey(path));
@@ -62,10 +67,11 @@ export function refreshDirty() {
 // Throw the edits away and go back to the last saved document. The caller rebuilds the form from it.
 export function discardChanges() {
   state.data = JSON.parse(JSON.stringify(dirtyBaseline));
+  renames = [];
   return state.data;
 }
 
-// Pending edits under a nav entry's paths ("EnergyFlow.Groups,EnergyFlow.Nodes"). "X.*" takes what no other entry claims under X.
+// Pending edits under a nav entry's paths ("EnergyFlow.Groups,EnergyFlow.Nodes").
 export function changeCountFor(spec: string, claimed: string[] = []) {
   const under = (path: string[], p: string) => p.split('.').every((k, i) => path[i] === k);
   const prefixes = spec.split(',').map(s => s.trim()).filter(Boolean);
@@ -79,8 +85,7 @@ export function changeCountFor(spec: string, claimed: string[] = []) {
 
 function isPlainObject(v: any) { return v != null && typeof v === 'object' && !Array.isArray(v); }
 
-// Empty is empty however it's spelled: an absent key, null, '', {} and [] all mean "not set", and the
-// renderer produces all of them. Without this, opening a tab would look like an edit.
+// Empty is empty however it's spelled.
 function prune(v: any): any {
   if (v === null || v === undefined || v === '') return undefined;
   if (Array.isArray(v)) {
@@ -113,8 +118,7 @@ function entryName(entry: any, index: number) {
 function walk(a: any, b: any, path: string[], label: string[], out: any[]) {
   if (same(a, b)) return;
 
-  // Recurse while both sides are object-shaped (or absent), so a whole new section still reports one
-  // row per setting rather than a wall of JSON.
+  // Recurse while both sides are object-shaped (or absent).
   const objectish = (v: any) => v === undefined || isPlainObject(v);
   if ((isPlainObject(a) || isPlainObject(b)) && objectish(a) && objectish(b)) {
     const keys = [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])];
