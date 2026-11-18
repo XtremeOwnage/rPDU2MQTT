@@ -75,7 +75,7 @@ Helm values `gui.trustedNetworks` and `gui.trustedProxies` set both lists from t
 | `/kiosk?theme=dark` | Dark |
 | `/kiosk?theme=light` | Light |
 
-Shows live power flow, battery charge, today's totals, top loads, the last 24 hours (with history on) and alerts from **Status**. Reloads itself when a new version is deployed.
+Shows Home, Solar, Grid and Battery now, today's totals, the last 24 hours (with history on), a live Sankey of the flow, and alerts from **Status**. Reloads itself when a new version is deployed.
 
 Add the display's address under **Trusted networks** so it opens without signing in.
 

@@ -22,19 +22,24 @@ if (run("kioskTheme('?theme=light')") !== 'light') fail('?theme=light is not lig
 if (run("kioskTheme('?theme=blue')") !== null) fail('an unknown theme is not ignored');
 if (run("kioskTheme('')") !== null) fail('no theme does not follow the system');
 
+for (const [v, want] of [[0, 0], [7.2, 8], [1800, 2000], [2300, 2500], [4100, 5000], [9600, 10000]])
+  if (run(`kkNice(${v})`) !== want) fail(`the axis above ${v} is ${run(`kkNice(${v})`)}, not ${want}`);
+
 const graph = {
   nodes: [
-    { id: 'grid', kind: 'grid', balance: 'grid', value: 900 },
-    { id: 'panel', kind: 'panel', value: 900 },
-    { id: 'hvac', kind: 'node', value: 600 },
-    { id: 'rack', kind: 'node', value: 250 },
-    { id: 'idle', kind: 'node', value: 0 },
-    { id: 'untracked:grid', kind: 'unmeasured', value: 50 },
-    { id: 'panel#unmeasured', kind: 'node', value: 50 },
+    { id: 'solar', label: 'Solar', kind: 'solar', value: 3000 },
+    { id: 'grid', label: 'Grid', kind: 'grid', value: 1000 },
+    { id: 'panel', label: 'Panel', kind: 'panel', value: 4000 },
+    { id: 'hvac', label: 'HVAC', kind: 'node', value: 2500 },
+    { id: 'rack', label: 'Rack', kind: 'node', value: 1500 },
+    { id: 'ups', label: 'UPS', kind: 'node', value: 1200 },
   ],
-  links: [{ source: 'grid', target: 'panel' }, { source: 'panel', target: 'hvac' }, { source: 'panel', target: 'rack' }],
+  links: [
+    { source: 'solar', target: 'panel', value: 3000 }, { source: 'grid', target: 'panel', value: 1000 },
+    { source: 'panel', target: 'hvac', value: 2500 }, { source: 'panel', target: 'rack', value: 1500 },
+    { source: 'rack', target: 'ups', value: 1200 },
+  ],
 };
-const ids = run(`topLoads(${JSON.stringify(graph)}, 5).map(n => n.id).join(',')`);
-if (ids !== 'hvac,rack') fail(`top loads are ${ids}, not hvac,rack`);
-if (run(`topLoads(${JSON.stringify(graph)}, 1).length`) !== 1) fail('the limit is not applied');
-console.log('kiosk: theme from the URL, top loads are measured leaves, largest first');
+const bars = run(`(() => { const s = kkSankey(${JSON.stringify(graph)}.nodes, ${JSON.stringify(graph)}.links, 1800, 500, 'W'); return s.querySelectorAll ? s.querySelectorAll('rect').length : (s.children || s.childNodes).filter(c => c.tagName === 'rect').length; })()`);
+if (bars !== 6) fail(`the Sankey draws ${bars} bars, not 6 (two sources, the panel, two branches, one beneath)`);
+console.log('kiosk: theme from the URL, round axes, Sankey from supply to what it feeds');
