@@ -54,6 +54,8 @@ credentials:
 | `split.enabled` | `false` | Run roles as separate Deployments (`-worker`, `-api`, `-ui`). The gui Service targets `ui`, the metrics Service `worker`. |
 | `split.{worker,api,ui}.replicaCount` | `1` | Replicas per role (with `split.enabled`). Keep `worker` at `1`. |
 | `split.{worker,api,ui}.resources` | `{}` | Per-role resource requests/limits (falls back to `resources`). |
+| `gui.trustedNetworks` | `[]` | CIDRs given read-only GUI access without signing in (`RPDU2MQTT_GUI_TRUSTED_NETWORKS`, overrides `Gui.TrustedNetworks`). |
+| `gui.trustedProxies` | `[]` | CIDRs of the proxies whose `X-Forwarded-For` is read (`RPDU2MQTT_GUI_TRUSTED_PROXIES`, overrides `Gui.TrustedProxies`). |
 | `service.gui.enabled` | `true` | Create a Service for the GUI (when `config.Gui.Enabled`). |
 | `service.api.enabled` | `true` | Create a Service for the REST API + its OpenAPI/Scalar docs (when `config.Api.Enabled`). |
 | `service.metrics.enabled` | `true` | Create a Service for `/metrics` (when `config.Prometheus.Exporter`). |

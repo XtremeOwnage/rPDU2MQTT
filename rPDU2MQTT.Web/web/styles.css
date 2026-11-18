@@ -89,6 +89,7 @@
   a { color:var(--accent); }
   code, kbd, .mono { font-family:var(--mono); }
   .is-hidden { display:none !important; }
+  html.viewer .savebar, html.viewer #st-restart, html.viewer #st-update, html.viewer .edit-only { display:none !important; }
   /* Trends chart. */
   .trend-chart { display:block; max-width:none; }
   .trend-chart rect { shape-rendering:crispEdges; }

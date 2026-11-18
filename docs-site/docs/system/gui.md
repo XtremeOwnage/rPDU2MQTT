@@ -16,6 +16,8 @@ GUI: **System › GUI**.
 | Authentication | `Gui.AuthType` | `Basic` | `Basic`, `Oidc`, `None` |
 | Username | `Gui.Username` | | Basic |
 | Password | `Gui.Password` | | Basic. Or `RPDU2MQTT_GUI_PASSWORD` |
+| Trusted networks | `Gui.TrustedNetworks` | empty | Read-only access without signing in. Or `RPDU2MQTT_GUI_TRUSTED_NETWORKS` |
+| Trusted proxies | `Gui.TrustedProxies` | empty | Proxies whose `X-Forwarded-For` is read. Or `RPDU2MQTT_GUI_TRUSTED_PROXIES` |
 | Show Project Link | `Gui.ShowProjectLink` | on | Docs and GitHub links in the footer |
 | Distance Units | `Gui.DistanceUnits` | `auto` | `auto`, `imperial`, `metric`. Floor plans |
 | Temperature Units | `Gui.TemperatureUnits` | `auto` | `auto`, `celsius`, `fahrenheit`. Stored values stay °C |
@@ -41,6 +43,25 @@ Set **Authentication** to `Oidc` and fill the **OIDC** box.
 - Register `https://<gui-host>/signin-oidc` as the redirect URI with the provider.
 - `X-Forwarded-Proto` and `X-Forwarded-Host` are honoured behind a TLS-terminating proxy.
 - A **Log out** link appears in the header.
+
+## Trusted networks
+
+Add an address or CIDR range under **Trusted networks**, e.g. `10.100.64.247/32` for a wall display. Requests from it get the Dashboards pages without signing in.
+
+- Settings, setup, tools and diagnostics pages, saving, and controls are hidden and refused (HTTP 403).
+- Credentials are removed from the configuration a trusted viewer receives.
+- **Sign in** in the header signs in from a trusted network.
+- Empty: everyone signs in. Ignored with `None`.
+
+Behind a reverse proxy, add the proxy's address under **Trusted proxies**. The client address is then read from `X-Forwarded-For`, right to left, while the address that added each entry is a trusted proxy. Without it, every request comes from the proxy.
+
+Behind the Cilium Gateway, the proxy address is the Cilium ingress IP of the node holding the gateway address. List one per node:
+
+```sh
+kubectl get ciliumnodes -o custom-columns=NAME:.metadata.name,INGRESS:.spec.ingress
+```
+
+Helm values `gui.trustedNetworks` and `gui.trustedProxies` set both lists from the deployment.
 
 ## None
 
@@ -77,6 +98,10 @@ Gui:
     ClientId: "rpdu2mqtt"
     Scopes: "openid profile email"
     CallbackPath: "/signin-oidc"
+  TrustedNetworks:
+    - 10.100.64.247/32
+  TrustedProxies:
+    - 10.16.3.101/32
 ```
 
 All settings: [GUI settings reference](../reference/settings/gui.md).

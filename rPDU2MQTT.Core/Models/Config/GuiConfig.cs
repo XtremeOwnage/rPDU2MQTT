@@ -43,6 +43,16 @@ public class GuiConfig
     [Description("How users authenticate to the GUI: Basic (username/password), Oidc (SSO), or None (no login).")]
     public GuiAuthType AuthType { get; set; } = GuiAuthType.Basic;
 
+    [Display(Name = "Trusted networks")]
+    [YamlMember(DefaultValuesHandling = DefaultValuesHandling.OmitEmptyCollections)]
+    [Description("Addresses or CIDR ranges given read-only access without signing in, e.g. 10.100.64.247/32 for a wall display. Changes still need sign-in. Leave empty to require sign-in for everyone.")]
+    public List<string> TrustedNetworks { get; set; } = new();
+
+    [Display(Name = "Trusted proxies")]
+    [YamlMember(DefaultValuesHandling = DefaultValuesHandling.OmitEmptyCollections)]
+    [Description("Addresses or CIDR ranges of reverse proxies whose X-Forwarded-For header is used to find the client address for Trusted networks. Leave empty to use the connecting address.")]
+    public List<string> TrustedProxies { get; set; } = new();
+
     [DefaultValue(8080)]
     [Description("Port the configuration GUI listens on.")]
     public int Port { get; set; } = 8080;

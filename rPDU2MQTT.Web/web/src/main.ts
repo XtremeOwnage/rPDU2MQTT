@@ -21,6 +21,9 @@ window.addEventListener('hashchange', () => {
 });
 
 export async function load() {
+  const status = (await api('/api/status')).body;
+  // Signed out on a trusted network: dashboards only.
+  state.viewer = status?.readOnly === true;
   state.schema = (await api('/api/schema')).body;
   state.data = (await api('/api/config')).body;
   // Older backends lack this endpoint.
@@ -30,7 +33,7 @@ export async function load() {
   build();
   refreshRangeBar();
   setBaseline();
-  refreshStatus();
+  renderStatus(status);
 }
 
 // --- App-bar status --------------------------------------------------------------------------------
@@ -236,15 +239,22 @@ function renderStatus(body: any) {
 
   renderRestartPending(body.restart);
 
+  if (typeof body.readOnly === 'boolean') state.viewer = body.readOnly;
+  document.documentElement.classList.toggle('viewer', state.viewer);
+  set('st-login', e => e.classList[state.viewer ? 'remove' : 'add']('is-hidden'));
+
   // A read-only config source cannot be saved.
-  configWritable = body.configWritable !== false;
-  set('st-readonly', e => e.classList[configWritable ? 'add' : 'remove']('is-hidden'));
+  configWritable = body.configWritable !== false && !state.viewer;
+  set('st-readonly', e => {
+    e.classList[configWritable ? 'add' : 'remove']('is-hidden');
+    e.title = state.viewer ? 'Read-only view. Sign in to make changes.' : 'The configuration source is read-only, so changes cannot be saved from here.';
+  });
   renderSaveBar();
 
   // Absent (older server) means show it.
   set('project-link', e => e.classList[body.showProjectLink === false ? 'add' : 'remove']('is-hidden'));
 
-  if (body.auth === 'oidc') {
+  if (body.auth === 'oidc' && !state.viewer) {
     set('st-logout', e => e.classList.remove('is-hidden'));
     if (body.user) set('st-user', e => e.textContent = body.user);
   }

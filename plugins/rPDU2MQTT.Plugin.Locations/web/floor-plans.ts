@@ -462,13 +462,14 @@ export default function mount(sec: any, host: any) {
   redoBtn.onclick = () => redo();
   const status = el('span', { class: 'ld-count fp-status' });
   [addBtn, floorBtn, bgBtn, toolsBtn, exportBtn, printBtn].forEach(b => b.classList.add('fp-wide-only'));
+  [addBtn, floorBtn, bgBtn, toolsBtn, undoBtn, redoBtn].forEach(b => b.classList.add('edit-only'));
   const moreBtn = btn('More…');
   moreBtn.classList.add('fp-narrow-only');
   moreBtn.title = 'Floor settings, background, tools, export and print.';
   moreBtn.onclick = () => {
     const body = el('div', { class: 'fp-sheet fp-more' });
     ([[addBtn, 'Add a floor'], [floorBtn, 'Floor settings'], [bgBtn, 'Background'], [toolsBtn, 'Tools…'], [exportBtn, 'Export…'], [printBtn, 'Print']] as [any, string][]).forEach(([b, label]) => {
-      if (b.classList.contains('fp-off')) return;
+      if (b.classList.contains('fp-off') || state.viewer && b.classList.contains('edit-only')) return;
       const go = btn(label);
       go.disabled = b.disabled;
       go.onclick = () => { closeSheet(); b.onclick(); };
@@ -479,7 +480,7 @@ export default function mount(sec: any, host: any) {
   sec.appendChild(el('div', { class: 'ld-toolbar fp-bar' }, el('label', { class: 'ld-inst' }, 'Floor ', floorSel), addBtn, floorBtn, bgBtn, toolsBtn,
     exportBtn, printBtn, moreBtn, el('span', { class: 'fp-undo' }, undoBtn, redoBtn), status));
 
-  const modeBar = el('div', { class: 'fp-seg', role: 'tablist' });
+  const modeBar = el('div', { class: 'fp-seg edit-only', role: 'tablist' });
   const modeBtns: Record<string, any> = {};
   ([['view', 'View'], ['edit', 'Edit']] as const).forEach(([m, label]) => {
     const b = el('button', { class: 'fp-seg-btn', text: label, type: 'button' });
@@ -2027,7 +2028,8 @@ export default function mount(sec: any, host: any) {
     let entries = menuFor(hitOf(e), p);
     if (mode !== 'edit') {
       entries = entries.filter(x => !x.run || !editOnly.has(x.run));
-      if (!entries.some(x => x.label === 'Edit this floor')) entries.push({ label: 'Edit this floor', run: () => { mode = 'edit'; tool = 'select'; render(); } });
+      if (state.viewer) entries = entries.filter(x => x.label !== 'Edit this floor');
+      else if (!entries.some(x => x.label === 'Edit this floor')) entries.push({ label: 'Edit this floor', run: () => { mode = 'edit'; tool = 'select'; render(); } });
     }
     render();
     openMenu(e, entries);
@@ -2696,7 +2698,7 @@ export default function mount(sec: any, host: any) {
     if (!fl) {
       side.appendChild(el('h3', { text: 'Start with a floor' }));
       side.appendChild(el('div', { class: 'desc', text: 'Add a site and its first floor, then draw its rooms or upload its plan. Rooms from your Version 2.0 room tags can be brought in under Tools.' }));
-      const start = btn('Add a site and floor', 'primary');
+      const start = btn('Add a site and floor', 'primary edit-only');
       start.onclick = () => addSheet();
       side.appendChild(start);
       return;
@@ -4237,12 +4239,12 @@ export default function mount(sec: any, host: any) {
     const bare = !!fl && !fl.floor.Image && !roomsNow().some(r => (r.Shape || []).length >= 3) && !itemsNow().length;
     empty.hidden = !!fl && (!bare || mode === 'edit');
     if (!fl) {
-      const start = btn('Add a site and floor', 'primary');
+      const start = btn('Add a site and floor', 'primary edit-only');
       start.onclick = () => addSheet();
       empty.append(el('div', { class: 'fp-empty-title', text: 'No floors yet' }), el('div', { class: 'desc', text: 'A floor is the plot you draw on: rooms, the yard, and everything placed in them.' }), start);
       return;
     }
-    if (!bare || mode === 'edit') return;
+    if (!bare || mode === 'edit' || state.viewer) return;
     const up = btn('Upload a plan image', 'primary');
     up.onclick = () => backgroundSheet();
     const draw = btn('Draw a room');
@@ -4254,6 +4256,7 @@ export default function mount(sec: any, host: any) {
   };
 
   const render = () => {
+    if (state.viewer && mode === 'edit') { mode = 'view'; tool = 'select'; }
     followSelection();
     const floors = floorsAll();
     const fl = floorNow();

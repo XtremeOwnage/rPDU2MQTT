@@ -801,7 +801,7 @@ export function addFlowSection(nav: any, sections: any) {
         {
           label: 'Edit this node',
           // Only a node of the config has an editor; a PDU or outlet the bridge derives has none.
-          disabled: !(state.data?.EnergyFlow?.Nodes || []).some((x: any) => x.Id === n.id),
+          disabled: state.viewer || !(state.data?.EnergyFlow?.Nodes || []).some((x: any) => x.Id === n.id),
           run: () => {
             editNodeOnNextOpen(n.id);
             (Array.from(document.querySelectorAll('nav a')) as any[]).find(a => a.dataset.label === 'Nodes')?.click();
