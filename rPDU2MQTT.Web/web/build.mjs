@@ -80,6 +80,7 @@ const MODULES = [
   'plugin-pages.ts',
   'config-form.ts',
   'actions.ts',
+  'kiosk.ts',
   'main.ts',
 ];
 

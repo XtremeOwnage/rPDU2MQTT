@@ -11,6 +11,7 @@ import { loadPluginPages } from './plugin-pages.js';
 import { initStackTables } from './stack-tables.js';
 import { initPhoneNav, openNav } from './phone-nav.js';
 import { rangeBar, refreshRangeBar } from './history-control.js';
+import { isKiosk, startKiosk } from './kiosk.js';
 
 // Back/forward and hash edits: open the matching tab if it isn't already active.
 window.addEventListener('hashchange', () => {
@@ -460,5 +461,5 @@ function initShell() {
   document.getElementById('st-range')?.appendChild(rangeBar());
 }
 
-initShell();
-load();
+if (isKiosk()) startKiosk();
+else { initShell(); load(); }
