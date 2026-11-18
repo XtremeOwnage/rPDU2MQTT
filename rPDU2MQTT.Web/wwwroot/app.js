@@ -1,15 +1,8 @@
 // ── state.ts ────────────────────────────────────────────────────
-// Shared, mutable app state: the config schema and the editable config document, both set on load(), plus
-// the relations a calculated binding can use — served by the backend rather than restated here, because a
-// second copy of the electrics is a second thing to be wrong about.
-// (Authored as ES modules; the build bundles them into one shared scope, as the GUI has always run.)
-const state                                                   = { schema: [], data: {}, derivations: [] };
+// Shared app state, set on load().
+const state                                                                    = { schema: [], data: {}, derivations: [], viewer: false };
 
-/// One page asking another to open on something specific — "show me Solar for today".
-///
-/// Set by whoever is navigating, consumed once by the page that lands. Deliberately not in the URL: the
-/// hash is the tab, and a node set encoded into it would be a second router to keep honest. A request that
-/// is never collected simply expires the next time one is made.
+/// One page asking another to open on something specific; consumed once by the page that lands.
 const focus                                                                         =
   { nodes: null, range: null, label: null };
 
@@ -20,8 +13,7 @@ function requestFocus(nodes          , range               , label              
   focus.label = label;
 }
 
-/// Take the pending request, if there is one. Reading it clears it — landing on the page twice should not
-/// re-apply a selection the reader has since changed.
+/// Take and clear the pending request.
 function takeFocus() {
   if (!focus.nodes) return null;
   const taken = { nodes: focus.nodes, range: focus.range, label: focus.label };
@@ -6482,7 +6474,7 @@ function addFlowSection(nav     , sections     ) {
         {
           label: 'Edit this node',
           // Only a node of the config has an editor; a PDU or outlet the bridge derives has none.
-          disabled: !(state.data?.EnergyFlow?.Nodes || []).some((x     ) => x.Id === n.id),
+          disabled: state.viewer || !(state.data?.EnergyFlow?.Nodes || []).some((x     ) => x.Id === n.id),
           run: () => {
             editNodeOnNextOpen(n.id);
             (Array.from(document.querySelectorAll('nav a'))         ).find(a => a.dataset.label === 'Nodes')?.click();
@@ -12931,6 +12923,7 @@ function addPanelScheduleSection(nav     , sections     ) {
   sec.appendChild(el('div', { class: 'ld-toolbar ps-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
     el('div', { class: 'ps-pick' }, el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel)),
     el('div', { class: 'ps-actions' }, refresh, addPanel, importBtn, traceStart, printBtn, exportBtn), status));
+  [addPanel, importBtn, traceStart].forEach(b => b.classList.add('edit-only'));
 
   // The panel's own settings: what it is called, and how many slots it has.
   const nameIn = el('input', { type: 'text', placeholder: 'Main Panel' })                    ;
@@ -13248,6 +13241,7 @@ function addPanelScheduleSection(nav     , sections     ) {
   };
 
   const edit = (panel       , b                , slot        , presetHalf         ) => {
+    if (state.viewer) { if (b) history(panel, b); return; }
     const entry = b ? configBreaker(panel.id, b) : null;
     const wasNumber = b?.number || '';
     const field = (label        , input     , hint         ) =>
@@ -13460,7 +13454,7 @@ function addPanelScheduleSection(nav     , sections     ) {
 
   /// What this breaker has been drawing: the channels measuring it, summed the way its power is.
   const history = (panel       , b         ) => {
-    const toEditor = btn('Edit breaker');
+    const toEditor = btn('Edit breaker', 'edit-only');
     toEditor.onclick = () => edit(panel, b, b.slot);
     const channels = b.legs.map(l => l.channel).filter(Boolean)            ;
     openHistorySheet({
@@ -15239,7 +15233,7 @@ function build() {
   const groupFor = (title        ) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System') ;
 
   state.schema.forEach((n     ) => {
-    if (HIDDEN.has(n.key)) return;
+    if (HIDDEN.has(n.key) || state.viewer) return;
     groupFor(n.group || 'System').items.push({ schema: n.key, child: n.key === 'Overrides' });
   });
   const placed = new Set            ();
@@ -15268,6 +15262,7 @@ function build() {
 
   const containers = new Map             ();
   for (const g of navGroups) {
+    if (state.viewer && g.title !== 'Dashboards') continue;
     // Drop items whose schema section is absent.
     const items = g.items.filter(it => 'tool' in it || byKey.get((it       ).schema));
     if (!items.length) continue;
@@ -15289,6 +15284,7 @@ function build() {
   ([...nav.querySelectorAll('a')]         ).forEach((a     ) => {
     const home = a.dataset?.navGroup && containers.get(a.dataset.navGroup);
     if (home) { a.classList.remove('nav-child'); home.appendChild(a); }
+    else if (state.viewer && a.dataset?.navGroup) a.remove();
   });
 
   // Open the tab named in the URL hash, else the first.
@@ -15779,6 +15775,9 @@ window.addEventListener('hashchange', () => {
 });
 
 async function load() {
+  const status = (await api('/api/status')).body;
+  // Signed out on a trusted network: dashboards only.
+  state.viewer = status?.readOnly === true;
   state.schema = (await api('/api/schema')).body;
   state.data = (await api('/api/config')).body;
   // Older backends lack this endpoint.
@@ -15788,7 +15787,7 @@ async function load() {
   build();
   refreshRangeBar();
   setBaseline();
-  refreshStatus();
+  renderStatus(status);
 }
 
 // --- App-bar status --------------------------------------------------------------------------------
@@ -15994,15 +15993,22 @@ function renderStatus(body     ) {
 
   renderRestartPending(body.restart);
 
+  if (typeof body.readOnly === 'boolean') state.viewer = body.readOnly;
+  document.documentElement.classList.toggle('viewer', state.viewer);
+  set('st-login', e => e.classList[state.viewer ? 'remove' : 'add']('is-hidden'));
+
   // A read-only config source cannot be saved.
-  configWritable = body.configWritable !== false;
-  set('st-readonly', e => e.classList[configWritable ? 'add' : 'remove']('is-hidden'));
+  configWritable = body.configWritable !== false && !state.viewer;
+  set('st-readonly', e => {
+    e.classList[configWritable ? 'add' : 'remove']('is-hidden');
+    e.title = state.viewer ? 'Read-only view. Sign in to make changes.' : 'The configuration source is read-only, so changes cannot be saved from here.';
+  });
   renderSaveBar();
 
   // Absent (older server) means show it.
   set('project-link', e => e.classList[body.showProjectLink === false ? 'add' : 'remove']('is-hidden'));
 
-  if (body.auth === 'oidc') {
+  if (body.auth === 'oidc' && !state.viewer) {
     set('st-logout', e => e.classList.remove('is-hidden'));
     if (body.user) set('st-user', e => e.textContent = body.user);
   }

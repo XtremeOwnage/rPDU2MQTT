@@ -167,8 +167,8 @@ internal class YamlConfigLoader
     }
 
     /// <summary>
-    /// Override credentials from the environment so secrets don't have to live in config.yaml.
-    /// For each variable, a "<NAME>_FILE" pointing at a file (Docker secret) takes precedence.
+    /// Override credentials and GUI access lists from the environment.
+    /// For each secret, a "<NAME>_FILE" pointing at a file (Docker secret) takes precedence.
     /// </summary>
     private static void ApplyEnvironmentOverrides(Config config)
     {
@@ -210,6 +210,12 @@ internal class YamlConfigLoader
 
         var plansKey = ResolveSecret("RPDU2MQTT_PLANS_SECRET_KEY");
         if (plansKey is not null) { config.PlanStorage.ObjectStore.SecretAccessKey = plansKey; Log.Information("Using plan storage secret key from environment."); }
+
+        var trustedNetworks = Environment.GetEnvironmentVariable("RPDU2MQTT_GUI_TRUSTED_NETWORKS");
+        if (trustedNetworks is not null) { config.Gui.TrustedNetworks = rPDU2MQTT.Helpers.TrustedNetworks.Split(trustedNetworks); Log.Information("Using GUI trusted networks from environment."); }
+
+        var trustedProxies = Environment.GetEnvironmentVariable("RPDU2MQTT_GUI_TRUSTED_PROXIES");
+        if (trustedProxies is not null) { config.Gui.TrustedProxies = rPDU2MQTT.Helpers.TrustedNetworks.Split(trustedProxies); Log.Information("Using GUI trusted proxies from environment."); }
     }
 
     /// <summary>

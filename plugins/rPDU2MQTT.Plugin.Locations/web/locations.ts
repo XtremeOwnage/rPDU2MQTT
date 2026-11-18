@@ -81,7 +81,7 @@ export default function mount(sec: any, host: any) {
     render();
   };
 
-  const publish = btn('Publish to Home Assistant…');
+  const publish = btn('Publish to Home Assistant…', 'edit-only');
   publish.onclick = () => haPublishSheet(async (action: string) => {
     const r: any = await api(`/api/integrations/locations/${action}`, { method: 'POST', body: onScreen() });
     const b = r?.body || {};
@@ -187,7 +187,7 @@ export default function mount(sec: any, host: any) {
       up.onclick = () => move(-1); down.onclick = () => move(1);
       actions.append(up, down);
     }
-    const del = btn('Delete', 'danger');
+    const del = btn('Delete', 'danger edit-only');
     del.onclick = () => {
       const inner = r.kind === 'site' || r.kind === 'floor' ? refs().filter(x => x.obj !== o && within(x.obj.Id, o.Id)) : [];
       if (!confirm(`Delete ${label(o)}${inner.length ? ` and ${inner.length} place(s) in it` : ''}?`)) return;
@@ -255,7 +255,7 @@ export default function mount(sec: any, host: any) {
 
   function renderNodes(r: Ref) {
     const o = r.obj;
-    const add = btn('Add nodes…', 'primary');
+    const add = btn('Add nodes…', 'primary edit-only');
     add.onclick = () => pickNodes(o);
     const c = card('Nodes', add);
     const nodes = nodesOf().filter(n => within(n.location, o.Id));
@@ -405,7 +405,7 @@ export default function mount(sec: any, host: any) {
     };
     const foot = el('div', { class: 'loc-pick-foot' });
     if (!isNew) {
-      const del = btn('Delete', 'danger');
+      const del = btn('Delete', 'danger edit-only');
       del.onclick = () => {
         if (!confirm(`Delete ${label(x)}?`)) return;
         sensorsIn().splice(sensorsIn().indexOf(x), 1);

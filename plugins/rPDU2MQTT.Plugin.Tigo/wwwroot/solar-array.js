@@ -242,8 +242,8 @@ function mount(sec     , host     ) {
   const showSel = el('div', { class: 'sa-show', role: 'group' });
   let show = 'power';
   try { show = localStorage.getItem('rpdu-solar-show') || 'power'; } catch { /* default */ }
-  const editBtn = btn('Edit');
-  const save = btn('Save', 'primary');
+  const editBtn = btn('Edit', 'edit-only');
+  const save = btn('Save', 'primary edit-only');
   const grouping = el('input', { type: 'checkbox' })                    ;
   const groupLabel = el('label', { class: 'sa-hide', title: 'Adds a Flow group per string. Its panels show when the group is expanded.' }, grouping, ' Flow group per string');
   grouping.onchange = () => {
@@ -649,7 +649,7 @@ function mount(sec     , host     ) {
       array.appendChild(box);
     });
 
-    const addString = btn('+ New string');
+    const addString = btn('+ New string', 'edit-only');
     addString.onclick = () => {
       const name = (prompt('Name the string (e.g. "A" or "South roof")') || '').trim();
       if (!name) return;

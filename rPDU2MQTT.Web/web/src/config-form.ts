@@ -722,7 +722,7 @@ export function build() {
   const groupFor = (title: string) => navGroups.find(g => g.title === title) ?? navGroups.find(g => g.title === 'System')!;
 
   state.schema.forEach((n: any) => {
-    if (HIDDEN.has(n.key)) return;
+    if (HIDDEN.has(n.key) || state.viewer) return;
     groupFor(n.group || 'System').items.push({ schema: n.key, child: n.key === 'Overrides' });
   });
   const placed = new Set<PluginPage>();
@@ -751,6 +751,7 @@ export function build() {
 
   const containers = new Map<string, any>();
   for (const g of navGroups) {
+    if (state.viewer && g.title !== 'Dashboards') continue;
     // Drop items whose schema section is absent.
     const items = g.items.filter(it => 'tool' in it || byKey.get((it as any).schema));
     if (!items.length) continue;
@@ -772,6 +773,7 @@ export function build() {
   ([...nav.querySelectorAll('a')] as any[]).forEach((a: any) => {
     const home = a.dataset?.navGroup && containers.get(a.dataset.navGroup);
     if (home) { a.classList.remove('nav-child'); home.appendChild(a); }
+    else if (state.viewer && a.dataset?.navGroup) a.remove();
   });
 
   // Open the tab named in the URL hash, else the first.

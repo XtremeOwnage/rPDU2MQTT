@@ -125,6 +125,14 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         return (id, registry.Get(id), config.Pdus.TryGetValue(id, out var c) ? c : new());
     }
 
+    private IReadOnlyList<Cidr> trustedNetworks = [];
+    private IReadOnlyList<Cidr> trustedProxies = [];
+    private const string TrustedClientKey = "rpdu2mqtt.trusted-client";
+    private const string ViewerKey = "rpdu2mqtt.viewer";
+
+    /// <summary>The request is from a trusted network and not signed in: read-only access.</summary>
+    internal static bool IsViewer(HttpContext ctx) => ctx.Items.ContainsKey(ViewerKey);
+
     /// <summary>Gui.AuthType is None.</summary>
     private bool AuthDisabled => config.Gui.AuthType == GuiAuthType.None;
 
@@ -154,6 +162,13 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             return;
         }
 
+        var (networks, badNetworks) = TrustedNetworks.Parse(gui.TrustedNetworks);
+        var (proxies, badProxies) = TrustedNetworks.Parse(gui.TrustedProxies);
+        foreach (var bad in badNetworks) Log.Warning($"Gui.TrustedNetworks: '{bad}' is not an address or CIDR range; ignored.");
+        foreach (var bad in badProxies) Log.Warning($"Gui.TrustedProxies: '{bad}' is not an address or CIDR range; ignored.");
+        trustedNetworks = AuthDisabled ? [] : networks;
+        trustedProxies = proxies;
+
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = Array.Empty<string>() });
         builder.Logging.ClearProviders();
         builder.WebHost.UseUrls($"http://*:{gui.Port}");
@@ -168,18 +183,28 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
         app = builder.Build();
 
+        // Before UseForwardedHeaders, which rewrites the remote address.
+        if (trustedNetworks.Count > 0)
+            app.Use(TrustedClientMiddleware);
+
         if (UseOidc)
         {
             var fwd = new ForwardedHeadersOptions { ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost };
             fwd.KnownIPNetworks.Clear();
             fwd.KnownProxies.Clear();
+            foreach (var p in trustedProxies)
+                fwd.KnownIPNetworks.Add(new System.Net.IPNetwork(p.Network, p.Prefix));
             app.UseForwardedHeaders(fwd);
 
             app.UseAuthentication();
+            if (trustedNetworks.Count > 0)
+                app.Use(ViewerMiddleware);
             app.UseAuthorization();
         }
         else if (!AuthDisabled)
         {
+            if (trustedNetworks.Count > 0)
+                app.Use(ViewerMiddleware);
             app.Use(AuthMiddleware);
         }
 
@@ -188,6 +213,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         await app.StartAsync(cancellationToken);
         var how = AuthDisabled ? "no authentication" : UseOidc ? $"OIDC via {gui.Oidc.Authority}" : $"user '{gui.Username}'";
         Log.Information($"Configuration GUI listening on http://*:{gui.Port} ({how}).");
+        if (trustedNetworks.Count > 0)
+            Log.Information($"Read-only GUI access without sign-in from {string.Join(", ", trustedNetworks)}"
+                + (trustedProxies.Count > 0 ? $"; X-Forwarded-For trusted from {string.Join(", ", trustedProxies)}." : "."));
     }
 
     /// <summary>Persist the auth-cookie encryption key across restarts.</summary>
@@ -281,7 +309,9 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         });
 
         builder.Services.AddAuthorizationBuilder()
-            .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build());
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder()
+                .RequireAssertion(c => c.User.Identity?.IsAuthenticated == true || c.Resource is HttpContext h && IsViewer(h))
+                .Build());
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -324,7 +354,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     private static readonly string Instance = Guid.NewGuid().ToString("N")[..12];
 
     /// <summary>Header state: version, config, MQTT and operator update report.</summary>
-    private async Task<object> BuildStatusAsync(string? user, CancellationToken ct) => new
+    private async Task<object> BuildStatusAsync(string? user, CancellationToken ct, bool? readOnly = null) => new
     {
         version = Version,
         instance = Instance,
@@ -337,6 +367,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         auth = AuthDisabled ? "none" : UseOidc ? "oidc" : "basic",
         showProjectLink = config.Gui.ShowProjectLink,
         user,
+        // Per request; absent from the shared push feed.
+        readOnly,
         update = await ReadOperatorUpdateAsync(configSource as KubernetesConfigSource, ct),
         // Settings saved but waiting on a restart.
         restart = new { required = pending.Required, settings = pending.Settings },
@@ -633,10 +665,40 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         }
     }
 
+    /// <summary>Marks a request whose client address is in Gui.TrustedNetworks.</summary>
+    private Task TrustedClientMiddleware(HttpContext ctx, Func<Task> next)
+    {
+        var client = TrustedNetworks.ClientAddress(ctx.Connection.RemoteIpAddress, ctx.Request.Headers["X-Forwarded-For"], trustedProxies);
+        if (TrustedNetworks.InAny(client, trustedNetworks))
+            ctx.Items[TrustedClientKey] = true;
+        return next();
+    }
+
+    /// <summary>A trusted client that is not signed in may read; anything else from it is refused.</summary>
+    private async Task ViewerMiddleware(HttpContext ctx, Func<Task> next)
+    {
+        var signedIn = UseOidc ? ctx.User.Identity?.IsAuthenticated == true : IsAuthorized(ctx.Request);
+        if (signedIn || !ctx.Items.ContainsKey(TrustedClientKey) || ctx.Request.Path.Equals("/login", StringComparison.OrdinalIgnoreCase))
+        {
+            await next();
+            return;
+        }
+
+        if (!TrustedNetworks.ViewerMayRequest(ctx.Request.Method, ctx.Request.Path.Value))
+        {
+            ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await ctx.Response.WriteAsJsonAsync(new { ok = false, message = "Read-only access. Sign in to make changes." });
+            return;
+        }
+
+        ctx.Items[ViewerKey] = true;
+        await next();
+    }
+
     /// <summary>HTTP Basic auth against the configured username/password.</summary>
     private async Task AuthMiddleware(HttpContext ctx, Func<Task> next)
     {
-        if (IsAuthorized(ctx.Request) || InstallAssets.ContainsKey(ctx.Request.Path.Value ?? ""))
+        if (IsViewer(ctx) || IsAuthorized(ctx.Request) || InstallAssets.ContainsKey(ctx.Request.Path.Value ?? ""))
         {
             await next();
             return;
@@ -691,6 +753,10 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         foreach (var (path, type) in InstallAssets)
             app.MapGet(path, () => LoadAssetBytes(path[1..]) is { } bytes ? Results.Bytes(bytes, type) : Results.NotFound()).AllowAnonymous();
 
+        // Reached only once signed in; a trusted viewer is sent through sign-in first.
+        if (!AuthDisabled)
+            app.MapGet("/login", () => Results.Redirect("/"));
+
         // OIDC sign-out: clears the cookie and ends the IdP session.
         if (UseOidc)
             app.MapGet("/logout", async (HttpContext ctx) =>
@@ -710,12 +776,12 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         });
 
         // Re-read the current source, which may have been edited.
-        app.MapGet("/api/config", () =>
+        app.MapGet("/api/config", (HttpContext ctx) =>
         {
             Config current;
             try { current = configSource.Load(); }
             catch { current = config; }
-            return Results.Content(ConfigSchema.ToJson(current), "application/json");
+            return Results.Content(IsViewer(ctx) ? ConfigSchema.ToViewerJson(current) : ConfigSchema.ToJson(current), "application/json");
         });
 
         app.MapPost("/api/config", async (HttpContext ctx) =>
@@ -810,7 +876,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
 
         app.MapGet("/api/status", async (HttpContext ctx) =>
         {
-            return Results.Json(await BuildStatusAsync(UseOidc ? ctx.User?.Identity?.Name : null, ctx.RequestAborted), ConfigSchema.Json);
+            return Results.Json(await BuildStatusAsync(UseOidc ? ctx.User?.Identity?.Name : null, ctx.RequestAborted, IsViewer(ctx)), ConfigSchema.Json);
         });
 
         // Single SSE push channel for the whole GUI.
@@ -2610,6 +2676,8 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         var found = Core.Integrations.IntegrationActions.Find(integration, action, CurrentPass);
         if (found is null || (readOnly && found.Effect != Core.Integrations.ActionEffect.Read))
             return Results.Json(new { ok = false, message = $"'{integration.DisplayName}' has no action called '{action}'." }, ConfigSchema.Json);
+        if (IsViewer(ctx) && found.Effect != Core.Integrations.ActionEffect.Read)
+            return Results.Json(new { ok = false, message = "Read-only access. Sign in to make changes." }, ConfigSchema.Json, statusCode: StatusCodes.Status403Forbidden);
 
         // Query, form and top-level JSON scalars flattened; JSON body also passed raw.
         var args = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);

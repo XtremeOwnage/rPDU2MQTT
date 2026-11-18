@@ -18,6 +18,8 @@ Embedded configuration web GUI
 | `Gui.EnergyPrice` | double |  | What a kWh of energy costs, in your currency. When set, the Trends pages can chart energy as cost. Leave blank to not offer cost. |
 | `Gui.Currency` | string | `$` | The currency symbol cost is shown with, e.g. $, €, £. |
 | `Gui.AuthType` | one of `Basic`, `Oidc`, `None` | `Basic` | How users authenticate to the GUI: Basic (username/password), Oidc (SSO), or None (no login). |
+| `Gui.TrustedNetworks` | list |  | Addresses or CIDR ranges given read-only access without signing in, e.g. 10.100.64.247/32 for a wall display. Changes still need sign-in. Leave empty to require sign-in for everyone. |
+| `Gui.TrustedProxies` | list |  | Addresses or CIDR ranges of reverse proxies whose X-Forwarded-For header is used to find the client address for Trusted networks. Leave empty to use the connecting address. |
 | `Gui.Port` | int | `8080` | Port the configuration GUI listens on. |
 | `Gui.Username` | string |  | Username required to access the GUI (HTTP Basic auth). |
 | `Gui.Password` | string (secret) |  | Password required to access the GUI (HTTP Basic auth). Required unless Oidc is enabled. |

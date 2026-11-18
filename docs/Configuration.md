@@ -649,6 +649,39 @@ Gui:
 - Use only where the GUI port is otherwise protected (private network, NetworkPolicy).
 - A warning is logged at startup.
 
+### Trusted networks (read-only access)
+
+Clients in `Gui.TrustedNetworks` get the dashboards without signing in. Everyone else signs in with `Gui.AuthType`.
+
+```yaml
+Gui:
+  AuthType: Oidc
+  TrustedNetworks:
+    - 10.100.64.247/32   # wall display
+  TrustedProxies:
+    - 10.16.3.101/32     # reverse proxy / gateway
+```
+
+| Setting | Value |
+| --- | --- |
+| `TrustedNetworks` | Addresses or CIDR ranges (IPv4 or IPv6). A bare address is one host. Empty: everyone signs in. |
+| `TrustedProxies` | Addresses or CIDR ranges of the reverse proxies in front of the GUI. Empty: the connecting address is the client. |
+| `RPDU2MQTT_GUI_TRUSTED_NETWORKS` | Comma-separated; overrides `TrustedNetworks`. Helm: `gui.trustedNetworks`. |
+| `RPDU2MQTT_GUI_TRUSTED_PROXIES` | Comma-separated; overrides `TrustedProxies`. Helm: `gui.trustedProxies`. |
+
+- Client address: the connecting address, then `X-Forwarded-For` read right to left while the address that added each entry is in `TrustedProxies`.
+- With `TrustedProxies` set, OIDC's `X-Forwarded-Proto` / `-Host` are also only read from those proxies.
+- A trusted viewer gets the Dashboards pages. Settings, setup, tools, diagnostics, saving and controls are hidden and refused (HTTP 403).
+- Credentials are removed from the configuration a trusted viewer receives.
+- **Sign in** in the header signs in from a trusted network.
+- Ignored when `AuthType` is `None`.
+
+Behind the Cilium Gateway, the GUI pod's connecting address is the Cilium ingress IP of the node holding the gateway address. List every node's ingress IP:
+
+```sh
+kubectl get ciliumnodes -o custom-columns=NAME:.metadata.name,INGRESS:.spec.ingress
+```
+
 ### GUI features
 
 | Feature | Behaviour |

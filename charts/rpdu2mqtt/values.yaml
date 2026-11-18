@@ -304,16 +304,19 @@ healthProbes:
 resources: {}
 podAnnotations: {}
 
-# The container's clock (tzdata name, e.g. "America/Chicago"). Unset, a container runs in UTC and every
-# log line is hours from yours. Use the region name rather than an abbreviation: "America/Chicago" follows
-# CST and CDT on its own, where "CST" pins standard time and is an hour out for most of the year.
-#
-# This is not the energy day boundary — that is EnergyFlow.Aggregation.PeriodTimeZone, which is
-# configuration precisely so the daily totals do not depend on the container's environment.
+# The container's time zone (tzdata name, e.g. "America/Chicago"). Unset: UTC.
+# The energy day boundary is EnergyFlow.Aggregation.PeriodTimeZone, not this.
 timeZone: ""
 
 # Anything else to put in the container's environment, as a list of name/value (or valueFrom) entries.
 extraEnv: []
+
+# GUI access set from the deployment. Each list overrides the matching Gui setting when non-empty.
+gui:
+  # CIDRs given read-only GUI access without signing in (RPDU2MQTT_GUI_TRUSTED_NETWORKS -> Gui.TrustedNetworks).
+  trustedNetworks: []
+  # CIDRs of the reverse proxies whose X-Forwarded-For is used (RPDU2MQTT_GUI_TRUSTED_PROXIES -> Gui.TrustedProxies).
+  trustedProxies: []
 
 # Defaults that satisfy the Pod Security Standards "restricted" profile, so the chart installs without
 # warnings into a namespace that enforces it. The image runs as uid 1654 (non-root), so these describe what

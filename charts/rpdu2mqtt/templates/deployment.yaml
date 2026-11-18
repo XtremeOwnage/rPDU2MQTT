@@ -106,8 +106,7 @@ spec:
                 fieldRef:
                   fieldPath: metadata.name
             {{- if $r.lease }}
-            # Only the holder of the leader lease polls, publishes and records, so the old and new pod of a
-            # rolling update never both do (#506). A restart from the GUI rolls this Deployment.
+            # Only the lease holder polls, publishes and records.
             - name: RPDU2MQTT_LEADER_LEASE
               value: "true"
             - name: RPDU2MQTT_DEPLOYMENT
@@ -147,13 +146,17 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             {{- end }}
-            {{- /* The container's own clock. Unset, a container runs in UTC: log lines, and anything the
-                   bridge formats in local time, are then hours from the operator's clock. The energy day
-                   boundary is NOT this — that is EnergyFlow.Aggregation.PeriodTimeZone, deliberately
-                   configuration rather than an accident of the container's environment. */}}
             {{- with $.Values.timeZone }}
             - name: TZ
               value: {{ . | quote }}
+            {{- end }}
+            {{- with ($.Values.gui).trustedNetworks }}
+            - name: RPDU2MQTT_GUI_TRUSTED_NETWORKS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with ($.Values.gui).trustedProxies }}
+            - name: RPDU2MQTT_GUI_TRUSTED_PROXIES
+              value: {{ join "," . | quote }}
             {{- end }}
             {{- with $.Values.extraEnv }}
             {{- toYaml . | nindent 12 }}

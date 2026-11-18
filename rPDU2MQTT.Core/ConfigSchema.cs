@@ -540,10 +540,7 @@ public static class ConfigSchema
     public static Config FromJson(string json)
         => JsonSerializer.Deserialize<Config>(json, ConfigJson) ?? throw new Exception("Configuration payload was empty.");
 
-    /// <summary>
-    /// Return a deep copy with secrets stripped, for writing to a Kubernetes CR or exporting a manifest
-    /// (credentials belong in a Secret, not the CR spec / committed manifest).
-    /// </summary>
+    /// <summary>A deep copy with secrets stripped, for the Kubernetes CR and exported manifests.</summary>
     public static Config RedactSecrets(Config config)
     {
         var clone = FromJson(ToJson(config));
@@ -555,13 +552,38 @@ public static class ConfigSchema
         if (clone.Gui.Oidc is not null)
             clone.Gui.Oidc.ClientSecret = null;
         clone.Api.ApiKey = null;
-        // Both of these travelled: the Home Assistant long-lived token and the cache password were written
-        // into the CR spec on every save, and into the manifest the Export page offers for GitOps.
         clone.HASS.Token = null;
         clone.HASS.EnergyDashboard.LegacyToken = null;
         clone.Cache.Password = null;
         clone.PlanStorage.ObjectStore.SecretAccessKey = null;
         return clone;
+    }
+
+    private static readonly string[] SecretNameEndings = ["password", "secret", "token", "apikey", "secretaccesskey", "credentials"];
+
+    /// <summary>The config as JSON for a read-only viewer: every credential removed, plugin settings included.</summary>
+    public static string ToViewerJson(Config config)
+    {
+        var root = System.Text.Json.Nodes.JsonNode.Parse(ToJson(RedactSecrets(config)));
+        StripSecrets(root);
+        return root?.ToJsonString(ConfigJson) ?? "{}";
+    }
+
+    private static void StripSecrets(System.Text.Json.Nodes.JsonNode? node)
+    {
+        switch (node)
+        {
+            case System.Text.Json.Nodes.JsonObject obj:
+                foreach (var name in obj.Select(p => p.Key).ToList())
+                {
+                    if (SecretNameEndings.Any(s => name.EndsWith(s, StringComparison.OrdinalIgnoreCase))) obj.Remove(name);
+                    else StripSecrets(obj[name]);
+                }
+                break;
+            case System.Text.Json.Nodes.JsonArray arr:
+                foreach (var item in arr) StripSecrets(item);
+                break;
+        }
     }
 
     /// <summary>Serialize a config object to YAML (honoring the model's YAML aliases).</summary>

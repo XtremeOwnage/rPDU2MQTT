@@ -77,6 +77,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   sec.appendChild(el('div', { class: 'ld-toolbar ps-toolbar', style: { flexWrap: 'wrap', gap: '8px' } },
     el('div', { class: 'ps-pick' }, el('label', { class: 'ld-inst' }, 'Panel ', panelSel), el('label', { class: 'ld-inst' }, 'Show ', unitSel)),
     el('div', { class: 'ps-actions' }, refresh, addPanel, importBtn, traceStart, printBtn, exportBtn), status));
+  [addPanel, importBtn, traceStart].forEach(b => b.classList.add('edit-only'));
 
   // The panel's own settings: what it is called, and how many slots it has.
   const nameIn = el('input', { type: 'text', placeholder: 'Main Panel' }) as HTMLInputElement;
@@ -394,6 +395,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
   };
 
   const edit = (panel: Panel, b: Breaker | null, slot: number, presetHalf?: number) => {
+    if (state.viewer) { if (b) history(panel, b); return; }
     const entry = b ? configBreaker(panel.id, b) : null;
     const wasNumber = b?.number || '';
     const field = (label: string, input: any, hint?: string) =>
@@ -606,7 +608,7 @@ export function addPanelScheduleSection(nav: any, sections: any) {
 
   /// What this breaker has been drawing: the channels measuring it, summed the way its power is.
   const history = (panel: Panel, b: Breaker) => {
-    const toEditor = btn('Edit breaker');
+    const toEditor = btn('Edit breaker', 'edit-only');
     toEditor.onclick = () => edit(panel, b, b.slot);
     const channels = b.legs.map(l => l.channel).filter(Boolean) as string[];
     openHistorySheet({

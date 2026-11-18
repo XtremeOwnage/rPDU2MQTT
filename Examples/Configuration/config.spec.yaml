@@ -361,3 +361,9 @@ Gui:
     Username: "admin"
     # Password for the GUI. The GUI refuses to start until this is set.
     Password: "change-me"
+    # Addresses or CIDR ranges given read-only access without signing in. Default: empty
+    # TrustedNetworks:
+    #   - 10.100.64.247/32
+    # Reverse proxies whose X-Forwarded-For is used to find the client address. Default: empty
+    # TrustedProxies:
+    #   - 10.16.3.101/32
