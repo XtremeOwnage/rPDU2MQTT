@@ -22,10 +22,6 @@ public static class BreakerState
     public static string Of(string? state) => string.IsNullOrWhiteSpace(state) ? Unknown : state;
 }
 
-/// <summary>
-/// An electrical panel and what is in its slots (#452). The panel directory that lives on paper — breaker
-/// number, wire label, description, and which circuits nobody has identified — held in config instead.
-/// </summary>
 public class PanelConfig : IExtensible
 {
     [Description("Stable unique id for this panel, used to refer to it from elsewhere. For example 'main_panel'.")]
@@ -72,10 +68,6 @@ public class PanelConfig : IExtensible
     public static int RowOf(int slot) => (slot + 1) / 2;
 }
 
-/// <summary>
-/// One breaker in a panel slot (#452). A double-pole breaker holds the next slot in its own column as well;
-/// a tandem breaker is two halves sharing one slot, numbered like "26.1" and "26.2".
-/// </summary>
 public class BreakerConfig : IExtensible
 {
     /// <summary>The slot this breaker sits in, numbered as the panel is: odd on the left, even on the right.</summary>
@@ -141,11 +133,18 @@ public class BreakerConfig : IExtensible
         if (Poles == 2) yield return Slot + 2;
     }
 
-    /// <summary>Two breakers collide when they hold a slot together and are not the two halves of one tandem.</summary>
+    /// <summary>Every slot and half this breaker holds. A double-pole with a half takes the opposite half of slot + 2.</summary>
+    public IEnumerable<(int Slot, int? Half)> Holds()
+    {
+        yield return (Slot, Half);
+        if (Poles == 2) yield return (Slot + 2, Half is null ? null : 3 - Half);
+    }
+
+    /// <summary>Two breakers collide when they hold the same half of a slot, or either holds all of it.</summary>
     public bool Collides(BreakerConfig other)
     {
         if (ReferenceEquals(this, other)) return false;
-        if (!Occupies().Intersect(other.Occupies()).Any()) return false;
-        return Half is null || other.Half is null || Half == other.Half;
+        var theirs = other.Holds().ToList();
+        return Holds().Any(a => theirs.Any(b => a.Slot == b.Slot && (a.Half is null || b.Half is null || a.Half == b.Half)));
     }
 }
