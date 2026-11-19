@@ -52,4 +52,6 @@ const graph = {
 };
 const loads = JSON.parse(run(`JSON.stringify(kkLoads(${JSON.stringify(graph.nodes)}, ${JSON.stringify(graph.links)}))`));
 if (loads.map(l => l.label).join() !== 'HVAC,UPS') fail('loads now ' + JSON.stringify(loads));
+const split2 = JSON.parse(run(`JSON.stringify(kkLoads([{id:'s',kind:'solar',balance:'solar',value:5},{id:'g',kind:'grid',balance:'grid',value:5},{id:'a',kind:'node',value:3},{id:'b',kind:'node',value:4}], [{source:'s',target:'a',value:3},{source:'g',target:'b',value:4}]))`));
+if (split2.map(l => l.label).join() !== 'b,a') fail('loads with no common hub ' + JSON.stringify(split2));
 console.log('kiosk: theme from the URL, round axes, power split, battery levels, loads');
