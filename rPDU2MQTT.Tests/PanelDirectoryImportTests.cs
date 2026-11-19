@@ -128,6 +128,21 @@ public class PanelDirectoryImportTests
         Assert.Equal("clash", PanelDirectoryImport.Effect(panel, PanelDirectoryImport.ParseLine("24: Something else")));
     }
 
+    [Fact]
+    public void AHalfWidthDoublePole_ReadsAsThePairItHolds()
+    {
+        var r = PanelDirectoryImport.ParseLine("2.2,4.1,20A: Mini split");
+
+        Assert.True(r.Ok);
+        Assert.Equal((2, 2, (int?)2), (r.Slot, r.Poles, r.Half));
+        Assert.Equal("2.2,4.1", r.Number);
+        Assert.False(PanelDirectoryImport.ParseLine("2.2,4.2: Mini split").Ok);
+
+        var panel = new PanelConfig { Breakers = { new BreakerConfig { Slot = 4, Number = "4.2", Half = 2 } } };
+        Assert.Equal("add", PanelDirectoryImport.Effect(panel, r));
+        Assert.Equal("clash", PanelDirectoryImport.Effect(panel, PanelDirectoryImport.ParseLine("2.1,4.2: Other")));
+    }
+
     /// <summary>The directory text the panel schedule exports (#592), as panelschedule.check.mjs writes it.</summary>
     [Fact]
     public void AnExportedDirectory_ReadsBackAsTheSameBreakers()
