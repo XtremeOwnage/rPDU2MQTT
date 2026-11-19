@@ -59,6 +59,24 @@ public class PanelConfigTests
     }
 
     [Fact]
+    public void QuadBreaker_HalfWidthDoublePole_SharesSlotPlusTwo()
+    {
+        var outerUpper = new BreakerConfig { Slot = 2, Half = 1, Number = "2.1" };
+        var inner = new BreakerConfig { Slot = 2, Poles = 2, Half = 2, Number = "2.2,4.1" };
+        var outerLower = new BreakerConfig { Slot = 4, Half = 2, Number = "4.2" };
+
+        Assert.Equal(new[] { (2, (int?)2), (4, (int?)1) }, inner.Holds());
+        Assert.False(inner.Collides(outerUpper));
+        Assert.False(inner.Collides(outerLower));
+        Assert.True(inner.Collides(new BreakerConfig { Slot = 4, Half = 1 }));
+        Assert.True(inner.Collides(new BreakerConfig { Slot = 4 }));
+
+        var outerPair = new BreakerConfig { Slot = 2, Poles = 2, Half = 1 };
+        Assert.False(outerPair.Collides(inner));
+        Assert.True(outerPair.Collides(outerLower));
+    }
+
+    [Fact]
     public void ABreakerStartsUnknown_SoABlankRowClaimsNothing()
     {
         Assert.Equal(BreakerState.Unknown, new BreakerConfig().State);
