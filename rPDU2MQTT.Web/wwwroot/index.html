@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-title" content="rPDU2MQTT" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E%E2%9A%A1%3C/text%3E%3C/svg%3E" />
-<!-- Apply the saved theme before first paint, so a reload never flashes the wrong one. -->
-<script>try{var t=localStorage.getItem('rpdu-theme');if(t&&t!=='system')document.documentElement.dataset.theme=t;}catch(e){}</script>
+<!-- Theme before first paint. -->
+<script>try{var d=document.documentElement;if(/^\/kiosk\/?$/i.test(location.pathname)){d.className='kiosk';var q=new URLSearchParams(location.search).get('theme');if(q==='dark'||q==='light')d.dataset.theme=q;}else{var t=localStorage.getItem('rpdu-theme');if(t&&t!=='system')d.dataset.theme=t;}}catch(e){}</script>
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -58,7 +58,7 @@
   </main>
 </div>
 
-<!-- The save bar only appears when there is something to save (or the config is read-only). -->
+<!-- Save bar. -->
 <div class="savebar is-hidden" id="savebar">
   <div class="savebar-inner">
     <span class="savebar-count" id="save-count"></span>

@@ -63,6 +63,22 @@ kubectl get ciliumnodes -o custom-columns=NAME:.metadata.name,INGRESS:.spec.ingr
 
 Helm values `gui.trustedNetworks` and `gui.trustedProxies` set both lists from the deployment.
 
+## Kiosk
+
+`/kiosk` is a full-screen, read-only view for a wall display, laid out for 1920×1080. No header, navigation or controls. Updates live.
+
+![Kiosk view](../assets/screenshots/kiosk.webp)
+
+| URL | Theme |
+| --- | --- |
+| `/kiosk` | Follows the display's system setting |
+| `/kiosk?theme=dark` | Dark |
+| `/kiosk?theme=light` | Light |
+
+Shows live power flow between Solar, Grid, Battery and Home, battery charge, net self-produced today, the last 24 hours (with history on), the largest loads now, and alerts from **Status**. Reloads itself when a new version is deployed.
+
+Add the display's address under **Trusted networks** so it opens without signing in.
+
 ## None
 
 No login. Anyone who can reach the port has full access. A warning is logged at startup.

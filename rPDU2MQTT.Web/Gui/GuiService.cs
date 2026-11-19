@@ -746,6 +746,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
     private void MapEndpoints(WebApplication app)
     {
         app.MapGet("/", () => Results.Content(LoadIndexHtml(), "text/html"));
+        app.MapGet("/kiosk", () => Results.Content(LoadIndexHtml(), "text/html"));
         app.MapGet("/styles.css", () => Results.Content(LoadAsset("styles.css") ?? "", "text/css"));
         app.MapGet("/app.js", () => Results.Content(LoadAsset("app.js") ?? "", "text/javascript"));
 
