@@ -21,12 +21,18 @@ if (run("kioskTheme('?theme=dark')") !== 'dark') fail('?theme=dark is not dark')
 if (run("kioskTheme('?theme=light')") !== 'light') fail('?theme=light is not light');
 if (run("kioskTheme('?theme=blue')") !== null) fail('an unknown theme is not ignored');
 if (run("kioskTheme('')") !== null) fail('no theme does not follow the system');
-if (run("kioskStyle('?style=glow&theme=dark')") !== 'glow') fail('?style=glow is not glow');
-if (run("kioskStyle('?style=minimal')") !== 'minimal') fail('?style=minimal is not minimal');
-if (run("kioskStyle('?style=x')") !== 'classic' || run("kioskStyle('')") !== 'classic') fail('the default style is not classic');
-
 for (const [v, want] of [[0, 0], [7.2, 8], [1800, 2000], [2300, 2500], [4100, 5000], [9600, 10000]])
   if (run(`kkNice(${v})`) !== want) fail(`the axis above ${v} is ${run(`kkNice(${v})`)}, not ${want}`);
+
+const split = (p) => run(`JSON.stringify(kkSplit(${JSON.stringify(p)}))`);
+let s = JSON.parse(split({ solar: 6800, home: 2600, battery: -2400, grid: -1800 }));
+if (s.solarHome !== 2600 || s.solarBattery !== 2400 || s.solarGrid !== 1800 || s.gridHome || s.batteryHome) fail('midday split ' + JSON.stringify(s));
+s = JSON.parse(split({ solar: 400, home: 2900, battery: 1200, grid: 1300 }));
+if (s.solarHome !== 400 || s.batteryHome !== 1200 || s.gridHome !== 1300 || s.solarGrid) fail('evening split ' + JSON.stringify(s));
+s = JSON.parse(split({ solar: 0, home: 1000, battery: -2000, grid: 3000 }));
+if (s.gridHome !== 1000 || s.gridBattery !== 2000) fail('grid charging split ' + JSON.stringify(s));
+
+if (run('kkSocLevel(82)') !== 'good' || run('kkSocLevel(46)') !== 'warn' || run('kkSocLevel(12)') !== 'bad' || run('kkSocLevel(null)') !== 'none') fail('battery colour levels');
 
 const graph = {
   nodes: [
@@ -36,13 +42,14 @@ const graph = {
     { id: 'hvac', label: 'HVAC', kind: 'node', value: 2500 },
     { id: 'rack', label: 'Rack', kind: 'node', value: 1500 },
     { id: 'ups', label: 'UPS', kind: 'node', value: 1200 },
+    { id: 'rack#unmeasured', label: 'Unmeasured load', kind: 'unmeasured', value: 300, synthetic: true },
   ],
   links: [
     { source: 'solar', target: 'panel', value: 3000 }, { source: 'grid', target: 'panel', value: 1000 },
     { source: 'panel', target: 'hvac', value: 2500 }, { source: 'panel', target: 'rack', value: 1500 },
-    { source: 'rack', target: 'ups', value: 1200 },
+    { source: 'rack', target: 'ups', value: 1200 }, { source: 'rack', target: 'rack#unmeasured', value: 300 },
   ],
 };
-const bars = run(`(() => { const s = kkSankey(${JSON.stringify(graph)}.nodes, ${JSON.stringify(graph)}.links, 1800, 500, 'W'); return s.querySelectorAll ? s.querySelectorAll('rect').length : (s.children || s.childNodes).filter(c => c.tagName === 'rect').length; })()`);
-if (bars !== 6) fail(`the Sankey draws ${bars} bars, not 6 (two sources, the panel, two branches, one beneath)`);
-console.log('kiosk: theme from the URL, round axes, Sankey from supply to what it feeds');
+const loads = JSON.parse(run(`JSON.stringify(kkLoads(${JSON.stringify(graph.nodes)}, ${JSON.stringify(graph.links)}))`));
+if (loads.map(l => l.label).join() !== 'HVAC,UPS') fail('loads now ' + JSON.stringify(loads));
+console.log('kiosk: theme from the URL, round axes, power split, battery levels, loads');
