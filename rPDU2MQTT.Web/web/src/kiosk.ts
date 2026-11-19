@@ -3,7 +3,6 @@ import { api, el, svgEl, formatNum } from './helpers.js';
 import { subscribeLive, realtimeLive, onRealtimeState } from './realtime.js';
 import { SOURCE_COLOR } from './charts.js';
 import { homeEnergy, selfSufficiencyPct, netSelfProducedPct, shareBand, sumKnown } from './energy.js';
-import { findHub, flowTree, type TreeNode } from './flow-tree.js';
 
 export const isKiosk = () => /^\/kiosk\/?$/i.test(location.pathname || '');
 
@@ -63,20 +62,14 @@ export function kkSplit(p: { solar: number | null; grid: number | null; battery:
   return { solarHome, solarBattery, solarGrid, batteryHome, gridHome, gridBattery, batteryGrid };
 }
 
-/// Leaves of the flow tree under the hub, largest first.
+/// Measured nodes that feed nothing further, largest first.
 export function kkLoads(nodes: any[], links: any[]): { label: string; value: number }[] {
-  const byId = new Map(nodes.map((n: any) => [n.id, n]));
-  const { hub } = findHub(nodes, links);
-  if (!hub) return [];
-  const out: { label: string; value: number }[] = [];
-  const walk = (t: TreeNode) => {
-    if (t.children.length) { t.children.forEach(walk); return; }
-    const n: any = byId.get(t.id);
-    if (!n || n.kind === 'unmeasured' || n.synthetic || !(t.value > 0)) return;
-    out.push({ label: t.label, value: t.value });
-  };
-  flowTree(nodes, links, hub, 'out').top.forEach(walk);
-  return out.sort((a, b) => b.value - a.value);
+  const feeds = new Set(links.filter((l: any) => (l.value ?? 0) > 0).map((l: any) => l.source));
+  return nodes
+    .filter((n: any) => !feeds.has(n.id) && !n.balance && kkTop(n) && n.kind !== 'unmeasured'
+      && !['solar', 'grid', 'battery'].includes(n.kind) && typeof n.value === 'number' && n.value > 0)
+    .map((n: any) => ({ label: n.label || n.id, value: n.value }))
+    .sort((a, b) => b.value - a.value);
 }
 
 const kkPhase = (ms: number) => `-${Date.now() % ms}ms`;
@@ -472,7 +465,7 @@ export function startKiosk() {
     });
     loads.replaceChildren(...rows);
     // Only whole rows: drop what doesn't fit.
-    while (loads.lastChild && loads.scrollHeight > loads.clientHeight + 1) loads.lastChild.remove();
+    while (loads.childElementCount > 1 && loads.clientHeight > 0 && loads.scrollHeight > loads.clientHeight + 1) loads.lastChild.remove();
     drawDay(false);
   };
 
