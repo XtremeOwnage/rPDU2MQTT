@@ -2023,7 +2023,8 @@
 .kk-card[hidden] { display: none; }
 .kk-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--edge); }
 .kk-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
-.kk-card-label { font-size: 16px; font-weight: 750; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+.kk-card-label { display: inline-flex; align-items: center; gap: 9px; font-size: 16px; font-weight: 750; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+.kk-icon { width: 22px; height: 22px; fill: none; stroke: var(--edge); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .kk-state { font-size: 16px; font-weight: 650; color: var(--muted); }
 .kk-card-main { display: flex; align-items: center; gap: 16px; margin-top: 2px; }
 .kk-now { font-size: 60px; font-weight: 750; letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1.05; white-space: nowrap; }
@@ -2048,9 +2049,46 @@
 .kk-axis { fill: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
 .kk-flow-box { flex: 1; min-height: 0; margin-top: 8px; }
 .kk-sankey { display: block; }
-.kk-band { fill-opacity: .32; }
+.kk-band { fill-opacity: .42; }
 .kk-pulse { fill: none; stroke: var(--fg); stroke-opacity: .35; stroke-dasharray: 3 29; animation: kk-pulse 1.6s linear infinite; }
 @keyframes kk-pulse { to { stroke-dashoffset: -32; } }
 .kk-sk-name { fill: var(--fg); font-size: 16px; font-weight: 600; }
 .kk-sk-val { fill: var(--muted); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) { .kk-pulse { animation: none; } }
+
+.kk-line { --c: var(--accent); }
+
+/* Kiosk ?style=glow */
+.kk[data-kstyle="glow"] { background:
+  radial-gradient(1100px 600px at 10% -10%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%),
+  radial-gradient(900px 600px at 95% 110%, color-mix(in srgb, #b06fd0 14%, transparent), transparent 70%), var(--bg); }
+.kk[data-kstyle="glow"] .kk-card { background: linear-gradient(160deg, color-mix(in srgb, var(--edge) 9%, var(--panel)) 0%, color-mix(in srgb, var(--panel) 72%, transparent) 60%);
+  border-color: color-mix(in srgb, var(--edge) 28%, var(--line)); border-radius: 18px; box-shadow: 0 0 0 1px rgba(255,255,255,.02), 0 18px 50px rgba(0,0,0,.35); }
+.kk[data-kstyle="glow"] .kk-card::before { display: none; }
+.kk[data-kstyle="glow"] .kk-now { color: color-mix(in srgb, var(--edge) 35%, var(--fg)); text-shadow: 0 0 28px color-mix(in srgb, var(--edge) 55%, transparent); }
+.kk[data-kstyle="glow"] .kk-icon { filter: drop-shadow(0 0 6px var(--edge)); }
+.kk[data-kstyle="glow"] .kk-line { filter: drop-shadow(0 0 5px var(--c)); stroke-width: 3; }
+.kk[data-kstyle="glow"] .kk-band { fill-opacity: .55; }
+.kk[data-kstyle="glow"] .kk-pulse { stroke-opacity: .7; stroke-dasharray: 4 28; filter: drop-shadow(0 0 3px var(--fg)); }
+.kk[data-kstyle="glow"] .kk-gauge-fill { box-shadow: 0 0 18px currentColor; }
+.kk[data-kstyle="glow"] .kk-gridline { stroke-opacity: .5; }
+.kk[data-kstyle="glow"] .kk-clock { text-shadow: 0 0 22px color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* Kiosk ?style=minimal */
+.kk[data-kstyle="minimal"] { gap: 10px; }
+.kk[data-kstyle="minimal"] .kk-sources { gap: 0; }
+.kk[data-kstyle="minimal"] .kk-card { background: none; border: 0; border-radius: 0; padding: 10px 26px; }
+.kk[data-kstyle="minimal"] .kk-sources > .kk-card + .kk-card { border-left: 1px solid var(--line-soft); }
+.kk[data-kstyle="minimal"] .kk-card::before { display: none; }
+.kk[data-kstyle="minimal"] .kk-flow { border-top: 1px solid var(--line-soft); padding-top: 18px; }
+.kk[data-kstyle="minimal"] .kk-card-label { font-weight: 600; letter-spacing: .16em; font-size: 15px; }
+.kk[data-kstyle="minimal"] .kk-now { font-weight: 300; font-size: 72px; letter-spacing: -.04em; }
+.kk[data-kstyle="minimal"] .kk-stat-value { font-weight: 400; }
+.kk[data-kstyle="minimal"] .kk-area { opacity: .55; }
+.kk[data-kstyle="minimal"] .kk-line { stroke-width: 2; }
+.kk[data-kstyle="minimal"] .kk-gridline { stroke-opacity: .4; }
+.kk[data-kstyle="minimal"] .kk-band { fill-opacity: .26; }
+.kk[data-kstyle="minimal"] .kk-pulse { display: none; }
+.kk[data-kstyle="minimal"] .kk-clock { font-weight: 300; font-size: 40px; }
+.kk[data-kstyle="minimal"] .kk-gauge { border-radius: 17px; }
+.kk[data-kstyle="minimal"] .kk-gauge-text { font-weight: 500; }

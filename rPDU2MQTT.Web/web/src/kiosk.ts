@@ -13,6 +13,25 @@ export function kioskTheme(search: string): string | null {
   return t === 'dark' || t === 'light' ? t : null;
 }
 
+/// The look a kiosk URL asks for: ?style=glow|minimal, else classic.
+export function kioskStyle(search: string): string {
+  const v = new URLSearchParams(search || '').get('style');
+  return v === 'glow' || v === 'minimal' ? v : 'classic';
+}
+
+const KK_ICON: Record<string, string> = {
+  home: 'M3 11.5 12 4l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+  solar: 'M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1',
+  grid: 'M13 2 4 14h7l-1 8 9-12h-7z',
+  battery: 'M4 7h15a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zM22 10.5v3',
+  flow: 'M3 7h6c4 0 6 10 10 10h2M3 17h6c4 0 6-10 10-10h2',
+};
+const kkIcon = (key: string) => {
+  const svg = svgEl('svg', { viewBox: '0 0 24 24', class: 'kk-icon', 'aria-hidden': 'true' });
+  svg.appendChild(svgEl('path', { d: KK_ICON[key] || '' }));
+  return svg;
+};
+
 /// A round axis bound at or above `v`: 1, 2, 2.5 or 5 times a power of ten.
 export function kkNice(v: number): number {
   if (!(v > 0)) return 0;
@@ -56,7 +75,8 @@ function kkChart(values: (number | null)[], at: string[], color: string, under: 
     const d = new Date(iso);
     if (i === 0 || d.getHours() % 6 !== 0 || new Date(at[i - 1]).getHours() === d.getHours()) return;
     svg.appendChild(svgEl('line', { x1: x(i), x2: x(i), y1: padT, y2: H - padB, class: 'kk-gridline' }));
-    const t = svgEl('text', { x: x(i), y: H - 6, class: 'kk-axis', 'text-anchor': 'middle' });
+    const edge = x(i) > W - padR - 28;
+    const t = svgEl('text', { x: edge ? W - padR : x(i), y: H - 6, class: 'kk-axis', 'text-anchor': edge ? 'end' : 'middle' });
     t.textContent = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).toLocaleTimeString([], { hour: 'numeric' });
     svg.appendChild(t);
   });
@@ -80,12 +100,21 @@ function kkChart(values: (number | null)[], at: string[], color: string, under: 
   clip('b', y(0), H);
   svg.appendChild(defs);
   const z = y(0).toFixed(1);
-  for (const [part, c] of [['a', color], ['b', under]] as [string, string][]) {
+  for (const [part, c, top] of [['a', color, true], ['b', under, false]] as [string, string, boolean][]) {
+    const fade = svgEl('linearGradient', { id: id + part + 'f', gradientUnits: 'userSpaceOnUse', x1: 0, x2: 0, y1: top ? padT : y(0), y2: top ? y(0) : H - padB });
+    [[0, top ? 0.42 : 0.04], [1, top ? 0.04 : 0.42]].forEach(([o, a]) => {
+      const st = svgEl('stop', { offset: o });
+      st.style.stopColor = c; st.style.stopOpacity = String(a);
+      fade.appendChild(st);
+    });
+    defs.appendChild(fade);
     const g = svgEl('g', { 'clip-path': `url(#${id + part})` });
     runs.forEach(r => {
       const line = r.map(p => `${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' L');
-      g.appendChild(svgEl('path', { d: `M${x(r[0].i).toFixed(1)},${z} L${line} L${x(r[r.length - 1].i).toFixed(1)},${z} Z`, fill: c, 'fill-opacity': '0.22' }));
-      g.appendChild(svgEl('path', { d: `M${line}`, fill: 'none', stroke: c, 'stroke-width': 2.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+      g.appendChild(svgEl('path', { d: `M${x(r[0].i).toFixed(1)},${z} L${line} L${x(r[r.length - 1].i).toFixed(1)},${z} Z`, fill: `url(#${id + part}f)`, class: 'kk-area' }));
+      const path = svgEl('path', { d: `M${line}`, fill: 'none', stroke: c, 'stroke-width': 2.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', class: 'kk-line' });
+      path.style.setProperty('--c', c);
+      g.appendChild(path);
     });
     svg.appendChild(g);
   }
@@ -161,6 +190,17 @@ export function kkSankey(nodes: any[], links: any[], W: number, H: number, units
   const span = W - labelL - labelR - BAR;
   const xOf = (col: number) => labelL + (cols.length === 1 ? 0 : (col * span) / (cols.length - 1));
   const phase = -(Date.now() % 1600);
+  const defs = svgEl('defs', {});
+  svg.appendChild(defs);
+  let gid = 0;
+  const gtag = Math.random().toString(36).slice(2, 7);
+  const gradient = (from: string, to: string, x0: number, x1: number) => {
+    const id = `kkg${gtag}${gid++}`;
+    const g = svgEl('linearGradient', { id, gradientUnits: 'userSpaceOnUse', x1: x0, x2: x1, y1: 0, y2: 0 });
+    [[0, from], [1, to]].forEach(([o, c]) => { const st = svgEl('stop', { offset: o }); st.style.stopColor = c as string; g.appendChild(st); });
+    defs.appendChild(g);
+    return id;
+  };
   edges.forEach(e => {
     const h = Math.max(1, e.v * k);
     const x0 = xOf(e.a.col) + BAR, x1 = xOf(e.b.col);
@@ -169,7 +209,7 @@ export function kkSankey(nodes: any[], links: any[], W: number, H: number, units
     const m = (x0 + x1) / 2;
     svg.appendChild(svgEl('path', {
       d: `M${x0},${y0} C${m},${y0} ${m},${y1} ${x1},${y1} L${x1},${y1 + h} C${m},${y1 + h} ${m},${y0 + h} ${x0},${y0 + h} Z`,
-      fill: e.color, class: 'kk-band',
+      fill: `url(#${gradient(e.a.color, e.b.color, x0, x1)})`, class: 'kk-band',
     }));
     const line = svgEl('path', { d: `M${x0},${y0 + h / 2} C${m},${y0 + h / 2} ${m},${y1 + h / 2} ${x1},${y1 + h / 2}`, class: 'kk-pulse' });
     line.style.strokeWidth = String(Math.min(3, Math.max(1, h / 4)));
@@ -226,7 +266,7 @@ export function startKiosk() {
     };
     c.box.style.setProperty('--edge', color);
     c.box.append(
-      el('div', { class: 'kk-card-head' }, el('span', { class: 'kk-card-label', text: label }), c.state),
+      el('div', { class: 'kk-card-head' }, el('span', { class: 'kk-card-label' }, kkIcon(key), label), c.state),
       el('div', { class: 'kk-card-main' }, c.now, c.extra), c.stats,
       c.chart);
     return c;
@@ -240,7 +280,9 @@ export function startKiosk() {
   const sources = el('div', { class: 'kk-sources' }, ...Object.values(cards).map(c => c.box));
   const flow = el('div', { class: 'kk-flow-box' });
   const view = el('div', { id: 'kiosk', class: 'kk' }, head, sources,
-    el('section', { class: 'kk-card kk-flow' }, el('div', { class: 'kk-card-head' }, el('span', { class: 'kk-card-label', text: 'Flow' })), flow));
+    el('section', { class: 'kk-card kk-flow' }, el('div', { class: 'kk-card-head' }, el('span', { class: 'kk-card-label' }, kkIcon('flow'), 'Flow')), flow));
+  view.dataset.kstyle = kioskStyle(location.search);
+  (view.lastChild as any).style.setProperty('--edge', HOME_COLOR);
   document.body.innerHTML = '';
   document.body.appendChild(view);
 

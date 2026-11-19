@@ -21,6 +21,9 @@ if (run("kioskTheme('?theme=dark')") !== 'dark') fail('?theme=dark is not dark')
 if (run("kioskTheme('?theme=light')") !== 'light') fail('?theme=light is not light');
 if (run("kioskTheme('?theme=blue')") !== null) fail('an unknown theme is not ignored');
 if (run("kioskTheme('')") !== null) fail('no theme does not follow the system');
+if (run("kioskStyle('?style=glow&theme=dark')") !== 'glow') fail('?style=glow is not glow');
+if (run("kioskStyle('?style=minimal')") !== 'minimal') fail('?style=minimal is not minimal');
+if (run("kioskStyle('?style=x')") !== 'classic' || run("kioskStyle('')") !== 'classic') fail('the default style is not classic');
 
 for (const [v, want] of [[0, 0], [7.2, 8], [1800, 2000], [2300, 2500], [4100, 5000], [9600, 10000]])
   if (run(`kkNice(${v})`) !== want) fail(`the axis above ${v} is ${run(`kkNice(${v})`)}, not ${want}`);

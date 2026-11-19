@@ -75,6 +75,14 @@ Helm values `gui.trustedNetworks` and `gui.trustedProxies` set both lists from t
 | `/kiosk?theme=dark` | Dark |
 | `/kiosk?theme=light` | Light |
 
+| `style` | Look |
+| --- | --- |
+| `classic` (default) | Cards with a coloured edge |
+| `glow` | Tinted cards, glowing figures and lines |
+| `minimal` | No card boxes, light figures |
+
+Combine with `&`, e.g. `/kiosk?theme=dark&style=glow`.
+
 Shows Home, Solar, Grid and Battery now, today's totals, the last 24 hours (with history on), a live Sankey of the flow, and alerts from **Status**. Reloads itself when a new version is deployed.
 
 Add the display's address under **Trusted networks** so it opens without signing in.
