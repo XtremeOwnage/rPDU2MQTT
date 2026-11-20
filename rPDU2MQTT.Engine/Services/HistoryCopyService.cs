@@ -66,6 +66,25 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
 
     private IHistoryTarget? Target(string id) => targets.FirstOrDefault(t => string.Equals(t.Id, id, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>Move renamed nodes' local history to their new ids. Null when there is nothing to move.</summary>
+    public string? RenameNodes(IReadOnlyList<(string From, string To)> renames)
+    {
+        if (renames.Count == 0) return null;
+        if (leader is not null && !leader.IsLeader) return "Local history was not moved: this instance is not the leader.";
+        var pairs = renames.SelectMany(r => new[] { (r.From, r.To), (r.From + FlowMetricKey.InSuffix, r.To + FlowMetricKey.InSuffix) }).ToList();
+        try
+        {
+            var moved = store.Rename(pairs, FlowUnits.Metrics);
+            Log.Information($"Local history: moved {moved} series for {renames.Count} renamed node(s).");
+            return $"Moved {moved} local history series.";
+        }
+        catch (Exception ex)
+        {
+            Log.Warning($"Local history: moving renamed nodes failed ({ex.Message}).");
+            return $"Local history was not moved: {ex.Message}";
+        }
+    }
+
     /// <summary>Start a copy unless one is running. `days` limits how far back it reads (0 reads ten years); `replace` overwrites what the destination holds.</summary>
     public object Start(string source, string target, int days = 0, bool replace = false)
     {
@@ -130,8 +149,7 @@ public sealed class HistoryCopyService(Config cfg, IReadOnlyDictionary<string, I
                     foreach (var group in groups)
                     {
                         ct.ThrowIfCancellationRequested();
-                        // Filling gaps, only the stretches the destination lacks are read, and a stretch every node lacks
-                        // (a restart, when nothing was recorded) is one read for all of them.
+                        // Only the stretches the destination lacks are read.
                         var spans = new Dictionary<(DateTime From, DateTime To), List<(string Id, string Label, string Kind)>>();
                         // A series needed nothing when nothing is written for it: no gap, or none the source can fill.
                         var wrote = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

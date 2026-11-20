@@ -1,12 +1,12 @@
 // Editing one node — name, kind, how it is valued, its live sources.
 import { api, btn, el, ensure, formatNum, toast } from '../helpers.js';
 import { state } from '../state.js';
-import { refreshDirty } from '../dirty.js';
+import { noteRename, refreshDirty } from '../dirty.js';
 import { wouldLoop } from './flow.js';
 import { sourceEditorFor, genericSourceEditor } from '../source-editors.js';
 import { tagInput } from '../tags.js';
 import { templateHelp } from '../template-field.js';
-import { BALANCE_ROLES, balanceRoleOf, renameInBalance, setBalanceRole } from './balance.js';
+import { BALANCE_ROLES, balanceRoleOf, setBalanceRole } from './balance.js';
 import { circuitChoices, choiceSelect } from '../location-options.js';
 import { extensionsFor, renderExtensions } from '../entity-extensions.js';
 import {
@@ -22,12 +22,6 @@ let pickerSeq = 0;
 /// A modal panel over the page. Returns the body to fill; closes on the button, the backdrop, or Escape.
 export function overlay(title: string, onClose?: () => void, opts: { footer?: any, className?: string, sub?: string } = {}): { body: any, close: () => void } {
   const back = el('div', { class: 'sheet-backdrop' });
-  // The node editor's widest row is a table of eleven columns, which wants about 1,640px. At 75vw that
-  // overflowed a 2,039px screen by ~110px and the Remove button rendered as "Re…", so the sheet takes what
-  // the screen actually has. Vertical scrolling only: the table below manages its own width.
-  // overflowX was hidden, on the reasoning that the table below manages its own width. Nothing did: the
-  // widest row wants ~1,640px, so on a phone the panel clipped it at ~340px with no way to reach the rest.
-  // Both axes scroll; the sizing is in .sheet-panel so a phone can be given different numbers.
   const panel = el('div', { class: 'sheet-panel' + (opts.className ? ' ' + opts.className : '') });
   // Header and footer stay put while the body scrolls under them: Close and Save are always in reach.
   const head = el('div', { class: 'sheet-head' });
@@ -39,15 +33,6 @@ export function overlay(title: string, onClose?: () => void, opts: { footer?: an
   head.appendChild(x);
   const body = el('div');
   // Every edit inside a sheet reports itself, once, here.
-  //
-  // The controls in this file write straight into the config object and most of them returned without
-  // telling the dirty tracker, so the save bar stayed silent until something else happened to refresh it —
-  // closing the sheet, or a control that did remember. Editing a topic and looking at the save bar said
-  // nothing had changed. Adding refreshDirty() to two dozen handlers fixes today's controls and not
-  // tomorrow's; `change` bubbles, so one listener on the sheet covers every control it will ever contain.
-  //
-  // refreshDirty() diffs the whole document, so it does not matter which control fired: what changed is
-  // read off the document rather than reported by the handler.
   body.addEventListener('change', () => refreshDirty());
   panel.append(head, body);
   if (opts.footer) panel.appendChild(el('div', { class: 'sheet-foot sheet-sticky-foot' }, opts.footer));
@@ -192,9 +177,6 @@ function openTopicPicker(current: string, onPick: (topic: string) => void) {
 }
 
 /// Every feed on the EmonCMS server, fetched once per page and shared by every binding's picker.
-///
-/// One request rather than one per row: a node with eight bindings would otherwise ask the server for the
-/// same list eight times the moment its editor opened.
 let emonFeeds: Promise<any[]> | null = null;
 function emonCmsFeeds(force = false): Promise<any[]> {
   if (force || !emonFeeds) {
@@ -228,8 +210,7 @@ function openEmonCmsPicker(current: string, onPick: (feed: any) => void) {
   const draw = (feeds: any[]) => {
     const q = search.value.trim().toLowerCase();
     const shown = feeds.filter(f => !q || (f.name || '').toLowerCase().includes(q) || (f.tag || '').toLowerCase().includes(q));
-    // A name that exists under several tags cannot be stored as a bare name, so the row that offers it
-    // stores the id instead — the ambiguity is settled here rather than reported later as a missing value.
+    // Names repeated across tags are stored by id.
     const counts = new Map<string, number>();
     feeds.forEach(f => counts.set(f.name, (counts.get(f.name) || 0) + 1));
 
@@ -265,8 +246,7 @@ function emonCmsSourceEditor(src: any, onChange: () => void): [any, any] {
   const browse = btn('Browse…');
   browse.title = 'List the feeds on the EmonCMS server and pick one.';
   browse.onclick = () => openEmonCmsPicker(feedIn.value.trim(), f => {
-    // Stored by name where the name identifies it, so the binding survives a re-provision that renumbers
-    // the feed; by id only where a name would be ambiguous.
+    // Stored by name where the name identifies it, so the binding survives a re-provision that renumbers the feed.
     emonCmsFeeds().then(all => {
       const dupes = all.filter(o => o.name === f.name).length > 1;
       feedIn.value = dupes ? String(f.id) : f.name;
@@ -377,23 +357,55 @@ function openModbusExplorer(src: any, onPick: () => void) {
   read.onclick(null);
 }
 
-/// Rename a node and carry its wiring with it; the id is the node's identity everywhere.
-export function openRenameDialog(node: any, flow: any, existingIds: Set<string>, onRenamed: (id: string) => void) {
+/// Every config slot holding a node id, except the legacy Parents map.
+function eachNodeRef(data: any, visit: (value: string, set: (v: string) => void) => void) {
+  const flow = data?.EnergyFlow || {};
+  const field = (o: any, k: string) => { if (o && typeof o[k] === 'string') visit(o[k], v => { o[k] = v; }); };
+  const list = (a: any) => { if (Array.isArray(a)) a.forEach((x, i) => { if (typeof x === 'string') visit(x, v => { a[i] = v; }); }); };
+  (flow.Links || []).forEach((l: any) => { field(l, 'From'); field(l, 'To'); });
+  (flow.Groups || []).forEach((g: any) => list(g.Members));
+  BALANCE_ROLES.forEach(([, key]) => list(flow.Balance?.[key]));
+  (flow.Panels || []).forEach((p: any) => { field(p, 'Node'); (p.Breakers || []).forEach((b: any) => field(b, 'Node')); });
+  (flow.Clamps || []).forEach((c: any) => field(c, 'Channel'));
+  (flow.AutoTags || []).forEach((r: any) => field(r, 'Match'));
+  const loc = data?.Plugins?.locations || {};
+  (loc.Placements || []).forEach((p: any) => field(p, 'Node'));
+  (loc.AutoLocations || []).forEach((r: any) => field(r, 'Match'));
+  const climate = (c: any) => { if (c) { list(c.Temperature); list(c.Humidity); } };
+  (loc.Sites || []).forEach((s: any) => (s.Floors || []).forEach((f: any) => {
+    (f.Rooms || []).forEach((r: any) => climate(r.Climate));
+    (f.Areas || []).forEach((a: any) => climate(a.Climate));
+  }));
+}
+
+export function countNodeRefs(data: any, id: string) {
+  let n = 0;
+  eachNodeRef(data, v => { if (v === id) n++; });
+  const parents = data?.EnergyFlow?.Parents || {};
+  return n + Object.entries(parents).filter(([c, p]) => c === id || p === id).length;
+}
+
+export function renameNodeRefs(data: any, from: string, to: string) {
+  eachNodeRef(data, (v, set) => { if (v === from) set(to); });
+  const parents = data?.EnergyFlow?.Parents;
+  if (parents) Object.keys(parents).forEach(child => {
+    if (parents[child] === from) parents[child] = to;
+    if (child === from) { parents[to] = parents[child]; delete parents[child]; }
+  });
+}
+
+export function openRenameDialog(node: any, existingIds: Set<string>, onRenamed: (id: string) => void) {
   const { body, close } = overlay(`Rename ${node.Label || node.Id}`);
-  const links: any[] = ensure(flow, 'Links', []);
-  const parents: any = ensure(flow, 'Parents', {});
-  const wired = links.filter(l => l.From === node.Id || l.To === node.Id).length
-    + Object.entries(parents).filter(([c, p]) => c === node.Id || p === node.Id).length;
+  const refs = countNodeRefs(state.data, node.Id);
 
-  body.appendChild(el('div', { class: 'desc', text: `Its ${wired} wiring reference(s) move with it automatically.` }));
+  body.appendChild(el('div', { class: 'desc', text: `${refs} reference(s) and the local history move with it.` }));
 
-  // The id is what every integration keys off, so a rename is a rename downstream too.
   const warn = el('div', {
     class: 'desc',
     style: { border: '1px solid var(--bad)', borderRadius: '6px', padding: '8px', margin: '8px 0', color: 'var(--fg)' },
   });
-  warn.appendChild(el('b', { text: 'This changes how the node appears downstream.' }));
-  warn.appendChild(el('div', { text: 'The MQTT topic, the Home Assistant entity/unique id, the Prometheus series and the EmonCMS feed are all derived from the id. Anything already recording under the old name — HA history, an energy dashboard entry, a Grafana query, an emonCMS feed — will see this as a new thing and stop following the old one. Rename deliberately, and fix those up afterwards.' }));
+  warn.appendChild(el('b', { text: 'Not moved: Home Assistant, Prometheus, EmonCMS.' }));
+  warn.appendChild(el('div', { text: 'The MQTT topic, HA entity, Prometheus series and EmonCMS feed follow the id. Their history stays under the old id.' }));
   body.appendChild(warn);
 
   const row = el('div', { class: 'ld-toolbar' });
@@ -411,17 +423,10 @@ export function openRenameDialog(node: any, flow: any, existingIds: Set<string>,
 
     const from = node.Id;
     node.Id = next;
-    links.forEach(l => { if (l.From === from) l.From = next; if (l.To === from) l.To = next; });
-    // It keeps its place in the energy balance and in any group that holds it.
-    renameInBalance(flow, from, next);
-    (flow.Groups || []).forEach((g: any) => { g.Members = (g.Members || []).map((m: string) => m === from ? next : m); });
-    // The legacy Parents map keys by child id and stores the parent id, so both sides can name this node.
-    Object.keys(parents).forEach(child => {
-      if (parents[child] === from) parents[child] = next;
-      if (child === from) { parents[next] = parents[child]; delete parents[child]; }
-    });
+    renameNodeRefs(state.data, from, next);
+    noteRename(from, next);
 
-    toast(`Renamed ${from} → ${next}; ${wired} reference(s) updated. Save to apply.`, true);
+    toast(`Renamed ${from} → ${next}; ${refs} reference(s) updated. Save to apply.`, true);
     close();
     onRenamed(next);
   };
@@ -438,10 +443,6 @@ export function field(labelText: string, control: HTMLElement, hint?: string) {
 }
 
 // Per-node editor (#129): what the node is, where its readings come from, and how it is wired.
-//
-// Laid out as sections a phone can stack: the basics, then one card per live binding, then the wiring,
-// then the filing details (tags, place, EmonCMS) folded away until wanted. The bindings were a table of
-// up to eleven columns — about 1,640px — which a phone could only show by scrolling it sideways.
 export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>, rerender: (close?: boolean) => void) {
   const meta = kindMeta(node.Kind);
   const allowed = meta[2];
@@ -468,8 +469,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   kindSel.onchange = () => { node.Kind = kindSel.value === 'node' ? undefined : kindSel.value; rerender(); };
   grid.appendChild(field('Kind', kindSel));
 
-  // What it counts toward is not what it is: stored in EnergyFlow.Balance, so the Balance page and this
-  // field are one setting and a node sits under one total at most.
+  // What it counts toward is not what it is.
   const flowCfg = ensure(state.data, 'EnergyFlow', {});
   const roleSel = el('select') as HTMLSelectElement;
   roleSel.appendChild(el('option', { value: '', text: 'Nothing' }));
@@ -582,8 +582,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     // Body: where it reads from, then how the reading is taken.
     const bodyRow = el('div', { class: 'ne-bind-body' });
     if (type === 'derived') {
-      // Nothing to point at: the value comes from this node's other bindings. Which sum it will actually
-      // do, and what it still needs to do any of them, are the useful things to say.
+      // Nothing to point at: the value comes from this node's other bindings.
       const m = metric.toLowerCase();
       const rule = (state.derivations || []).find((d: any) => d.metric === m);
       const bound = (x: string) => sources.some((o: any) => o !== src
@@ -597,13 +596,11 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
         const r = (state.derivations || []).find((d: any) => d.metric === x);
         return (r?.from || []).some((f: any) => have(f.a, seen) && have(f.b, seen));
       };
-      // Seeded with the metric being worked out, or it can be "reached" through a relation that needs
-      // itself — which would offer a sum the backend will not do.
+      // Seeded with the metric being worked out, or it can be "reached" through a relation that needs itself.
       const reach = (x: string) => have(x, new Set([m]));
       const usable = (rule?.from || []).find((f: any) => reach(f.a) && reach(f.b));
       const what = el('div', { class: 'ne-derived' });
-      // A backend that does not serve the relations (an older one, mid-rollout) leaves us unable to say
-      // which sum this is — but "cannot be calculated" would be a claim, and we do not have it to make.
+      // No relations from the backend.
       if (!(state.derivations || []).length) {
         what.appendChild(el('span', { class: 'desc', style: { margin: '0' }, text: 'calculated from this node’s other readings' }));
       } else if (!rule) {
@@ -807,8 +804,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
   const addLink = (from: string, to: string) => {
     if (from === to || links.some(l => l.From === from && l.To === to)) return;
     if (wouldLoop(links, from, to)) { toast('That would create a feeder loop.', false); return; }
-    // A panel is fed from one place. Two feeders split its power across both on the diagram and count a
-    // supply that is not there, so the second one is refused rather than quietly wired.
+    // A panel is fed from one place.
     const already = (cand.get(to) || {}).kind === 'panel' ? links.find(l => l.To === to) : null;
     if (already) { toast(`${nm(to)} is a panel, and a panel is fed from one place — it is already fed by ${nm(already.From)}. Drop that first.`, false); return; }
     links.push({ From: from, To: to });
@@ -873,8 +869,7 @@ export function renderNodeEditor(node: any, links: any[], cand: Map<string, any>
     el('span', { class: 'ne-count', text: filed ? `${filed} set` : '' })));
   const moreGrid = el('div', { class: 'node-editor-fields' });
 
-  // Tags (#342). Every kind can be tagged — a panel or a plain node is exactly the sort of thing an
-  // export filter names.
+  // Tags (#342).
   const tags = ensure(node, 'Tags', []);
   moreGrid.appendChild(field('Tags', tagInput(tags, {
     placeholder: 'critical, rack-1',

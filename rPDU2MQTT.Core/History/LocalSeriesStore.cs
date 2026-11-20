@@ -4,30 +4,12 @@ using System.Text;
 namespace rPDU2MQTT.Core.History;
 
 /// <summary>One resolution of one series: how often it is stored, how it is chunked, and how long it is kept.</summary>
-/// <param name="Name">The directory the tier's chunks live in, and what a read names when it says where a figure came from.</param>
-/// <param name="IntervalSeconds">Seconds a slot covers.</param>
-/// <param name="Chunk">How much time one file holds.</param>
-/// <param name="KeepDays">How long a chunk is kept once it is complete.</param>
 public sealed record SeriesTier(string Name, int IntervalSeconds, ChunkSpan Chunk, int KeepDays);
 
 /// <summary>How much time one file holds. Retention is then deleting whole files rather than rewriting any.</summary>
 public enum ChunkSpan { Day, Month, Year }
 
-/// <summary>
-/// The bridge's own history: a directory of fixed-interval files, one per series per tier per chunk (#502).
-///
-/// <para>
-/// Nothing is indexed and nothing is queried: a reading's place is arithmetic, so a window is a seek and a
-/// sequential read. The directory is the whole database — copy it, tar it, mount it read-only — and a chunk
-/// is a plain file whose layout is documented in <see cref="SeriesFile"/>.
-/// </para>
-/// <para>
-/// Three tiers, because a year of ten-second readings is millions of slots to walk for a chart of thirty
-/// days: the readings as they arrive, a minute, and an hour. A coarser tier holds the <b>last</b> reading of
-/// each bucket, which is what every read asks for anyway — the value as of that moment — and keeps a
-/// counter's meaning intact, which an average would not.
-/// </para>
-/// </summary>
+/// <summary>The bridge's own history: a directory of fixed-interval files, one per series per tier per chunk (#502).</summary>
 public sealed class LocalSeriesStore
 {
     private static readonly StringComparer Ids = StringComparer.OrdinalIgnoreCase;
@@ -44,9 +26,7 @@ public sealed class LocalSeriesStore
     {
         Root = root;
         this.toleranceSeconds = Math.Max(1, toleranceSeconds);
-        // Each resolution is kept for as long as it is worth keeping, and each is a choice of its own: the
-        // readings as they arrive are what costs the disk, and a day at a time costs almost nothing —
-        // a century of daily readings for one series is about 300 KB.
+        // Each resolution is kept for as long as it is worth keeping, and each is a choice of its own.
         Tiers =
         [
             new SeriesTier("raw", Math.Max(1, rawIntervalSeconds), ChunkSpan.Day, Math.Max(1, rawKeepDays)),
@@ -63,11 +43,7 @@ public sealed class LocalSeriesStore
 
     // --- Where a series lives ------------------------------------------------------------------------
 
-    /// <summary>
-    /// The directory one series' chunks live in. A node id carries characters a filesystem argues about
-    /// (<c>outlet:pdu:1</c>, <c>main#in</c>), so the name is cleaned for reading and a hash of the original
-    /// keeps two different series from ever meeting in the same directory.
-    /// </summary>
+    /// <summary>The directory one series' chunks live in.</summary>
     public static string FolderFor(string node, string metric)
     {
         var key = $"{node}|{metric}";
@@ -120,10 +96,7 @@ public sealed class LocalSeriesStore
         }
     }
 
-    /// <summary>
-    /// Store a sweep of readings taken at one moment: the readings of a series are written together, so a
-    /// sweep of two hundred nodes costs one open per series rather than one per reading.
-    /// </summary>
+    /// <summary>Store a sweep of readings taken at one moment.</summary>
     public void WriteSweep(DateTime atUtc, IEnumerable<(string Node, string Metric, double Value)> readings)
     {
         lock (gate)
@@ -165,11 +138,7 @@ public sealed class LocalSeriesStore
 
     // --- Reading -------------------------------------------------------------------------------------
 
-    /// <summary>
-    /// The tier a window is best answered from: the coarsest one still finer than the step, since anything
-    /// finer is read and thrown away — and only among the tiers that still keep the oldest moment asked for.
-    /// A step finer than every tier is answered by the finest that is left.
-    /// </summary>
+    /// <summary>The tier a window is best answered from.</summary>
     public SeriesTier TierFor(DateTime oldestUtc, int stepSeconds, DateTime nowUtc)
     {
         var kept = Tiers.Where(t => oldestUtc >= nowUtc.AddDays(-t.KeepDays)).ToList();
@@ -186,11 +155,7 @@ public sealed class LocalSeriesStore
     public double ValueAt(string node, string metric, DateTime atUtc, DateTime? nowUtc = null)
         => AnyTier(node, metric, atUtc, TierFor(atUtc, 1, nowUtc ?? DateTime.UtcNow));
 
-    /// <summary>
-    /// The chosen tier's answer, else any other tier's. A coarser tier is an optimisation, not the truth:
-    /// until a roll-up has run — the first hours of a new install — only the raw tier holds anything, and a
-    /// tier that has been trimmed holds nothing however fine it is.
-    /// </summary>
+    /// <summary>The chosen tier's answer, else any other tier's.</summary>
     private double AnyTier(string node, string metric, DateTime atUtc, SeriesTier first)
     {
         var value = FromTier(node, metric, first, atUtc);
@@ -213,8 +178,7 @@ public sealed class LocalSeriesStore
             if (!double.IsNaN(found)) return found;
         }
 
-        // The moment may be the first of a chunk — or in one that was never started — with the reading that
-        // was standing written in the chunk before. One back is enough: beyond that it is too old to stand.
+        // The moment may be the first of a chunk.
         var previous = ExistingChunk(node, metric, tier, ChunkStart(tier.Chunk, atUtc).AddSeconds(-1));
         if (previous is null) return double.NaN;
         var lastSlot = previous.Slots() - 1;
@@ -256,8 +220,7 @@ public sealed class LocalSeriesStore
                         if (!double.IsNaN(window[back])) { values[i] = window[back]; break; }
                 }
             }
-            // A step this chunk had nothing for may still be answered by the chunk before it, or by another
-            // tier — the roll-ups may not have caught up, or this one may have been trimmed.
+            // A step this chunk had nothing for may still be answered by the chunk before it, or by another tier.
             for (var i = at; i <= last; i++)
                 if (double.IsNaN(values[i])) values[i] = AnyTier(node, metric, steps[i], tier);
             at = last + 1;
@@ -290,11 +253,7 @@ public sealed class LocalSeriesStore
         }
     }
 
-    /// <summary>
-    /// The stretches of [from, to) the tier stored at `intervalSeconds` holds nothing for; empty when it is complete. A raw
-    /// stretch shorter than `minimumRawGap` slots (a missed sweep) does not count, and stretches within `mergeWithin` slots of
-    /// each other are one, so a scatter of gaps is a few reads rather than hundreds.
-    /// </summary>
+    /// <summary>The stretches of [from, to) the tier stored at `intervalSeconds` holds nothing for; empty when it is complete.</summary>
     public List<(DateTime From, DateTime To)> Missing(string node, string metric, DateTime fromUtc, DateTime toUtc, int intervalSeconds,
                                                       int minimumRawGap = 3, int mergeWithin = 30)
     {
@@ -331,6 +290,59 @@ public sealed class LocalSeriesStore
             }
         }
         return runs;
+    }
+
+    // --- Renaming -----------------------------------------------------------------------------------
+
+    /// <summary>Move each node's series to its new id. Where the new id already holds a reading, that reading is kept. Returns the series moved.</summary>
+    public int Rename(IReadOnlyList<(string From, string To)> nodes, IEnumerable<string> metrics)
+    {
+        var moved = 0;
+        var metricList = metrics.Distinct().ToList();
+        lock (gate)
+        {
+            // Staged first, so a swap of two ids does not merge one into the other.
+            var staged = new List<(string Dir, string To)>();
+            foreach (var (from, to) in nodes)
+            {
+                if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to) || from == to) continue;
+                foreach (var metric in metricList)
+                {
+                    var src = Path.Combine(Root, FolderFor(from, metric));
+                    if (!Directory.Exists(src)) continue;
+                    var stage = Path.Combine(Root, $".rename.{staged.Count}.{FolderFor(from, metric)}");
+                    Directory.Move(src, stage);
+                    staged.Add((stage, Path.Combine(Root, FolderFor(to, metric))));
+                }
+            }
+            foreach (var (dir, to) in staged)
+            {
+                MergeInto(dir, to);
+                moved++;
+            }
+        }
+        return moved;
+    }
+
+    private static void MergeInto(string src, string dst)
+    {
+        if (!Directory.Exists(dst)) { Directory.Move(src, dst); return; }
+        foreach (var file in Directory.GetFiles(src, "*.rts", SearchOption.AllDirectories))
+        {
+            var target = Path.Combine(dst, Path.GetRelativePath(src, file));
+            if (!File.Exists(target))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Move(file, target);
+                continue;
+            }
+            var from = SeriesFile.Open(file);
+            var into = SeriesFile.Open(target);
+            if (from is null || into is null) continue;
+            var values = from.Read(0, (int)Math.Min(from.Slots(), int.MaxValue));
+            into.WriteGaps(values.Select((v, i) => ((long)i, v)).Where(r => !double.IsNaN(r.v)));
+        }
+        Directory.Delete(src, true);
     }
 
     // --- Keeping it small ----------------------------------------------------------------------------
@@ -379,10 +391,7 @@ public sealed class LocalSeriesStore
         return oldest;
     }
 
-    /// <summary>
-    /// Fill the coarser tiers from the finer ones, for the recent buckets only. Re-running it changes
-    /// nothing: a bucket's value is the last reading in it, whenever it is worked out.
-    /// </summary>
+    /// <summary>Fill the coarser tiers from the finer ones, for the recent buckets only.</summary>
     public void Rollup(string node, string metric, DateTime nowUtc, int? buckets = null)
     {
         lock (gate)
@@ -391,8 +400,7 @@ public sealed class LocalSeriesStore
             var coarse = Tiers[i];
             var fine = Tiers[i - 1];
             var writes = new List<(DateTime At, double Value)>();
-            // Only the recent buckets, and fewer of them the coarser the tier: re-working a day's figure
-            // every five minutes is three reads, where re-working a year of them would be hundreds.
+            // Only the recent buckets, and fewer of them the coarser the tier.
             var recent = buckets ?? (coarse.IntervalSeconds <= 60 ? 180 : coarse.IntervalSeconds <= 3600 ? 48 : 3);
             for (var back = recent; back >= 1; back--)
             {

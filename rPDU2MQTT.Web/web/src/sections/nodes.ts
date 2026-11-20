@@ -209,7 +209,6 @@ export function syncNodeModal(node: any, links: any[], cand: Map<string, any>, e
 }
 
 /// The node editor on its own, over whatever is open (a breaker's editor, say) rather than on the Nodes page.
-/// `graph` is what the bridge reads, for the editor's pickers; `onClose` runs once it is put away.
 export function openNodeSheet(id: string, graph: { id: string, label: string, kind: string }[], onClose?: () => void) {
   const flow = ensure(state.data, 'EnergyFlow', {});
   const customNodes = ensure(flow, 'Nodes', []);
@@ -336,7 +335,7 @@ export function renderNodeManager(flow: any, customNodes: any[], links: any[], c
     rename.onclick = () => {
       const taken = new Set<string>([...cand.keys(), ...customNodes.map((x: any) => x.Id)]);
       taken.delete(n.Id);
-      openRenameDialog(n, flow, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
+      openRenameDialog(n, taken, id => { if (editing.id === n.Id) editing.id = id; rerender(); });
     };
 
     const copy = btn('Copy');
