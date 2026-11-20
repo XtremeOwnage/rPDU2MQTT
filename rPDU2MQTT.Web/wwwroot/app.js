@@ -15862,7 +15862,7 @@ function kkFlow(s       , W        , H        ) {
   const cx = VW / 2, nw = 420, nh = 196;
   const N                                           = {
     solar: { x: cx, y: 18 + nh / 2 }, home: { x: cx, y: VH - 18 - nh / 2 },
-    grid: { x: cx - VW * .335, y: VH / 2 }, battery: { x: cx + VW * .335, y: VH / 2 },
+    grid: { x: 30 + nw / 2, y: VH / 2 }, battery: { x: VW - 30 - nw / 2, y: VH / 2 },
   };
   const exporting = (s.grid ?? 0) < -1, importing = (s.grid ?? 0) > 1;
   const bmode                                = (s.battery ?? 0) < -1 ? 'charge' : (s.battery ?? 0) > 1 ? 'discharge' : null;
@@ -15882,12 +15882,12 @@ function kkFlow(s       , W        , H        ) {
   const geo = (a        , b        )                                                     => {
     const A = N[a], B = N[b];
     if (a === 'solar' && b === 'home') return { p: [cx, A.y + nh / 2, cx, B.y - nh / 2], k: 'v' };
-    if (a === 'solar') return { p: [A.x + Math.sign(B.x - cx) * nw / 2, A.y, B.x, B.y - nh / 2], k: 'hv' };
+    if (a === 'solar') return { p: [A.x + Math.sign(B.x - cx) * nw / 2, A.y, B.x - Math.sign(B.x - cx) * nw / 2, B.y], k: 's' };
     if (b === 'home') return { p: [A.x, A.y + nh / 2, B.x + Math.sign(A.x - cx) * nw / 2, B.y], k: 'vh' };
-    return { p: [A.x + Math.sign(B.x - A.x) * nw / 2, A.y, B.x - Math.sign(B.x - A.x) * nw / 2, B.y], k: 'h' };
+    return { p: [A.x + Math.sign(B.x - A.x) * nw / 2, A.y + nh / 4, B.x - Math.sign(B.x - A.x) * nw / 2, B.y + nh / 4], k: 'h' };
   };
   const curve = (k        , x0        , y0        , x1        , y1        ) =>
-    k === 'hv' ? `M${x0},${y0} C${x1},${y0} ${x1},${y0} ${x1},${y1}`
+    k === 's' ? `M${x0},${y0} C${(x0 + x1) / 2},${y0} ${(x0 + x1) / 2},${y1} ${x1},${y1}`
     : k === 'vh' ? `M${x0},${y0} C${x0},${y1} ${x0},${y1} ${x1},${y1}` : `M${x0},${y0} L${x1},${y1}`;
   const pills                                     = [];
   edges.forEach(([a, b, w]) => {
@@ -15897,24 +15897,25 @@ function kkFlow(s       , W        , H        ) {
     if (!(w > 1)) { if (!inter) add('path', { d: curve(k, x0, y0, x1, y1), class: 'kk-idle' }); return; }
     const c0 = a === 'grid' ? SOURCE_COLOR.grid : a === 'battery' ? SOURCE_COLOR.battery : SOURCE_COLOR.solar;
     const c1 = b === 'grid' ? KK_EXPORT : b === 'battery' ? SOURCE_COLOR.battery : c0;
-    const sw = Math.min(46, 10 + 36 * w / 6000), gid = kkId(), mid = kkId();
+    const sw = Math.min(46, 10 + 36 * w / 6000), gid = kkId();
     const grad = svgEl('linearGradient', { id: gid, gradientUnits: 'userSpaceOnUse', x1: x0, y1: y0, x2: x1, y2: y1 });
     grad.append(kkStop(0, c0), kkStop(1, c1));
-    const marker = svgEl('marker', { id: mid, viewBox: '0 0 10 10', refX: 5, refY: 5, markerWidth: 1.5, markerHeight: 1.5, orient: 'auto' });
-    const head = svgEl('path', { d: 'M0,0 L10,5 L0,10 Z' }); head.style.fill = c1;
-    marker.appendChild(head);
-    defs.append(grad, marker);
-    const ex = k === 'vh' || k === 'h' ? x1 - Math.sign(x1 - x0) * sw * .75 : x1;
-    const ey = k === 'vh' || k === 'h' ? y1 : y1 - sw * .75;
-    const d = curve(k, x0, y0, ex, ey);
+    defs.appendChild(grad);
+    // The head points the way the line arrives: down for 'v', sideways for the rest.
+    const [ux, uy] = k === 'v' ? [0, 1] : [Math.sign(x1 - x0), 0];
+    const len = Math.max(24, sw * .9), half = sw / 2 + Math.max(9, sw * .3);
+    const bx = x1 - ux * len, by = y1 - uy * len;
+    const d = curve(k, x0, y0, bx + ux * 2, by + uy * 2);
     add('path', { d, stroke: `url(#${gid})`, 'stroke-width': sw + 16, class: 'kk-halo' });
-    add('path', { d, stroke: `url(#${gid})`, 'stroke-width': sw, 'marker-end': `url(#${mid})`, class: 'kk-ribbon' });
+    add('path', { d, stroke: `url(#${gid})`, 'stroke-width': sw, class: 'kk-ribbon' });
+    const head = add('path', { d: `M${x1},${y1} L${bx - uy * half},${by + ux * half} L${bx + uy * half},${by - ux * half} Z`, class: 'kk-head' });
+    head.style.fill = c1;
     const gap = Math.max(26, sw * 1.5), ms = Math.round((2.2 - Math.min(1.5, w / 4000)) * 1000);
-    const flow = add('path', { d, 'stroke-width': Math.max(4, sw * .26), 'stroke-dasharray': `1 ${gap}`, class: 'kk-dots' });
+    const flow = add('path', { d: curve(k, x0, y0, bx, by), 'stroke-width': Math.max(4, sw * .26), 'stroke-dasharray': `1 ${gap}`, class: 'kk-dots' });
     flow.style.setProperty('--o', `${-(gap + 1) * 2}px`);
     flow.style.animationDuration = ms + 'ms';
     flow.style.animationDelay = kkPhase(ms);
-    const m                   = k === 'v' ? [x0, (y0 + y1) / 2] : k === 'hv' ? [(x0 + x1) / 2 + (x1 - x0) * .2, y0]
+    const m                   = k === 'v' ? [x0, (y0 + by) / 2] : k === 's' ? [(x0 + bx) / 2, (y0 + by) / 2]
       : k === 'vh' ? [x0, (y0 + y1) / 2 + 6] : [x0 + (x1 - x0) * .2, y0];
     pills.push([m[0], m[1], kkW(w), c1]);
   });

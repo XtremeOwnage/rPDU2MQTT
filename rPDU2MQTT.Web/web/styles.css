@@ -2037,6 +2037,7 @@
 .kk-idle { fill: none; stroke: var(--line); stroke-width: 4; stroke-dasharray: 1 12; stroke-linecap: round; }
 .kk-halo { fill: none; stroke-opacity: .18; stroke-linecap: round; }
 .kk-ribbon { fill: none; stroke-opacity: .62; }
+.kk-head { fill-opacity: .9; }
 .kk-dots { --o: -40px; fill: none; stroke: #fff; stroke-opacity: .9; stroke-linecap: round; filter: drop-shadow(0 0 3px rgba(255,255,255,.7)); animation: kk-dots 1.5s linear infinite; }
 @keyframes kk-dots { to { stroke-dashoffset: var(--o); } }
 .kk-pill-bg { fill: var(--bg); stroke-width: 2.5; }
