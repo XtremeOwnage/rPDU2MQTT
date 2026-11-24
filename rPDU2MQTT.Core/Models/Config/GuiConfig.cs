@@ -15,7 +15,6 @@ public class GuiConfig
     [FeatureToggle]
     public bool Enabled { get; set; }
 
-    /// <summary>Show the documentation and GitHub links in the GUI footer.</summary>
     [DefaultValue(true)]
     [Description("Show links to the documentation and the GitHub page in the GUI. Turn off for a cleaner look on a shared screen.")]
     public bool ShowProjectLink { get; set; } = true;
@@ -47,6 +46,11 @@ public class GuiConfig
     [YamlMember(DefaultValuesHandling = DefaultValuesHandling.OmitEmptyCollections)]
     [Description("Addresses or CIDR ranges given read-only access without signing in, e.g. 10.100.64.247/32 for a wall display. Changes still need sign-in. Leave empty to require sign-in for everyone.")]
     public List<string> TrustedNetworks { get; set; } = new();
+
+    [DefaultValue(true)]
+    [Display(Name = "Kiosk authentication")]
+    [Description("Require sign-in to open /kiosk. Off: anyone who can reach the GUI can open /kiosk, read-only.")]
+    public bool KioskAuth { get; set; } = true;
 
     [Display(Name = "Trusted proxies")]
     [YamlMember(DefaultValuesHandling = DefaultValuesHandling.OmitEmptyCollections)]

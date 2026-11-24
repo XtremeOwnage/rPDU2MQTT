@@ -86,6 +86,25 @@ public static class TrustedNetworks
         return false;
     }
 
+    private static readonly string[] KioskGets =
+        ["/kiosk", "/styles.css", "/app.js", "/api/status", "/api/status/board", "/api/flow", "/api/flow/series", "/api/events"];
+
+    private static readonly string[] KioskTopics = ["flow:realpower", "status"];
+
+    /// <summary>Whether a request is one the kiosk view makes.</summary>
+    public static bool KioskMayRequest(string method, string? path, string? topics)
+    {
+        var p = (path ?? "").TrimEnd('/');
+        if (HttpMethodIs(method, "POST"))
+            return p.Equals("/api/flow/live", StringComparison.OrdinalIgnoreCase);
+        if (!HttpMethodIs(method, "GET") && !HttpMethodIs(method, "HEAD"))
+            return false;
+        if (!KioskGets.Any(k => p.Equals(k, StringComparison.OrdinalIgnoreCase)))
+            return false;
+        return !p.Equals("/api/events", StringComparison.OrdinalIgnoreCase)
+            || (topics ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).All(t => KioskTopics.Contains(t));
+    }
+
     /// <summary>/api/integrations/{id}/{action}.</summary>
     private static bool IsIntegrationAction(string path)
     {

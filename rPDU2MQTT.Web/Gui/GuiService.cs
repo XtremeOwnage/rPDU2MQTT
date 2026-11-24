@@ -197,12 +197,14 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
             app.UseForwardedHeaders(fwd);
 
             app.UseAuthentication();
+            app.Use(KioskMiddleware);
             if (trustedNetworks.Count > 0)
                 app.Use(ViewerMiddleware);
             app.UseAuthorization();
         }
         else if (!AuthDisabled)
         {
+            app.Use(KioskMiddleware);
             if (trustedNetworks.Count > 0)
                 app.Use(ViewerMiddleware);
             app.Use(AuthMiddleware);
@@ -674,11 +676,21 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
         return next();
     }
 
+    private bool SignedIn(HttpContext ctx) => UseOidc ? ctx.User.Identity?.IsAuthenticated == true : IsAuthorized(ctx.Request);
+
+    /// <summary>With Gui.KioskAuth off, the kiosk's own requests are read-only without sign-in.</summary>
+    private Task KioskMiddleware(HttpContext ctx, Func<Task> next)
+    {
+        if (!config.Gui.KioskAuth && !SignedIn(ctx)
+            && TrustedNetworks.KioskMayRequest(ctx.Request.Method, ctx.Request.Path.Value, ctx.Request.Query["topics"].ToString()))
+            ctx.Items[ViewerKey] = true;
+        return next();
+    }
+
     /// <summary>A trusted client that is not signed in may read; anything else from it is refused.</summary>
     private async Task ViewerMiddleware(HttpContext ctx, Func<Task> next)
     {
-        var signedIn = UseOidc ? ctx.User.Identity?.IsAuthenticated == true : IsAuthorized(ctx.Request);
-        if (signedIn || !ctx.Items.ContainsKey(TrustedClientKey) || ctx.Request.Path.Equals("/login", StringComparison.OrdinalIgnoreCase))
+        if (IsViewer(ctx) || SignedIn(ctx) || !ctx.Items.ContainsKey(TrustedClientKey) || ctx.Request.Path.Equals("/login", StringComparison.OrdinalIgnoreCase))
         {
             await next();
             return;
@@ -823,6 +835,7 @@ public sealed partial class GuiService : IHostedService, IAsyncDisposable
                 config.History = reloaded.History;
                 config.PlanStorage = reloaded.PlanStorage;
                 config.Gui.DistanceUnits = reloaded.Gui.DistanceUnits;
+                config.Gui.KioskAuth = reloaded.Gui.KioskAuth;
                 foreach (var p in (integrations?.All ?? []).OfType<Core.Integrations.IGuiPageProvider>().Where(p => p.PageSettings.Count > 0))
                     ConfigApply.CopyPluginKeys(config, reloaded, ((Core.Integrations.IIntegration)p).Id, p.PageSettings);
 

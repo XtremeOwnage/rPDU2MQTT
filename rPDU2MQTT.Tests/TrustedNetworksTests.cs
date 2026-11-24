@@ -181,4 +181,22 @@ public class TrustedNetworksTests
         Assert.Equal("list", gui.Properties!.Single(p => p.Key == "TrustedNetworks").Type);
         Assert.Equal("list", gui.Properties!.Single(p => p.Key == "TrustedProxies").Type);
     }
+
+    [Theory]
+    [InlineData("GET", "/kiosk", null, true)]
+    [InlineData("GET", "/kiosk/", null, true)]
+    [InlineData("GET", "/app.js", null, true)]
+    [InlineData("GET", "/api/flow", null, true)]
+    [InlineData("GET", "/api/flow/series", null, true)]
+    [InlineData("GET", "/api/status/board", null, true)]
+    [InlineData("POST", "/api/flow/live", null, true)]
+    [InlineData("GET", "/api/events", "flow:realpower,status", true)]
+    [InlineData("GET", "/api/events", "status,logs", false)]
+    [InlineData("GET", "/", null, false)]
+    [InlineData("GET", "/api/config", null, false)]
+    [InlineData("GET", "/api/schema", null, false)]
+    [InlineData("POST", "/api/config", null, false)]
+    [InlineData("DELETE", "/kiosk", null, false)]
+    public void KioskRequests(string method, string path, string? topics, bool allowed) =>
+        Assert.Equal(allowed, TrustedNetworks.KioskMayRequest(method, path, topics));
 }
