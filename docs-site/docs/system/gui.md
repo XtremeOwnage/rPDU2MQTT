@@ -77,7 +77,7 @@ Helm values `gui.trustedNetworks` and `gui.trustedProxies` set both lists from t
 
 Shows live power flow between Solar, Grid, Battery and Home, battery charge, net self-produced today, the last 24 hours (with history on), the largest loads now, and alerts from **Status**. Reloads itself when a new version is deployed.
 
-Add the display's address under **Trusted networks** so it opens without signing in.
+To open it without signing in, turn off **System › GUI › Kiosk authentication**, or add the display's address under **Trusted networks**.
 
 ## None
 

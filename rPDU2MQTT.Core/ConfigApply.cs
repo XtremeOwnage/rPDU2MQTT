@@ -15,25 +15,18 @@ public static class ConfigApply
     /// </summary>
     public static readonly string[] AppliedLive =
     [
-        // The hierarchy is read fresh on every /api/flow request.
         "EnergyFlow",
-        // Instances are reconciled after the save — a new PDU starts polling, a removed one stops.
         "Pdus",
-        // FlowHistoryRouter reads the provider and its settings per call.
         "History",
-        // Read on each periodic sync and by the manual sync/clear buttons.
         "HomeAssistant.EnergyDashboard",
         "HomeAssistant.Url",
         "HomeAssistant.Token",
-        // Read on each provisioning pass.
         "EmonCMS.Feeds",
-        // The image store is rebuilt when its settings object changes.
         "PlanStorage",
-        // Only the floor plan page reads it, from the saved document.
         "Gui.DistanceUnits",
-        // Only the Trends pages read these, from the saved document.
         "Gui.EnergyPrice",
         "Gui.Currency",
+        "Gui.KioskAuth",
     ];
 
     /// <summary>Does a change to this setting take effect without a restart?</summary>

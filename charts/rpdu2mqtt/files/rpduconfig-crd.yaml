@@ -865,6 +865,9 @@ spec:
                     items:
                       type: string
                     description: Addresses or CIDR ranges given read-only access without signing in, e.g. 10.100.64.247/32 for a wall display. Changes still need sign-in. Leave empty to require sign-in for everyone.
+                  KioskAuth:
+                    type: boolean
+                    description: 'Require sign-in to open /kiosk. Off: anyone who can reach the GUI can open /kiosk, read-only.'
                   TrustedProxies:
                     type: array
                     items:
